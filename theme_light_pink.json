@@ -1,0 +1,51 @@
+{
+    "defaults":
+    {
+        "colours":
+        {
+            "normal_bg":"#FFDDEE",
+            "hovered_bg":"#FFC0CB",
+            "disabled_bg":"#F8F8FF",
+            "selected_bg":"#FFB6C1",
+            "dark_bg":"#fff6f5",
+            "normal_text":"#000000",
+            "hovered_text":"#FFFFFF",
+            "selected_text":"#FFFFFF",
+            "disabled_text":"#808080",
+            "link_text": "#FF69B4",
+            "link_hover": "#FF1493",
+            "link_selected": "#C71585",
+            "text_shadow": "#777777",
+            "normal_border": "#DDDDDD",
+            "hovered_border": "#FF69B4",
+            "disabled_border": "#C0C0C0",
+            "selected_border": "#FF1493",
+            "active_border": "#FF1493",
+            "filled_bar":"#FF69B4",
+            "unfilled_bar":"#FFC0CB",
+            "text_cursor": "#ff4531"
+        }
+    },
+    "progress_bar":
+    {
+        "colours":
+        {
+            "normal_text": "#000000",
+            "text_shadow": "#FFC0CB",
+            "normal_border": "#DDDDDD",
+            "filled_bar":"#FF69B4",
+            "unfilled_bar":"#FFC0CB"
+        }
+    },
+    "screen_space_health_bar":
+    {
+        "colours":
+        {
+            "normal_text": "#000000",
+            "text_shadow": "#FFC0CB",
+            "normal_border": "#DDDDDD",
+            "filled_bar":"#FF69B4",
+            "unfilled_bar":"#FFC0CB"
+        }
+    }
+}

@@ -1,0 +1,101 @@
+{
+    "defaults":
+    {
+        "colours":
+        {
+            "normal_bg":"#FFF9DB",
+            "hovered_bg":"#FFEEBA",
+            "disabled_bg":"#F0F0F0",
+            "selected_bg":"#FFE082",
+            "dark_bg":"#fffcef",
+            "normal_text":"#000000",
+            "hovered_text":"#FFFFFF",
+            "selected_text":"#FFFFFF",
+            "disabled_text":"#808080",
+            "link_text": "#FFC107",
+            "link_hover": "#FFA000",
+            "link_selected": "#FF8F00",
+            "text_shadow": "#777777",
+            "normal_border": "#DDDDDD",
+            "hovered_border": "#FFC107",
+            "disabled_border": "#C0C0C0",
+            "selected_border": "#FFA000",
+            "active_border": "#FFA000",
+            "filled_bar":"#FFC107",
+            "unfilled_bar":"#FFEEBA",
+            "text_cursor": "#ffd417"
+        },
+        "font":
+        {
+            "name": "gabriola",
+            "size": "18",
+            "bold": "0",
+            "italic": "0",
+            "regular_path": "data/Gabriola.ttf"
+        }
+    },
+    "progress_bar":
+    {
+        "colours":
+        {
+            "normal_text": "#000000",
+            "text_shadow": "#FFEEBA",
+            "normal_border": "#DDDDDD",
+            "filled_bar":"#FFC107",
+            "unfilled_bar":"#FFEEBA"
+        }
+    },
+    "screen_space_health_bar":
+    {
+        "colours":
+        {
+            "normal_text": "#000000",
+            "text_shadow": "#FFEEBA",
+            "normal_border": "#DDDDDD",
+            "filled_bar":"#FFC107",
+            "unfilled_bar":"#FFEEBA"
+        }
+    },
+    "@player_status_bars":
+    {
+        "misc":
+        {
+            "shadow_width": "1",
+            "border_width": "0"
+        }
+    },
+
+    "#health_bar":
+    {
+        "colours": {
+            "filled_bar": "#AA4040D0",
+            "unfilled_bar": "#888888D0"
+        },
+        "misc":
+        {
+            "follow_sprite_offset": "-14,-20"
+        }
+    },
+    "#mana_bar":
+    {
+        "colours": {
+            "filled_bar": "#6666AAD0",
+            "unfilled_bar": "#FFEEBA"
+        },
+        "misc":
+        {
+            "follow_sprite_offset": "-14,-14"
+        }
+    },
+    "#stamina_bar":
+    {
+        "colours": {
+            "filled_bar": "#77CC77D0",
+            "unfilled_bar": "#FFEEBA"
+        },
+        "misc":
+        {
+            "follow_sprite_offset": "-14,-8"
+        }
+    }
+}

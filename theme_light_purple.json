@@ -1,0 +1,51 @@
+{
+    "defaults":
+    {
+        "colours":
+        {
+            "normal_bg":"#E8DAEF",
+            "hovered_bg":"#D2B4DE",
+            "disabled_bg":"#F5EEF8",
+            "selected_bg":"#BB8FCE",
+            "dark_bg":"#fdfbff",
+            "normal_text":"#000000",
+            "hovered_text":"#FFFFFF",
+            "selected_text":"#FFFFFF",
+            "disabled_text":"#808080",
+            "link_text": "#9B59B6",
+            "link_hover": "#8E44AD",
+            "link_selected": "#6C3483",
+            "text_shadow": "#777777",
+            "normal_border": "#DDDDDD",
+            "hovered_border": "#9B59B6",
+            "disabled_border": "#C0C0C0",
+            "selected_border": "#8E44AD",
+            "active_border": "#8E44AD",
+            "filled_bar":"#9B59B6",
+            "unfilled_bar":"#D2B4DE",
+            "text_cursor": "#9b37ff"
+        }
+    },
+    "progress_bar":
+    {
+        "colours":
+        {
+            "normal_text": "#000000",
+            "text_shadow": "#D2B4DE",
+            "normal_border": "#DDDDDD",
+            "filled_bar":"#9B59B6",
+            "unfilled_bar":"#D2B4DE"
+        }
+    },
+    "screen_space_health_bar":
+    {
+        "colours":
+        {
+            "normal_text": "#000000",
+            "text_shadow": "#D2B4DE",
+            "normal_border": "#DDDDDD",
+            "filled_bar":"#9B59B6",
+            "unfilled_bar":"#D2B4DE"
+        }
+    }
+}

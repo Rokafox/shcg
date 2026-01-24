@@ -2,7 +2,8 @@ import os
 import more_itertools as mit
 import itertools
 import pygame, pygame_gui
-
+import cards
+import random
 
 
 pygame.init()
@@ -60,6 +61,10 @@ for name in image_files_others:
     elif os.path.exists(image_path_png):
         image_others[name] = pygame.image.load(image_path_png)
 
+# NOTE:
+# a special image image_others["405"] is full transparent to represent no image
+# image_others["404coyote"] is a placeholder image for missing images
+
 # =====================================
 # End of Loading Images
 # =====================================
@@ -89,15 +94,475 @@ global_vars_theme = "Yellow Theme"
 # =====================================
 
 
-image_slot_example = pygame_gui.elements.UIImage(pygame.Rect((100, 50), (156, 156)),
-                                    pygame.Surface((156, 156)),
+image_slot_leader_1 = pygame_gui.elements.UIImage(pygame.Rect((50, 50), (200, 200)),
+                                    pygame.Surface((200, 200)),
                                     ui_manager)
-image_slot_example.set_image(image_others["404coyote"])
-image_slot_example.set_tooltip("Example tooltip.", delay=0.1, wrap_width=300)
+image_slot_leader_1.set_image(image_others["404coyote"])
+
+image_slot_leader_2 = pygame_gui.elements.UIImage(pygame.Rect((50, 900 - 200 - 50), (200, 200)),
+                                    pygame.Surface((200, 200)),
+                                    ui_manager)
+image_slot_leader_2.set_image(image_others["404coyote"])
+
+
+label_leader_1 = pygame_gui.elements.UILabel(pygame.Rect((60, 10), (200, 50)),
+                                    "Leader 1",
+                                    ui_manager)
+
+label_leader_2 = pygame_gui.elements.UILabel(pygame.Rect((60, 900 - 200 - 50 - 40), (200, 50)),
+                                    "Leader 2",
+                                    ui_manager)
+
+settings_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 270), (200, 50)),
+                                    text='Settings',
+                                    manager=ui_manager,)
+
+new_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 330), (200, 50)),
+                                    text='New Game',
+                                    manager=ui_manager,)
+
+
+text_box = pygame_gui.elements.UITextEntryBox(pygame.Rect((900, 300), (400, 295)),"", ui_manager)
+text_box_introduction_text = "Hover over card name to show details.\n"
+text_box.set_text(text_box_introduction_text)
+
+
+def draw_card(card):
+    card_surface = pygame.Surface((100, 145))
+    
+    if card.name in image_cards:
+        # scale image to fit 100x145
+        scaled_card_img = pygame.transform.scale(image_cards[card.name], (100, 145))
+        card_surface.blit(scaled_card_img, (0, 0))
+    else:
+        scaled_card_img = pygame.transform.scale(image_others["404coyote"], (100, 145))
+        card_surface.blit(scaled_card_img, (0, 0))
+    
+    font = pygame.font.Font(None, 28)
+    font_bold = pygame.font.Font(None, 32)
+    
+    cost_text = str(card.cost)
+    for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+        cost_outline = font_bold.render(cost_text, True, (0, 0, 0))
+        card_surface.blit(cost_outline, (8 + dx, 8 + dy))
+    cost_render = font_bold.render(cost_text, True, (255, 215, 0))
+    card_surface.blit(cost_render, (8, 8))
+    
+    if hasattr(card, 'type') and card.type == 'follower':
+        attack_text = str(card.attack)
+        for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+            attack_outline = font_bold.render(attack_text, True, (0, 0, 0))
+            card_surface.blit(attack_outline, (8 + dx, 120 + dy))
+        attack_render = font_bold.render(attack_text, True, (255, 50, 50))
+        card_surface.blit(attack_render, (8, 120))
+        
+        hp_text = str(card.hp)
+        hp_width = font_bold.size(hp_text)[0]
+        for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+            hp_outline = font_bold.render(hp_text, True, (0, 0, 0))
+            card_surface.blit(hp_outline, (92 - hp_width + dx, 120 + dy))
+        hp_render = font_bold.render(hp_text, True, (50, 255, 50))
+        card_surface.blit(hp_render, (92 - hp_width, 120))
+    
+    return card_surface
+
+
+# Hand of player (9 slots each)
+hand_slots_leader_2 = []
+for i in range(9):
+    slot = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 110, 700), (100, 145)),
+                                        pygame.Surface((100, 145)),
+                                        ui_manager)
+    slot.set_image(image_others["404coyote"]) # Temporary use 404coyote instead of transparent image
+    hand_slots_leader_2.append(slot)
+
+hand_slots_leader_1 = []
+for i in range(9):
+    slot = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 110, 50), (100, 145)),
+                                        pygame.Surface((100, 145)),
+                                        ui_manager)
+    slot.set_image(image_others["404coyote"])
+    hand_slots_leader_1.append(slot)
+
+
+def draw_hand_ui(player):
+    global hand_player_1, hand_player_2
+    hand = []
+    if player == 1: # 'top'
+        hand_player_1 = sorted(hand_player_1, key=lambda x: x.cost)
+        hand = hand_player_1
+        slots = hand_slots_leader_1
+    else:  # 'bottom'
+        hand_player_2 = sorted(hand_player_2, key=lambda x: x.cost)
+        hand = hand_player_2
+        slots = hand_slots_leader_2
+    for i in range(9):
+        if i < len(hand):
+            slots[i].set_image(draw_card(hand[i]))
+        else:
+            slots[i].set_image(image_others["404coyote"])
+    return
+
+
+# Deck (pile of cards) of each player, right bottom and right top next to last hand slot
+# In this super hard card game, deck, cards are openly visible to both players
+
+# card on top of the deck is draggable to hand area to draw, so need to mark it
+top_of_deck_marker_player_1 = None
+top_of_deck_marker_player_2 = None
+
+
+def draw_deck_ui(player):
+    global deck_player_1, deck_player_2
+    deck = []
+    if player == 1: # 'top'
+        base_x = 1500 - 100 - 50
+        base_y = 50
+        deck = deck_player_1
+    else:  # 'bottom'
+        base_x = 1500 - 100 - 50
+        base_y = 900 - 145 - 50
+        deck = deck_player_2
+    if not deck:
+        return
+    for i in range(len(deck)):
+        offset = i * 1
+        card_ui = pygame_gui.elements.UIImage(
+            pygame.Rect((base_x + offset, base_y + offset), (100, 145)),
+            pygame.Surface((100, 145)),
+            ui_manager
+        )
+        card_ui.set_image(draw_card(deck[i]))
+        if i == len(deck) - 1:
+            global top_of_deck_marker_player_1, top_of_deck_marker_player_2
+            if player == 1:
+                top_of_deck_marker_player_1 = card_ui
+            else:
+                top_of_deck_marker_player_2 = card_ui
+    return
+
+
+# field slots of each player (5 slots each)
+field_slots_leader_1 = []
+for i in range(5):
+    slot = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 120, 300), (100, 145)),
+                                        pygame.Surface((100, 145)),
+                                        ui_manager)
+    slot.set_image(image_others["404coyote"])
+    field_slots_leader_1.append(slot)
+
+field_slots_leader_2 = []
+for i in range(5):
+    slot = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 120, 450), (100, 145)),
+                                        pygame.Surface((100, 145)),
+                                        ui_manager)
+    slot.set_image(image_others["404coyote"])
+    field_slots_leader_2.append(slot)
+
+
+def draw_field_ui(player):
+    # draw cards on field slots, just as draw_hand_ui
+    global field_player_1, field_player_2
+    field = []
+    if player == 1: # 'top'
+        field = field_player_1
+        slots = field_slots_leader_1
+    else:  # 'bottom'
+        field = field_player_2
+        slots = field_slots_leader_2
+    field = sorted(field, key=lambda x: x.cost)
+    for i in range(5):
+        if i < len(field):
+            slots[i].set_image(draw_card(field[i]))
+        else:
+            slots[i].set_image(image_others["404coyote"])
+    return
+
+
+# Tail indicators (how many foxtail this player have currently), just above hand slots, from left to right, 32 x 32, max 9
+tail_indicators_leader_1 = []
+for i in range(9):
+    indicator = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 40, 200 + 20), (32, 32)),
+                                        pygame.Surface((32, 32)),
+                                        ui_manager)
+    indicator.set_image(image_others["405"])
+    tail_indicators_leader_1.append(indicator)
+
+tail_indicators_leader_2 = []
+for i in range(9):
+    indicator = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 40, 700 - 20 - 32), (32, 32)),
+                                        pygame.Surface((32, 32)),
+                                        ui_manager)
+    indicator.set_image(image_others["405"])
+    tail_indicators_leader_2.append(indicator)
+
+
+def draw_tail_ui(player):
+    # fill tail indicators to default value (9) according to foxtail count
+    global foxtail_player_1, foxtail_player_2
+    foxtail = 0
+    if player == 1:
+        foxtail = foxtail_player_1
+        indicators = tail_indicators_leader_1
+    else:
+        foxtail = foxtail_player_2
+        indicators = tail_indicators_leader_2
+    for i in range(9):
+        if i < foxtail:
+            indicators[i].set_image(image_others["foxtail"])  # filled
+        else:
+            indicators[i].set_image(image_others["405"])  # empty
+    return
+
+
+def use_foxtail(player, amount):
+    # use amount of foxtail for player without redrawing UI
+    # also includes error checking
+    assert amount >= 0
+    if amount == 0:
+        return
+    global foxtail_player_1, foxtail_player_2
+    if player == 1:
+        foxtail_prev = foxtail_player_1
+        if foxtail_player_1 >= amount:
+            foxtail_player_1 -= amount
+            for i in range(foxtail_player_1, foxtail_prev):
+                tail_indicators_leader_1[i].set_image(image_others["405"])
+        else:
+            raise ValueError("Not enough foxtail")
+    else:
+        foxtail_prev = foxtail_player_2
+        if foxtail_player_2 >= amount:
+            foxtail_player_2 -= amount
+            for i in range(foxtail_player_2, foxtail_prev):
+                tail_indicators_leader_2[i].set_image(image_others["405"])
+        else:
+            raise ValueError("Not enough foxtail")
+
+
+def add_foxtail(player, amount):
+    # add amount of foxtail for player without redrawing UI
+    # also includes error checking
+    assert amount >= 0
+    if amount == 0:
+        return
+    global foxtail_player_1, foxtail_player_2
+    if player == 1:
+        foxtail_prev = foxtail_player_1
+        if foxtail_player_1 + amount <= 9:
+            foxtail_player_1 += amount
+        for i in range(foxtail_prev, foxtail_player_1):
+            tail_indicators_leader_1[i].set_image(image_others["foxtail"])
+        else:
+            foxtail_player_1 = 9
+            draw_tail_ui(1)
+    else:
+        foxtail_prev = foxtail_player_2
+        if foxtail_player_2 + amount <= 9:
+            foxtail_player_2 += amount
+        for i in range(foxtail_prev, foxtail_player_2):
+            tail_indicators_leader_2[i].set_image(image_others["foxtail"])
+        else:
+            foxtail_player_2 = 9
+            draw_tail_ui(2)
+
+
 
 # =====================================
 # End of Example UI Components
 # =====================================
+# Component tooltips
+# =====================================
+
+def build_component_tooltips():
+    """
+    All tooltips here. Delay should always be 0.1
+    """
+    image_slot_leader_1.set_tooltip("Example tooltip.", delay=0.1, wrap_width=300)
+    settings_button.set_tooltip("Open settings window.", delay=0.1, wrap_width=300)
+
+
+build_component_tooltips()
+
+# =====================================
+# Windows & Support Functions
+# =====================================
+
+def build_settings_window():
+    global theme_selection_menu, settings_window
+    try:
+        settings_window.kill()
+    except Exception as e:
+        pass
+
+    def local_translate(s: str) -> str:
+        # If ever needed
+        return s
+
+    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 300), (400, 200)),
+                                        ui_manager,
+                                        window_display_title=local_translate("Settings"),
+                                        object_id="#settings_window",
+                                        resizable=False)
+
+    theme_selection_label = pygame_gui.elements.UILabel(pygame.Rect((10, 10), (140, 35)),
+                                        local_translate("Theme:"),
+                                        ui_manager,
+                                        container=settings_window)
+
+    theme_selection_menu = pygame_gui.elements.UIDropDownMenu(["Yellow Theme", "Purple Theme", "Red Theme", "Blue Theme", "Green Theme", "Pink Theme"],
+                                                            global_vars_theme,
+                                                            pygame.Rect((180, 10), (156, 35)),
+                                                            ui_manager,
+                                                            container=settings_window,)
+
+
+settings_window = None
+theme_selection_menu = None
+
+
+def change_theme(theme=None):
+    global global_vars_theme
+    if theme:
+        global_vars_theme = theme
+    else:
+        global_vars_theme = theme_selection_menu.selected_option[0]
+    if global_vars_theme == "Yellow Theme":
+        ui_manager_lower.get_theme().load_theme("theme_light_yellow.json")
+        ui_manager.get_theme().load_theme("theme_light_yellow.json")
+        ui_manager_overlay.get_theme().load_theme("theme_light_yellow.json")
+    elif global_vars_theme == "Purple Theme":
+        ui_manager_lower.get_theme().load_theme("theme_light_purple.json")
+        ui_manager.get_theme().load_theme("theme_light_purple.json")
+        ui_manager_overlay.get_theme().load_theme("theme_light_purple.json")
+    elif global_vars_theme == "Red Theme":
+        ui_manager_lower.get_theme().load_theme("theme_light_red.json")
+        ui_manager.get_theme().load_theme("theme_light_red.json")
+        ui_manager_overlay.get_theme().load_theme("theme_light_red.json")
+    elif global_vars_theme == "Blue Theme":
+        ui_manager_lower.get_theme().load_theme("theme_light_blue.json")
+        ui_manager.get_theme().load_theme("theme_light_blue.json")
+        ui_manager_overlay.get_theme().load_theme("theme_light_blue.json")
+    elif global_vars_theme == "Green Theme":
+        ui_manager_lower.get_theme().load_theme("theme_light_green.json")
+        ui_manager.get_theme().load_theme("theme_light_green.json")
+        ui_manager_overlay.get_theme().load_theme("theme_light_green.json")
+    elif global_vars_theme == "Pink Theme":
+        ui_manager_lower.get_theme().load_theme("theme_light_pink.json")
+        ui_manager.get_theme().load_theme("theme_light_pink.json")
+        ui_manager_overlay.get_theme().load_theme("theme_light_pink.json")
+    else:
+        raise ValueError(f"Unknown theme: {global_vars_theme}")
+    
+    ui_manager_lower.rebuild_all_from_changed_theme_data()
+    ui_manager.rebuild_all_from_changed_theme_data()
+    ui_manager_overlay.rebuild_all_from_changed_theme_data()
+    build_component_tooltips() # This is needed as theme switching resets tooltips delay and wrap width
+
+
+deck_player_1: list[cards.Card] = []
+deck_player_2: list[cards.Card] = []
+hand_player_1: list[cards.Card] = []
+hand_player_2: list[cards.Card] = []
+field_player_1: list[cards.Card] = []
+field_player_2: list[cards.Card] = []
+foxtail_player_1: int = 9 # foxtail is used as cost resource
+foxtail_player_2: int = 9
+current_player: int = 2  # 1 or 2
+
+def start_new_game():
+    # fetch decks, deck and deck for cpu are selected by player
+    # shuffle decks
+    # draw UI components
+    example_deck = [cards.goblin, cards.fighter] * 20  # Example deck with 40 cards
+
+    text_box.set_text(text_box_introduction_text)
+
+    global deck_player_1, deck_player_2
+    deck_player_1 = example_deck.copy()
+    deck_player_2 = example_deck.copy()
+
+    random.shuffle(deck_player_1)
+    random.shuffle(deck_player_2)
+
+    global hand_player_1, hand_player_2, foxtail_player_1, foxtail_player_2
+    global field_player_1, field_player_2
+    hand_player_1 = []
+    hand_player_2 = []
+    foxtail_player_1 = 9
+    foxtail_player_2 = 9
+    field_player_1 = []
+    field_player_2 = []
+    # draw UI
+    draw_tail_ui(1)
+    draw_tail_ui(2)
+    # draw hand
+    draw_hand_ui(1)
+    draw_hand_ui(2)
+    # draw deck
+    draw_deck_ui(1)
+    draw_deck_ui(2)
+    # draw field
+    draw_field_ui(1)
+    draw_field_ui(2)
+
+    
+
+def draw_card_tail(player):
+    # comsume 1 foxtail to draw a card
+    global deck_player_1, deck_player_2, hand_player_1, hand_player_2
+    if player == 1 and len(hand_player_1) >= 9:
+        text_box.append_html_text(f"Player 1's hand is full. Cannot draw a card. \n")
+        return
+    if player == 2 and len(hand_player_2) >= 9:
+        text_box.append_html_text(f"Player 2's hand is full. Cannot draw a card. \n")
+        return
+    if foxtail_player_1 > 0 and player == 1:
+        use_foxtail(player, 1)
+    elif foxtail_player_2 > 0 and player == 2:
+        use_foxtail(player, 1)
+    else:
+        text_box.append_html_text(f"Player {player} does not have enough foxtail to draw a card. \n")
+        return
+    if player == 1:
+        if deck_player_1:
+            drawn_card = deck_player_1.pop()
+            hand_player_1.append(drawn_card)
+            draw_hand_ui(1)
+            text_box.append_html_text(f"Player 1 drew a card: {drawn_card.name}. \n")
+        else:
+            text_box.append_html_text(f"Player 1's deck is empty. Cannot draw a card. \n")
+    else:
+        if deck_player_2:
+            drawn_card = deck_player_2.pop()
+            hand_player_2.append(drawn_card)
+            draw_hand_ui(2)
+            text_box.append_html_text(f"Player 2 drew a card: {drawn_card.name}. \n")
+        else:
+            text_box.append_html_text(f"Player 2's deck is empty. Cannot draw a card. \n")
+
+
+def assign_card_to_field_from_hand(player, card: cards.Card):
+    global hand_player_1, hand_player_2, field_player_1, field_player_2
+    # remove from hand, add to field
+    if player == 1 and len(field_player_1) <= 4:
+        hand_player_1.remove(card)
+        field_player_1.append(card)
+        draw_hand_ui(1)
+        draw_field_ui(1)
+    elif player == 2 and len(field_player_2) <= 4:
+        hand_player_2.remove(card)
+        field_player_2.append(card)
+        draw_hand_ui(2)
+        draw_field_ui(2)
+    else:
+        return
+
+
+# =====================================
+# End of Windows & Support Functions
+# =====================================
+
 
 
 
@@ -105,8 +570,8 @@ if __name__ == "__main__":
     pygame.display.set_caption("Super Hard Card Game")
     try:
         pygame.display.set_icon(pygame.image.load("icon.png"))
-    except Exception as e:
-        print(f"Error loading icon: {e}")
+    except Exception:
+        print(f"Error loading icon.png")
 
     print("Starting!")
     # Drag and Drop feature
@@ -114,6 +579,10 @@ if __name__ == "__main__":
     ui_drag_and_drop_target_orig_pos = (0, 0)
     ui_drag_and_drop_usage: str = ""
     running = True 
+
+    # other variables
+    the_selected_card: cards.Card | None = None # record which card in hand is being dragged
+
 
     while running:
         time_delta = clock.tick(60)/1000.0
@@ -133,15 +602,65 @@ if __name__ == "__main__":
 
             # left click
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if image_slot_example.rect.collidepoint(event.pos):
-                    ui_drag_and_drop_target_orig_pos = (image_slot_example.rect.x, image_slot_example.rect.y)
-                    ui_drag_and_drop_usage = "example_usage"
-                    ui_drag_and_drop_target = image_slot_example
+                if current_player == 1:
+                    if top_of_deck_marker_player_1 and top_of_deck_marker_player_1.rect.collidepoint(event.pos):
+                        ui_drag_and_drop_target_orig_pos = (top_of_deck_marker_player_1.rect.x, image_slot_leader_1.rect.y)
+                        ui_drag_and_drop_usage = "draw_card_player_1"
+                        ui_drag_and_drop_target = top_of_deck_marker_player_1
+                    for index, card_slot in enumerate(hand_slots_leader_1):
+                        if card_slot.rect.collidepoint(event.pos):
+                            # find which card in hand this is
+                            if index < len(hand_player_1):
+                                the_selected_card = hand_player_1[index]
+                            ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
+                            ui_drag_and_drop_usage = "play_card_player_1"
+                            ui_drag_and_drop_target = card_slot
+                elif current_player == 2:
+                    if top_of_deck_marker_player_2 and top_of_deck_marker_player_2.rect.collidepoint(event.pos):
+                        ui_drag_and_drop_target_orig_pos = (top_of_deck_marker_player_2.rect.x, image_slot_leader_2.rect.y)
+                        ui_drag_and_drop_usage = "draw_card_player_2"
+                        ui_drag_and_drop_target = top_of_deck_marker_player_2
+                    for index, card_slot in enumerate(hand_slots_leader_2):
+                        if card_slot.rect.collidepoint(event.pos):
+                            # find which card in hand this is
+                            if index < len(hand_player_2):
+                                the_selected_card = hand_player_2[index]
+                                print(f"Selected card: {the_selected_card.name}")
+                                print(f"Index on hand: {index}")
+                                print(hand_player_2)
+                            ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
+                            ui_drag_and_drop_usage = "play_card_player_2"
+                            ui_drag_and_drop_target = card_slot
 
             if event.type == pygame.MOUSEBUTTONUP:
                 # example usage of drag and drop
                 if ui_drag_and_drop_target != None:
-                    ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
+                    if ui_drag_and_drop_usage == "draw_card_player_1":
+                        # if collide with any hand slot of player 1, call draw card
+                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in hand_slots_leader_1]):
+                            draw_card_tail(1)
+                        ui_drag_and_drop_target.kill()
+                        draw_deck_ui(1)
+                    elif ui_drag_and_drop_usage == "draw_card_player_2":
+                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in hand_slots_leader_2]):
+                            draw_card_tail(2)
+                        ui_drag_and_drop_target.kill()
+                        draw_deck_ui(2)
+                    elif ui_drag_and_drop_usage == "play_card_player_1":
+                        # if collide with any field slot of player 1, call assign card to field from hand
+                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in field_slots_leader_1]):
+                            if the_selected_card:
+                                assign_card_to_field_from_hand(1, the_selected_card)
+                                the_selected_card = None
+                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
+                    elif ui_drag_and_drop_usage == "play_card_player_2":
+                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in field_slots_leader_2]):
+                            if the_selected_card:
+                                assign_card_to_field_from_hand(2, the_selected_card)
+                                the_selected_card = None
+                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
+                    else:
+                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
                     ui_drag_and_drop_target = None
                     ui_drag_and_drop_usage = ""
                     ui_drag_and_drop_target_orig_pos = (0, 0)
@@ -151,13 +670,17 @@ if __name__ == "__main__":
                     ui_drag_and_drop_target.set_position((ui_drag_and_drop_target.rect.x + event.rel[0], ui_drag_and_drop_target.rect.y + event.rel[1]))
 
             if event.type == pygame_gui.UI_BUTTON_PRESSED:
-                pass
+                if event.ui_element == settings_button:
+                    build_settings_window()
+                if event.ui_element == new_game_button:
+                    start_new_game()
 
             if event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
                 pass
 
             if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
-                pass
+                if event.ui_element == theme_selection_menu:
+                    change_theme()
 
             ui_manager_lower.process_events(event)
             ui_manager.process_events(event)

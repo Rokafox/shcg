@@ -113,6 +113,10 @@ label_leader_2 = pygame_gui.elements.UILabel(pygame.Rect((60, 900 - 200 - 50 - 4
                                     "Leader 2",
                                     ui_manager)
 
+end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 300), (1600 - 1320 -20, 295)),
+                                    text='End Turn',
+                                    manager=ui_manager,)
+
 settings_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 270), (200, 50)),
                                     text='Settings',
                                     manager=ui_manager,)
@@ -123,11 +127,11 @@ new_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 33
 
 
 text_box = pygame_gui.elements.UITextEntryBox(pygame.Rect((900, 300), (400, 295)),"", ui_manager)
-text_box_introduction_text = "Hover over card name to show details.\n"
+text_box_introduction_text = "======================================\n"
 text_box.set_text(text_box_introduction_text)
 
 
-def draw_card(card):
+def draw_card(card, show_attack_status_indicator: bool = False) -> pygame.Surface:
     card_surface = pygame.Surface((100, 145))
     
     if card.name in image_cards:
@@ -164,6 +168,21 @@ def draw_card(card):
         hp_render = font_bold.render(hp_text, True, (50, 255, 50))
         card_surface.blit(hp_render, (92 - hp_width, 120))
     
+    if show_attack_status_indicator: # show can attack status for followers
+        if hasattr(card, 'type') and card.type == 'follower':
+            if card.can_attack_status == 0:
+                # cannot attack, gray
+                indicator_color = (150, 150, 150)
+            elif card.can_attack_status == 1:
+                # can attack follower, yellow
+                indicator_color = (255, 255, 50)
+            elif card.can_attack_status == 2:
+                # can attack player, green
+                indicator_color = (50, 255, 50)
+            else:
+                raise ValueError(f"Unknown can_attack_status: {card.can_attack_status}")
+            # outline the card with the indicator color
+            pygame.draw.rect(card_surface, indicator_color, pygame.Rect(0, 0, 100, 145), 2)
     return card_surface
 
 
@@ -200,7 +219,7 @@ def draw_hand_ui(player):
         if i < len(hand):
             slots[i].set_image(draw_card(hand[i]))
         else:
-            slots[i].set_image(image_others["404coyote"])
+            slots[i].set_image(image_others["405"])
     return
 
 
@@ -265,17 +284,18 @@ def draw_field_ui(player):
     global field_player_1, field_player_2
     field = []
     if player == 1: # 'top'
+        field_player_1 = sorted(field_player_1, key=lambda x: x.cost)
         field = field_player_1
         slots = field_slots_leader_1
     else:  # 'bottom'
+        field_player_2 = sorted(field_player_2, key=lambda x: x.cost)
         field = field_player_2
         slots = field_slots_leader_2
-    field = sorted(field, key=lambda x: x.cost)
     for i in range(5):
         if i < len(field):
-            slots[i].set_image(draw_card(field[i]))
+            slots[i].set_image(draw_card(field[i], show_attack_status_indicator=True))
         else:
-            slots[i].set_image(image_others["404coyote"])
+            slots[i].set_image(image_others["405"])
     return
 
 
@@ -365,6 +385,31 @@ def add_foxtail(player, amount):
         else:
             foxtail_player_2 = 9
             draw_tail_ui(2)
+
+
+def draw_player_hp_ui():
+    # draw player hp on leader image, black text with white outline
+    global player_hp_1, player_hp_2
+    font = pygame.font.Font(None, 70)
+    font_bold = pygame.font.Font(None, 90)
+    # player 1
+    hp_text_1 = str(player_hp_1)
+    image_with_hp_1 = image_others["404coyote"].copy()
+    for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+        hp_outline_1 = font_bold.render(hp_text_1, True, (255, 255, 255))
+        image_with_hp_1.blit(hp_outline_1, (170 + dx, 320 + dy))
+    hp_render_1 = font_bold.render(hp_text_1, True, (0, 0, 0))
+    image_with_hp_1.blit(hp_render_1, (170, 320))
+    image_slot_leader_1.set_image(image_with_hp_1)
+    # player 2
+    hp_text_2 = str(player_hp_2)
+    image_with_hp_2 = image_others["404coyote"].copy()
+    for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+        hp_outline_2 = font_bold.render(hp_text_2, True, (255, 255, 255))
+        image_with_hp_2.blit(hp_outline_2, (170 + dx, 320 + dy))
+    hp_render_2 = font_bold.render(hp_text_2, True, (0, 0, 0))
+    image_with_hp_2.blit(hp_render_2, (170, 320))
+    image_slot_leader_2.set_image(image_with_hp_2)
 
 
 
@@ -469,28 +514,71 @@ field_player_2: list[cards.Card] = []
 foxtail_player_1: int = 9 # foxtail is used as cost resource
 foxtail_player_2: int = 9
 current_player: int = 2  # 1 or 2
+player_hp_1: int = 20
+player_hp_2: int = 20
+game_turn: int = 1
 
 def start_new_game():
     # fetch decks, deck and deck for cpu are selected by player
     # shuffle decks
     # draw UI components
-    example_deck = [cards.goblin, cards.fighter] * 20  # Example deck with 40 cards
+    example_deck_1: list[cards.Card] = []
+    example_deck_2: list[cards.Card] = []
+    for i in range(40):
+        goblin = cards.Follower(
+            name="goblin",
+            cost=1,
+            attack=1,
+            hp=1
+        )
+
+        fighter = cards.Follower(
+            name="fighter",
+            cost=2,
+            attack=2,
+            hp=2,
+        )
+        card = random.choice([goblin, fighter])
+        example_deck_1.append(card)
+
+    for i in range(40):
+        goblin = cards.Follower(
+            name="goblin",
+            cost=1,
+            attack=1,
+            hp=1
+        )
+
+        fighter = cards.Follower(
+            name="fighter",
+            cost=2,
+            attack=2,
+            hp=2,
+        )
+        card = random.choice([goblin, fighter])
+        example_deck_2.append(card)
 
     text_box.set_text(text_box_introduction_text)
 
     global deck_player_1, deck_player_2
-    deck_player_1 = example_deck.copy()
-    deck_player_2 = example_deck.copy()
+    deck_player_1 = example_deck_1.copy()
+    deck_player_2 = example_deck_2.copy()
 
     random.shuffle(deck_player_1)
     random.shuffle(deck_player_2)
 
     global hand_player_1, hand_player_2, foxtail_player_1, foxtail_player_2
-    global field_player_1, field_player_2
+    global field_player_1, field_player_2, current_player
+    global player_hp_1, player_hp_2, game_turn
     hand_player_1 = []
     hand_player_2 = []
     foxtail_player_1 = 9
     foxtail_player_2 = 9
+    current_player = 2
+    player_hp_1 = 20
+    player_hp_2 = 20
+    draw_player_hp_ui()
+    game_turn = 1
     field_player_1 = []
     field_player_2 = []
     # draw UI
@@ -505,8 +593,12 @@ def start_new_game():
     # draw field
     draw_field_ui(1)
     draw_field_ui(2)
+    text_box.append_html_text(f"Player {current_player}'s turn. \n")
+    text_box.append_html_text(f"Turn {game_turn}. \n")
 
     
+start_new_game()
+
 
 def draw_card_tail(player):
     # comsume 1 foxtail to draw a card
@@ -529,7 +621,7 @@ def draw_card_tail(player):
             drawn_card = deck_player_1.pop()
             hand_player_1.append(drawn_card)
             draw_hand_ui(1)
-            text_box.append_html_text(f"Player 1 drew a card: {drawn_card.name}. \n")
+            text_box.append_html_text(f"Player 1 drew a card: {drawn_card}. \n")
         else:
             text_box.append_html_text(f"Player 1's deck is empty. Cannot draw a card. \n")
     else:
@@ -537,7 +629,7 @@ def draw_card_tail(player):
             drawn_card = deck_player_2.pop()
             hand_player_2.append(drawn_card)
             draw_hand_ui(2)
-            text_box.append_html_text(f"Player 2 drew a card: {drawn_card.name}. \n")
+            text_box.append_html_text(f"Player 2 drew a card: {drawn_card}. \n")
         else:
             text_box.append_html_text(f"Player 2's deck is empty. Cannot draw a card. \n")
 
@@ -546,17 +638,130 @@ def assign_card_to_field_from_hand(player, card: cards.Card):
     global hand_player_1, hand_player_2, field_player_1, field_player_2
     # remove from hand, add to field
     if player == 1 and len(field_player_1) <= 4:
-        hand_player_1.remove(card)
-        field_player_1.append(card)
-        draw_hand_ui(1)
-        draw_field_ui(1)
+        if foxtail_player_1 >= card.cost:
+            use_foxtail(1, card.cost)
+            hand_player_1.remove(card)
+            if card.type == 'follower':
+                card.summoned_this_turn = True
+            text_box.append_html_text(f"Player 1 played {card}. \n")
+            field_player_1.append(card)
+            draw_hand_ui(1)
+            draw_field_ui(1)
+        else:
+            text_box.append_html_text(f"Player 1 does not have enough foxtail to play {card}. \n")
+            return
     elif player == 2 and len(field_player_2) <= 4:
-        hand_player_2.remove(card)
-        field_player_2.append(card)
-        draw_hand_ui(2)
-        draw_field_ui(2)
+        if foxtail_player_2 >= card.cost:
+            use_foxtail(2, card.cost)
+            hand_player_2.remove(card)
+            if card.type == 'follower':
+                card.summoned_this_turn = True
+            text_box.append_html_text(f"Player 2 played {card}. \n")
+            field_player_2.append(card)
+            draw_hand_ui(2)
+            draw_field_ui(2)
+        else:
+            text_box.append_html_text(f"Player 2 does not have enough foxtail to play {card.name}. \n")
+            return
     else:
         return
+
+
+def attack_with_follower(player, attacker: cards.Follower, target: cards.Follower | str):
+    global field_player_1, field_player_2, player_hp_1, player_hp_2
+    if player == 1:
+        if attacker not in field_player_1:
+            text_box.append_html_text(f"Player 1's attacker is not on the field. \n")
+            return
+        if isinstance(target, cards.Follower):
+            if target not in field_player_2:
+                text_box.append_html_text(f"Player 2's target is not on the field. \n")
+                return
+            # attack follower
+            text_box.append_html_text(f"{attacker} is about to attack {target}. \n")
+            target.hp -= attacker.attack
+            attacker.hp -= target.attack
+            if target.hp <= 0:
+                field_player_2.remove(target)
+                text_box.append_html_text(f"Player 2's {target} was destroyed. \n")
+            if attacker.hp <= 0:
+                field_player_1.remove(attacker)
+                text_box.append_html_text(f"Player 1's {attacker} was destroyed. \n")
+            attacker.update_can_attack_status()
+            draw_field_ui(1)
+            draw_field_ui(2)
+        elif target == "leader":
+            player_hp_2 -= attacker.attack
+            text_box.append_html_text(f"Player 2's leader took {attacker.attack} damage, remaining HP: {player_hp_2}. \n")
+            attacker.update_can_attack_status()
+            draw_player_hp_ui()
+            draw_field_ui(1)
+        else:
+            text_box.append_html_text(f"Invalid target for attack. \n")
+            return
+    else:
+        if attacker not in field_player_2:
+            text_box.append_html_text(f"Player 2's attacker is not on the field. \n")
+            return
+        if isinstance(target, cards.Follower):
+            if target not in field_player_1:
+                text_box.append_html_text(f"Player 1's target is not on the field. \n")
+                return
+            # attack follower
+            text_box.append_html_text(f"{attacker} is about to attack {target}. \n")
+            target.hp -= attacker.attack
+            attacker.hp -= target.attack
+            if target.hp <= 0:
+                field_player_1.remove(target)
+                text_box.append_html_text(f"Player 1's {target} was destroyed. \n")
+            if attacker.hp <= 0:
+                field_player_2.remove(attacker)
+                text_box.append_html_text(f"Player 2's {attacker} was destroyed. \n")
+            attacker.update_can_attack_status()
+            draw_field_ui(1)
+            draw_field_ui(2)
+        elif target == "leader":
+            player_hp_1 -= attacker.attack
+            text_box.append_html_text(f"Player 1's leader took {attacker.attack} damage, remaining HP: {player_hp_1}. \n")
+            attacker.update_can_attack_status()
+            draw_player_hp_ui()
+            draw_field_ui(2)
+        else:
+            text_box.append_html_text(f"Invalid target for attack. \n")
+            return
+
+
+
+def end_turn_and_switch_player():
+    global current_player, foxtail_player_1, foxtail_player_2, game_turn
+    if current_player == 1:
+        current_player = 2
+        foxtail_player_2 = 9
+        draw_tail_ui(2)
+        for card in field_player_2:
+            if card.type == 'follower':
+                card.summoned_this_turn = False
+                card.reset_attack_status()
+    else:
+        current_player = 1
+        foxtail_player_1 = 9
+        draw_tail_ui(1)
+        # reset followers' can attack status
+        for card in field_player_1:
+            if card.type == 'follower':
+                card.summoned_this_turn = False
+                card.reset_attack_status()
+
+    draw_field_ui(1)
+    draw_field_ui(2)
+    game_turn += 1
+    text_box.set_text(text_box_introduction_text)
+    text_box.append_html_text(f"Player {current_player}'s turn. \n")
+    text_box.append_html_text(f"Turn {game_turn}. \n")
+
+
+
+
 
 
 # =====================================
@@ -615,6 +820,17 @@ if __name__ == "__main__":
                             ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
                             ui_drag_and_drop_usage = "play_card_player_1"
                             ui_drag_and_drop_target = card_slot
+                    # follower on field if can attack, can be dragged to opponent followers or leader to attack
+                    for index, card_slot in enumerate(field_slots_leader_1):
+                        if card_slot.rect.collidepoint(event.pos):
+                            # find which card on field this is
+                            if index < len(field_player_1):
+                                the_selected_card = field_player_1[index]
+                            if the_selected_card and the_selected_card.type == 'follower' and the_selected_card.can_attack_status > 0:
+                                ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
+                                ui_drag_and_drop_usage = "attack_with_follower_player_1"
+                                ui_drag_and_drop_target = card_slot
+
                 elif current_player == 2:
                     if top_of_deck_marker_player_2 and top_of_deck_marker_player_2.rect.collidepoint(event.pos):
                         ui_drag_and_drop_target_orig_pos = (top_of_deck_marker_player_2.rect.x, image_slot_leader_2.rect.y)
@@ -631,6 +847,16 @@ if __name__ == "__main__":
                             ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
                             ui_drag_and_drop_usage = "play_card_player_2"
                             ui_drag_and_drop_target = card_slot
+                    # follower on field if can attack, can be dragged to opponent followers or leader to attack
+                    for index, card_slot in enumerate(field_slots_leader_2):
+                        if card_slot.rect.collidepoint(event.pos):
+                            # find which card on field this is
+                            if index < len(field_player_2):
+                                the_selected_card = field_player_2[index]
+                            if the_selected_card and the_selected_card.type == 'follower' and the_selected_card.can_attack_status > 0:
+                                ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
+                                ui_drag_and_drop_usage = "attack_with_follower_player_2"
+                                ui_drag_and_drop_target = card_slot
 
             if event.type == pygame.MOUSEBUTTONUP:
                 # example usage of drag and drop
@@ -659,6 +885,33 @@ if __name__ == "__main__":
                                 assign_card_to_field_from_hand(2, the_selected_card)
                                 the_selected_card = None
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
+                    elif ui_drag_and_drop_usage == "attack_with_follower_player_1":
+                        # if collide with any opponent field slot or leader, call attack with follower
+                        for index, slot in enumerate(field_slots_leader_2):
+                            if slot.rect.colliderect(ui_drag_and_drop_target.rect):
+                                if the_selected_card:
+                                    target_card = None
+                                    if index < len(field_player_2):
+                                        target_card = field_player_2[index]
+                                    if target_card and target_card.type == 'follower':
+                                        attack_with_follower(1, the_selected_card, target_card)
+                        if image_slot_leader_2.rect.colliderect(ui_drag_and_drop_target.rect):
+                            attack_with_follower(1, the_selected_card, "leader")
+                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
+                    elif ui_drag_and_drop_usage == "attack_with_follower_player_2":
+                        for index, slot in enumerate(field_slots_leader_1):
+                            if slot.rect.colliderect(ui_drag_and_drop_target.rect):
+                                if the_selected_card:
+                                    target_card = None
+                                    if index < len(field_player_1):
+                                        target_card = field_player_1[index]
+                                    if target_card and target_card.type == 'follower':
+                                        attack_with_follower(2, the_selected_card, target_card)
+                        if image_slot_leader_1.rect.colliderect(ui_drag_and_drop_target.rect):
+                            attack_with_follower(2, the_selected_card, "leader")
+                        if the_selected_card:
+                            attack_with_follower(2, the_selected_card, "leader")
+                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
                     else:
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
                     ui_drag_and_drop_target = None
@@ -674,6 +927,8 @@ if __name__ == "__main__":
                     build_settings_window()
                 if event.ui_element == new_game_button:
                     start_new_game()
+                if event.ui_element == end_turn_button:
+                    end_turn_and_switch_player()
 
             if event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
                 pass

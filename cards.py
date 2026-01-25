@@ -38,7 +38,7 @@ class Follower(Card):
             self.can_enhance = False
             self.enhanced_this_turn = True
             self.is_enhanced = True
-            if self.how_many_attacks_done < self.how_many_attacks_max:
+            if self.how_many_attacks_done < self.how_many_attacks_max and self.can_attack_status < 1:
                 self.can_attack_status = 1
 
     def __repr__(self):

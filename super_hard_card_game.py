@@ -336,6 +336,7 @@ def draw_field_ui(player):
 
 # Tail indicators (how many foxtail this player have currently), just above hand slots, from left to right, 32 x 32, max 9
 tail_indicators_leader_1 = []
+tail_indicators_leader_1_active = []
 for i in range(9):
     indicator = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 40, 200 + 20), (32, 32)),
                                         pygame.Surface((32, 32)),
@@ -344,6 +345,7 @@ for i in range(9):
     tail_indicators_leader_1.append(indicator)
 
 tail_indicators_leader_2 = []
+tail_indicators_leader_2_active = []
 for i in range(9):
     indicator = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 40, 700 - 20 - 32), (32, 32)),
                                         pygame.Surface((32, 32)),
@@ -355,16 +357,24 @@ for i in range(9):
 def draw_tail_ui(player):
     # fill tail indicators to default value (9) according to foxtail count
     global foxtail_player_1, foxtail_player_2
+    global tail_indicators_leader_1, tail_indicators_leader_2
+    global tail_indicators_leader_1_active, tail_indicators_leader_2_active
     foxtail = 0
     if player == 1:
         foxtail = foxtail_player_1
         indicators = tail_indicators_leader_1
+        tail_indicators_leader_1_active = []
     else:
         foxtail = foxtail_player_2
         indicators = tail_indicators_leader_2
+        tail_indicators_leader_2_active = []
     for i in range(9):
         if i < foxtail:
             indicators[i].set_image(image_others["foxtail"])  # filled
+            if player == 1:
+                tail_indicators_leader_1_active.append(indicators[i])
+            else:
+                tail_indicators_leader_2_active.append(indicators[i])
         else:
             indicators[i].set_image(image_others["405"])  # empty
     return
@@ -377,12 +387,15 @@ def use_foxtail(player, amount):
     if amount == 0:
         return
     global foxtail_player_1, foxtail_player_2
+    global tail_indicators_leader_1, tail_indicators_leader_2
+    global tail_indicators_leader_1_active, tail_indicators_leader_2_active
     if player == 1:
         foxtail_prev = foxtail_player_1
         if foxtail_player_1 >= amount:
             foxtail_player_1 -= amount
             for i in range(foxtail_player_1, foxtail_prev):
                 tail_indicators_leader_1[i].set_image(image_others["405"])
+                tail_indicators_leader_1_active.remove(tail_indicators_leader_1[i])
         else:
             raise ValueError("Not enough foxtail")
     else:
@@ -391,6 +404,7 @@ def use_foxtail(player, amount):
             foxtail_player_2 -= amount
             for i in range(foxtail_player_2, foxtail_prev):
                 tail_indicators_leader_2[i].set_image(image_others["405"])
+                tail_indicators_leader_2_active.remove(tail_indicators_leader_2[i])
         else:
             raise ValueError("Not enough foxtail")
 
@@ -402,12 +416,15 @@ def add_foxtail(player, amount):
     if amount == 0:
         return
     global foxtail_player_1, foxtail_player_2
+    global tail_indicators_leader_1, tail_indicators_leader_2
+    global tail_indicators_leader_1_active, tail_indicators_leader_2_active
     if player == 1:
         foxtail_prev = foxtail_player_1
         if foxtail_player_1 + amount <= 9:
             foxtail_player_1 += amount
         for i in range(foxtail_prev, foxtail_player_1):
             tail_indicators_leader_1[i].set_image(image_others["foxtail"])
+            tail_indicators_leader_1_active.append(tail_indicators_leader_1[i])
         else:
             foxtail_player_1 = 9
             draw_tail_ui(1)
@@ -417,6 +434,7 @@ def add_foxtail(player, amount):
             foxtail_player_2 += amount
         for i in range(foxtail_prev, foxtail_player_2):
             tail_indicators_leader_2[i].set_image(image_others["foxtail"])
+            tail_indicators_leader_2_active.append(tail_indicators_leader_2[i])
         else:
             foxtail_player_2 = 9
             draw_tail_ui(2)
@@ -560,6 +578,10 @@ player_hp_1: int = 20
 player_hp_2: int = 20
 game_turn: int = 1
 game_concluded: bool = False
+player_1_max_enhance_turns: int = 1
+player_2_max_enhance_turns: int = 1
+player_1_enhance_used_this_turn: int = 0
+player_2_enhance_used_this_turn: int = 0
 
 def start_new_game():
     # fetch decks, deck and deck for cpu are selected by player
@@ -617,6 +639,7 @@ def start_new_game():
     global hand_player_1, hand_player_2, foxtail_player_1, foxtail_player_2
     global field_player_1, field_player_2, current_player
     global player_hp_1, player_hp_2, game_turn, game_concluded
+    global player_1_max_enhance_turns, player_2_max_enhance_turns
     hand_player_1 = []
     hand_player_2 = []
     foxtail_player_1 = 9
@@ -627,6 +650,8 @@ def start_new_game():
     draw_player_hp_ui()
     game_turn = 1
     game_concluded = False
+    player_1_max_enhance_turns = 1
+    player_2_max_enhance_turns = 1
     field_player_1 = []
     field_player_2 = []
     # draw UI
@@ -800,6 +825,7 @@ def player_take_damage(player: int, amount: int):
 
 def end_turn_and_switch_player():
     global current_player, foxtail_player_1, foxtail_player_2, game_turn
+    global player_1_enhance_used_this_turn, player_2_enhance_used_this_turn
     if game_concluded:
         text_box.append_html_text("The game has concluded. Start a new game instead.\n")
         return
@@ -824,6 +850,8 @@ def end_turn_and_switch_player():
     draw_field_ui(1)
     draw_field_ui(2)
     game_turn += 1
+    player_1_enhance_used_this_turn = 0
+    player_2_enhance_used_this_turn = 0
     text_box.set_text(text_box_introduction_text)
     text_box.append_html_text(f"Player {current_player}'s turn. \n")
     text_box.append_html_text(f"Turn {game_turn}. \n")
@@ -899,6 +927,11 @@ if __name__ == "__main__":
                                 ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
                                 ui_drag_and_drop_usage = "attack_with_follower_player_1"
                                 ui_drag_and_drop_target = card_slot
+                    for index, tail in enumerate(tail_indicators_leader_1_active):
+                        if tail.rect.collidepoint(event.pos):
+                            ui_drag_and_drop_target_orig_pos = (tail.rect.x, tail.rect.y)
+                            ui_drag_and_drop_usage = "use_foxtail_player_1"
+                            ui_drag_and_drop_target = tail
 
                 elif current_player == 2:
                     if top_of_deck_marker_player_2 and top_of_deck_marker_player_2.rect.collidepoint(event.pos):
@@ -926,6 +959,11 @@ if __name__ == "__main__":
                                 ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
                                 ui_drag_and_drop_usage = "attack_with_follower_player_2"
                                 ui_drag_and_drop_target = card_slot
+                    for index, tail in enumerate(tail_indicators_leader_2_active):
+                        if tail.rect.collidepoint(event.pos):
+                            ui_drag_and_drop_target_orig_pos = (tail.rect.x, tail.rect.y)
+                            ui_drag_and_drop_usage = "use_foxtail_player_2"
+                            ui_drag_and_drop_target = tail
 
             if event.type == pygame.MOUSEBUTTONUP:
                 # drag and drop
@@ -964,7 +1002,7 @@ if __name__ == "__main__":
                                         target_card = field_player_2[index]
                                     if target_card and target_card.type == 'follower':
                                         attack_with_follower(1, the_selected_card, target_card)
-                        if image_slot_leader_2.rect.collidepoint(event.pos):
+                        if image_slot_leader_2.rect.collidepoint(event.pos) and the_selected_card.can_attack_status >= 2:
                             attack_with_follower(1, the_selected_card, "leader")
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
                     elif ui_drag_and_drop_usage == "attack_with_follower_player_2":
@@ -976,11 +1014,44 @@ if __name__ == "__main__":
                                         target_card = field_player_1[index]
                                     if target_card and target_card.type == 'follower':
                                         attack_with_follower(2, the_selected_card, target_card)
-                        if image_slot_leader_1.rect.collidepoint(event.pos):
+                        if image_slot_leader_1.rect.collidepoint(event.pos) and the_selected_card.can_attack_status >= 2:
                             attack_with_follower(2, the_selected_card, "leader")
+                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
+                    elif ui_drag_and_drop_usage == "use_foxtail_player_1":
+                        if player_1_enhance_used_this_turn >= player_1_max_enhance_turns:
+                            text_box.append_html_text("All enhance actions of player 1 used for this turn. \n")
+                        else:
+                            # if any enhanceable follower on field, call enhance on that card
+                            for index, slot in enumerate(field_slots_leader_1):
+                                if slot.rect.collidepoint(event.pos):
+                                    if index < len(field_player_1):
+                                        target_card = field_player_1[index]
+                                        if target_card.type == 'follower' and target_card.can_enhance:
+                                            target_card.enhance()
+                                            text_box.append_html_text(f"Player 1 enhanced {target_card}. \n")
+                                            player_1_enhance_used_this_turn += 1
+                                            draw_field_ui(1)
+                                            use_foxtail(1, 1)
+                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
+                    elif ui_drag_and_drop_usage == "use_foxtail_player_2":
+                        if player_2_enhance_used_this_turn >= player_2_max_enhance_turns:
+                            text_box.append_html_text("All enhance actions of player 2 used for this turn. \n")
+                        else:
+                            for index, slot in enumerate(field_slots_leader_2):
+                                if slot.rect.collidepoint(event.pos):
+                                    if index < len(field_player_2):
+                                        target_card = field_player_2[index]
+                                        if target_card.type == 'follower' and target_card.can_enhance:
+                                            target_card.enhance()
+                                            text_box.append_html_text(f"Player 2 enhanced {target_card}. \n")
+                                            player_2_enhance_used_this_turn += 1
+                                            draw_field_ui(2)
+                                            use_foxtail(2, 1)
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
                     else:
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
+
+
                     ui_drag_and_drop_target = None
                     ui_drag_and_drop_usage = ""
                     ui_drag_and_drop_target_orig_pos = (0, 0)

@@ -29,6 +29,7 @@ class Follower(Card):
     
     def tooltip_str(self):
         s = f"{self.name}\n"
+        s += f"Attack: {self.attack}  HP: {self.hp}/{self.max_hp}\n"
         if self.is_enhanced and self.description_e:
             s += f"{self.description_e}\n"
         elif self.description:

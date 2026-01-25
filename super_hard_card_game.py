@@ -253,6 +253,7 @@ def draw_hand_ui(player):
     for i in range(9):
         if i < len(hand):
             slots[i].set_image(draw_card(hand[i]))
+            slots[i].set_tooltip(hand[i].tooltip_str(), delay=0.1, wrap_width=300)
         else:
             slots[i].set_image(image_405_card_slot)
     return
@@ -329,6 +330,7 @@ def draw_field_ui(player):
     for i in range(5):
         if i < len(field):
             slots[i].set_image(draw_card(field[i], show_attack_status_indicator=True))
+            slots[i].set_tooltip(field[i].tooltip_str(), delay=0.1, wrap_width=300)
         else:
             slots[i].set_image(image_405_card_slot)
     return
@@ -590,41 +592,17 @@ def start_new_game():
     example_deck_1: list[cards.Card] = []
     example_deck_2: list[cards.Card] = []
     for i in range(40):
-        goblin = cards.Follower(
-            name="goblin",
-            cost=1,
-            attack=1,
-            hp=1,
-            can_enhance=True
-        )
-
-        fighter = cards.Follower(
-            name="fighter",
-            cost=2,
-            attack=2,
-            hp=2,
-            can_enhance=False
-        )
-        card = random.choice([goblin, fighter])
+        ゴブリン = cards.ゴブリン()
+        ファイター = cards.ファイター()
+        ゴリアテ = cards.ゴリアテ()
+        card = random.choice([ゴブリン, ファイター, ゴリアテ])
         example_deck_1.append(card)
 
     for i in range(40):
-        goblin = cards.Follower(
-            name="goblin",
-            cost=1,
-            attack=1,
-            hp=1,
-            can_enhance=True
-        )
-
-        fighter = cards.Follower(
-            name="fighter",
-            cost=2,
-            attack=2,
-            hp=2,
-            can_enhance=False
-        )
-        card = random.choice([goblin, fighter])
+        ゴブリン = cards.ゴブリン()
+        ファイター = cards.ファイター()
+        ゴリアテ = cards.ゴリアテ()
+        card = random.choice([ゴブリン, ファイター, ゴリアテ])
         example_deck_2.append(card)
 
     text_box.set_text(text_box_introduction_text)

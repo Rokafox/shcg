@@ -25,7 +25,9 @@ class Follower(Card):
         self.enhanced_this_turn: bool = False
         self.can_attack_status: int = 0  # 0: cannot attack, 1: can attack follower, 2: can attack player
         self.how_many_attacks_max: int = 1  # Number of attacks per turn
-        self.how_many_attacks_done: int = 0  # Number of attacks done this turn 
+        self.how_many_attacks_done: int = 0  # Number of attacks done this turn
+        self.f = "" # summon effect
+        self.l = "" # last word effect 
     
     def tooltip_str(self):
         s = f"{self.name}\n"

@@ -17,6 +17,287 @@ clock = pygame.time.Clock()
 # for file in os.listdir("./.tmp"):
 #     os.remove(f"./.tmp/{file}")
 
+# ====================================
+# Game State
+# ====================================
+
+class SHCGGameState:
+    def __init__(self, current_player):
+        self.current_player = current_player  # 1 or 2
+        self.turn = 1
+        self.concluded = False
+        self.decks: dict[int, list[cards.Card]] = {1: [], 2: []}
+        self.hands: dict[int, list[cards.Card]] = {1: [], 2: []}
+        self.fields: dict[int, list[cards.Card]] = {1: [], 2: []}
+        self.hp = {1: 20, 2: 20}
+        self.foxtail = {1: 9, 2: 9}
+        self.enhance_used_this_turn = {1: 0, 2: 0}
+        self.max_enhance_allowed_per_turn = {1: 1, 2: 1}
+        # ui
+        self.top_of_the_deck_ui_marker: dict[int, pygame_gui.elements.UIImage | None] = {1: None, 2: None}
+    
+    @property
+    def opponent(self):
+        return 3 - self.current_player
+
+    def draw_card_with_foxtail(self, player, ui_draw, ui_set_text):
+        """
+        At any time, the current player can consume 1 foxtail to draw a card. No restriction unless hand is full.
+        """
+        if self.decks[player] == [] or self.hands[player] >= 9:
+            return
+        if self.foxtail[player] > 0:
+            self.use_foxtail(player, 1)
+        else:
+            return
+        drawn_card = self.decks[player].pop()
+        self.hands[player].append(drawn_card)
+        if ui_set_text:
+            text_box.append_html_text(f"Player {player} drew a card: {drawn_card}. \n")
+        if ui_draw:
+            self.draw_hand_ui(player)
+            # draw_deck_ui is unnecessary as it is handled by pygame event
+
+
+    def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text):
+        if len(self.fields[player]) > 4 and card.type != 'spell':
+            return
+        if self.foxtail[player] < card.cost:
+            return
+        self.use_foxtail(player, card.cost)
+        self.hands[player].remove(card)
+        if card.type == 'follower':
+            card.summoned_this_turn = True
+            self.fields[player].append(card)
+        elif card.type == 'spell':
+            pass
+        elif card.type == 'amulet':
+            self.fields[player].append(card)
+        if ui_set_text:
+            text_box.append_html_text(f"Player {player} played {card}.\n")
+        if ui_draw:
+            self.draw_hand_ui(player)
+            self.draw_field_ui(player)
+
+
+    def follower_attack(self, player, attacker: cards.Follower, target: cards.Follower | str, ui_draw, ui_set_text):
+        assert attacker.can_attack_status > 0, "This follower cannot attack now."
+        assert attacker.type == 'follower', "Attacker must be a follower."
+        assert attacker in self.fields[player], "Attacker is not on the field."
+        if isinstance(target, cards.Follower):
+            assert target in self.fields[self.opponent], "Target follower is not on opponent's field."
+            if ui_set_text:
+                text_box.append_html_text(f"{attacker} is about to attack {target}.\n")
+            target.hp -= attacker.attack
+            attacker.hp -= target.attack
+            if target.hp <= 0:
+                self.fields[self.opponent].remove(target)
+                if ui_set_text:
+                    text_box.append_html_text(f"Player {self.opponent}'s {target} was destroyed.\n")
+            if attacker.hp <= 0:
+                self.fields[self.player].remove(attacker)
+                if ui_set_text:
+                    text_box.append_html_text(f"Player {player}'s {attacker} was destroyed.\n")
+            attacker.update_can_attack_status()
+            if ui_draw:
+                self.draw_field_ui(1)
+                self.draw_field_ui(2)
+        elif target == "leader":
+            # リーダーへの攻撃
+            self.player_take_damage(self.opponent, attacker.attack)
+            attacker.update_can_attack_status()
+            self.draw_field_ui(player)
+        else:
+            raise Exception("Should not reach here.")
+
+
+    def player_take_damage(self, player: int, amount: int, ui_draw, ui_set_text) -> bool:
+        assert amount >= 0
+        self.hp[player] -= amount
+        if ui_set_text:
+            text_box.append_html_text(f"Player {player} took {amount} damage, remaining HP: {hp[player]}.\n")
+        if amount > 0 and ui_draw:
+            self.draw_player_hp_ui()
+        if self.hp[player] <= 0:
+            winner = self.opponent
+            if ui_set_text:
+                text_box.append_html_text(f"Player {winner} wins!\n")
+            self.concluded = True
+            return True
+        return False
+
+
+    def end_turn(self, ui_draw, ui_set_text):
+        if self.concluded:
+            text_box.append_html_text("The game has concluded. Start a new game instead.\n")
+            return
+        self.current_player = self.opponent
+        self.foxtail[self.current_player] = 9
+        for card in self.fields[self.current_player]:
+            if card.type == 'follower':
+                card.summoned_this_turn = False
+                card.reset_attack_status()
+        self.turn += 1
+        self.enhance_used = {1: 0, 2: 0}
+        if ui_draw:
+            self.draw_tail_ui(self.current_player)
+            self.draw_field_ui(1)
+            self.draw_field_ui(2)
+        if ui_set_text:
+            text_box.set_text(text_box_introduction_text)
+            text_box.append_html_text(f"Player {self.current_player}'s turn.\n")
+            text_box.append_html_text(f"Turn {self.turn}.\n")
+
+
+    def use_foxtail(self, player, amount, ui_draw, ui_set_text):
+        # The player use this amount of foxtail
+        assert amount >= 0
+        if amount == 0:
+            return
+        global tail_indicators_leader_1, tail_indicators_leader_2
+        global tail_indicators_leader_1_active, tail_indicators_leader_2_active
+        foxtail_prev = self.foxtail[player]
+        if self.foxtail[player] >= amount:
+            self.foxtail[player] -= amount
+            if ui_draw:
+                for i in range(self.foxtail[player], foxtail_prev):
+                    tail_indicators_leader_1[i].set_image(image_others["405"])
+                    tail_indicators_leader_1_active.remove(tail_indicators_leader_1[i])
+        else:
+            raise ValueError("Not enough foxtail")
+
+
+    def add_foxtail(self, player, amount, ui_draw, ui_set_text):
+        # add amount of foxtail for player
+        assert amount >= 0
+        if amount == 0:
+            return
+        global tail_indicators_leader_1, tail_indicators_leader_2
+        global tail_indicators_leader_1_active, tail_indicators_leader_2_active
+        foxtail_prev = self.foxtail[player]
+        if self.foxtail[player] + amount <= 9:
+            self.foxtail[player] += amount
+        for i in range(foxtail_prev, self.foxtail[player]):
+            tail_indicators_leader_1[i].set_image(image_others["foxtail"])
+            tail_indicators_leader_1_active.append(tail_indicators_leader_1[i])
+        else:
+            self.foxtail[player] = 9
+            self.draw_tail_ui(1)
+
+    # ====================================
+    # UI functions
+    # ====================================
+
+    def draw_deck_ui(self, player):
+        deck = []
+        if player == 1: # 'top'
+            base_x = 1500 - 100 - 50
+            base_y = 50
+            deck = self.decks[1]
+        else:  # 'bottom'
+            base_x = 1500 - 100 - 50
+            base_y = 900 - 145 - 50
+            deck = self.decks[2]
+        if not deck:
+            return
+        for i in range(len(deck)):
+            offset = i * 1
+            card_ui = pygame_gui.elements.UIImage(
+                pygame.Rect((base_x + offset, base_y + offset), (100, 145)),
+                pygame.Surface((100, 145)),
+                ui_manager
+            )
+            card_ui.set_image(draw_card(deck[i]))
+            if i == len(deck) - 1:
+                self.top_of_the_deck_ui_marker[player] = card_ui
+        return
+
+
+    def draw_hand_ui(self, player):
+        self.hands[player] = sorted(self.hands[player], key=lambda x: x.cost)
+        hand = self.hands[player]
+        if player == 1: # 'top'
+            slots = hand_slots_leader_1
+        else:  # 'bottom'
+            slots = hand_slots_leader_2
+        for i in range(9):
+            if i < len(hand):
+                slots[i].set_image(draw_card(hand[i]))
+                slots[i].set_tooltip(hand[i].tooltip_str(), delay=0.1, wrap_width=300)
+            else:
+                slots[i].set_image(image_405_card_slot)
+        return
+
+
+    def draw_field_ui(self, player):
+        self.fields[player] = sorted(self.fields[player], key=lambda x: x.cost)
+        field = self.fields[player]
+        if player == 1: # 'top'
+            slots = field_slots_leader_1
+        else:  # 'bottom'
+            slots = field_slots_leader_2
+        for i in range(5):
+            if i < len(field):
+                slots[i].set_image(draw_card(field[i], show_attack_status_indicator=True))
+                slots[i].set_tooltip(field[i].tooltip_str(), delay=0.1, wrap_width=300)
+            else:
+                slots[i].set_image(image_405_card_slot)
+        return
+
+
+    def draw_tail_ui(self, player):
+        # fill tail indicators to default value (9) according to foxtail count
+        foxtail = self.foxtail[player]
+        if player == 1:
+            indicators = tail_indicators_leader_1
+            tail_indicators_leader_1_active = []
+        else:
+            indicators = tail_indicators_leader_2
+            tail_indicators_leader_2_active = []
+        for i in range(9):
+            if i < foxtail:
+                indicators[i].set_image(image_others["foxtail"])  # filled
+                if player == 1:
+                    tail_indicators_leader_1_active.append(indicators[i])
+                else:
+                    tail_indicators_leader_2_active.append(indicators[i])
+            else:
+                indicators[i].set_image(image_others["405"])  # empty
+        return
+
+
+    def draw_player_hp_ui(self):
+        # draw player hp on player_1_hp_slot and player_2_hp_slot
+        # green text, bold font
+        font_bold = pygame.font.Font(None, 64)
+        
+        # player 1
+        hp_text_1 = str(self.hp[1])
+        image_with_hp_1 = image_others["405"].copy()
+        hp_render_1 = font_bold.render(hp_text_1, True, (0, 255, 0))
+        
+        # transform size of image_with_hp_1 to fit the player_1_hp_slot
+        x = player_1_hp_slot.get_relative_rect().width
+        y = player_1_hp_slot.get_relative_rect().height
+        image_with_hp_1 = pygame.transform.scale(image_with_hp_1, (x, y))
+        text_rect_1 = hp_render_1.get_rect(center=(x//2, y//2))
+        image_with_hp_1.blit(hp_render_1, text_rect_1)
+        player_1_hp_slot.set_image(image_with_hp_1)
+        
+        # player 2
+        hp_text_2 = str(self.hp[2])
+        image_with_hp_2 = image_others["405"].copy()
+        hp_render_2 = font_bold.render(hp_text_2, True, (0, 255, 0))
+        
+        # transform size of image_with_hp_2 to fit the player_2_hp_slot
+        x = player_2_hp_slot.get_relative_rect().width
+        y = player_2_hp_slot.get_relative_rect().height
+        image_with_hp_2 = pygame.transform.scale(image_with_hp_2, (x, y))
+        text_rect_2 = hp_render_2.get_rect(center=(x//2, y//2))
+        image_with_hp_2.blit(hp_render_2, text_rect_2)
+        player_2_hp_slot.set_image(image_with_hp_2)
+
+
 # =====================================
 # Load Images
 # =====================================
@@ -209,7 +490,7 @@ def draw_card(card, show_attack_status_indicator: bool = False) -> pygame.Surfac
     
     # 強化可能マーカーを右上に表示
     if hasattr(card, 'can_enhance') and card.can_enhance:
-        # foxtail_img = pygame.transform.scale(image_others["foxtail"], (32, 32))
+        # foxtail_img = pygame.transform.scale(image_others["foxtail"], (24, 24))
         # card_surface.blit(foxtail_img, (68, 0))  # Does not look good. Instead, use word "E"
         enhance_text = "E"
         for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
@@ -238,65 +519,6 @@ for i in range(9):
     slot.set_image(image_others["404coyote"])
     hand_slots_leader_1.append(slot)
 
-
-def draw_hand_ui(player):
-    global hand_player_1, hand_player_2
-    hand = []
-    if player == 1: # 'top'
-        hand_player_1 = sorted(hand_player_1, key=lambda x: x.cost)
-        hand = hand_player_1
-        slots = hand_slots_leader_1
-    else:  # 'bottom'
-        hand_player_2 = sorted(hand_player_2, key=lambda x: x.cost)
-        hand = hand_player_2
-        slots = hand_slots_leader_2
-    for i in range(9):
-        if i < len(hand):
-            slots[i].set_image(draw_card(hand[i]))
-            slots[i].set_tooltip(hand[i].tooltip_str(), delay=0.1, wrap_width=300)
-        else:
-            slots[i].set_image(image_405_card_slot)
-    return
-
-
-# Deck (pile of cards) of each player, right bottom and right top next to last hand slot
-# In this super hard card game, deck, cards are openly visible to both players
-
-# card on top of the deck is draggable to hand area to draw, so need to mark it
-top_of_deck_marker_player_1 = None
-top_of_deck_marker_player_2 = None
-
-
-def draw_deck_ui(player):
-    global deck_player_1, deck_player_2
-    deck = []
-    if player == 1: # 'top'
-        base_x = 1500 - 100 - 50
-        base_y = 50
-        deck = deck_player_1
-    else:  # 'bottom'
-        base_x = 1500 - 100 - 50
-        base_y = 900 - 145 - 50
-        deck = deck_player_2
-    if not deck:
-        return
-    for i in range(len(deck)):
-        offset = i * 1
-        card_ui = pygame_gui.elements.UIImage(
-            pygame.Rect((base_x + offset, base_y + offset), (100, 145)),
-            pygame.Surface((100, 145)),
-            ui_manager
-        )
-        card_ui.set_image(draw_card(deck[i]))
-        if i == len(deck) - 1:
-            global top_of_deck_marker_player_1, top_of_deck_marker_player_2
-            if player == 1:
-                top_of_deck_marker_player_1 = card_ui
-            else:
-                top_of_deck_marker_player_2 = card_ui
-    return
-
-
 # field slots of each player (5 slots each)
 field_slots_leader_1 = []
 for i in range(5):
@@ -313,27 +535,6 @@ for i in range(5):
                                         ui_manager)
     slot.set_image(image_others["404coyote"])
     field_slots_leader_2.append(slot)
-
-
-def draw_field_ui(player):
-    # draw cards on field slots, just as draw_hand_ui
-    global field_player_1, field_player_2
-    field = []
-    if player == 1: # 'top'
-        field_player_1 = sorted(field_player_1, key=lambda x: x.cost)
-        field = field_player_1
-        slots = field_slots_leader_1
-    else:  # 'bottom'
-        field_player_2 = sorted(field_player_2, key=lambda x: x.cost)
-        field = field_player_2
-        slots = field_slots_leader_2
-    for i in range(5):
-        if i < len(field):
-            slots[i].set_image(draw_card(field[i], show_attack_status_indicator=True))
-            slots[i].set_tooltip(field[i].tooltip_str(), delay=0.1, wrap_width=300)
-        else:
-            slots[i].set_image(image_405_card_slot)
-    return
 
 
 # Tail indicators (how many foxtail this player have currently), just above hand slots, from left to right, 32 x 32, max 9
@@ -354,125 +555,6 @@ for i in range(9):
                                         ui_manager)
     indicator.set_image(image_others["405"])
     tail_indicators_leader_2.append(indicator)
-
-
-def draw_tail_ui(player):
-    # fill tail indicators to default value (9) according to foxtail count
-    global foxtail_player_1, foxtail_player_2
-    global tail_indicators_leader_1, tail_indicators_leader_2
-    global tail_indicators_leader_1_active, tail_indicators_leader_2_active
-    foxtail = 0
-    if player == 1:
-        foxtail = foxtail_player_1
-        indicators = tail_indicators_leader_1
-        tail_indicators_leader_1_active = []
-    else:
-        foxtail = foxtail_player_2
-        indicators = tail_indicators_leader_2
-        tail_indicators_leader_2_active = []
-    for i in range(9):
-        if i < foxtail:
-            indicators[i].set_image(image_others["foxtail"])  # filled
-            if player == 1:
-                tail_indicators_leader_1_active.append(indicators[i])
-            else:
-                tail_indicators_leader_2_active.append(indicators[i])
-        else:
-            indicators[i].set_image(image_others["405"])  # empty
-    return
-
-
-def use_foxtail(player, amount):
-    # use amount of foxtail for player without redrawing UI
-    # also includes error checking
-    assert amount >= 0
-    if amount == 0:
-        return
-    global foxtail_player_1, foxtail_player_2
-    global tail_indicators_leader_1, tail_indicators_leader_2
-    global tail_indicators_leader_1_active, tail_indicators_leader_2_active
-    if player == 1:
-        foxtail_prev = foxtail_player_1
-        if foxtail_player_1 >= amount:
-            foxtail_player_1 -= amount
-            for i in range(foxtail_player_1, foxtail_prev):
-                tail_indicators_leader_1[i].set_image(image_others["405"])
-                tail_indicators_leader_1_active.remove(tail_indicators_leader_1[i])
-        else:
-            raise ValueError("Not enough foxtail")
-    else:
-        foxtail_prev = foxtail_player_2
-        if foxtail_player_2 >= amount:
-            foxtail_player_2 -= amount
-            for i in range(foxtail_player_2, foxtail_prev):
-                tail_indicators_leader_2[i].set_image(image_others["405"])
-                tail_indicators_leader_2_active.remove(tail_indicators_leader_2[i])
-        else:
-            raise ValueError("Not enough foxtail")
-
-
-def add_foxtail(player, amount):
-    # add amount of foxtail for player without redrawing UI
-    # also includes error checking
-    assert amount >= 0
-    if amount == 0:
-        return
-    global foxtail_player_1, foxtail_player_2
-    global tail_indicators_leader_1, tail_indicators_leader_2
-    global tail_indicators_leader_1_active, tail_indicators_leader_2_active
-    if player == 1:
-        foxtail_prev = foxtail_player_1
-        if foxtail_player_1 + amount <= 9:
-            foxtail_player_1 += amount
-        for i in range(foxtail_prev, foxtail_player_1):
-            tail_indicators_leader_1[i].set_image(image_others["foxtail"])
-            tail_indicators_leader_1_active.append(tail_indicators_leader_1[i])
-        else:
-            foxtail_player_1 = 9
-            draw_tail_ui(1)
-    else:
-        foxtail_prev = foxtail_player_2
-        if foxtail_player_2 + amount <= 9:
-            foxtail_player_2 += amount
-        for i in range(foxtail_prev, foxtail_player_2):
-            tail_indicators_leader_2[i].set_image(image_others["foxtail"])
-            tail_indicators_leader_2_active.append(tail_indicators_leader_2[i])
-        else:
-            foxtail_player_2 = 9
-            draw_tail_ui(2)
-
-
-def draw_player_hp_ui():
-    # draw player hp on player_1_hp_slot and player_2_hp_slot
-    # green text, bold font
-    global player_hp_1, player_hp_2
-    font_bold = pygame.font.Font(None, 64)
-    
-    # player 1
-    hp_text_1 = str(player_hp_1)
-    image_with_hp_1 = image_others["405"].copy()
-    hp_render_1 = font_bold.render(hp_text_1, True, (0, 255, 0))
-    
-    # transform size of image_with_hp_1 to fit the player_1_hp_slot
-    x = player_1_hp_slot.get_relative_rect().width
-    y = player_1_hp_slot.get_relative_rect().height
-    image_with_hp_1 = pygame.transform.scale(image_with_hp_1, (x, y))
-    text_rect_1 = hp_render_1.get_rect(center=(x//2, y//2))
-    image_with_hp_1.blit(hp_render_1, text_rect_1)
-    player_1_hp_slot.set_image(image_with_hp_1)
-    
-    # player 2
-    hp_text_2 = str(player_hp_2)
-    image_with_hp_2 = image_others["405"].copy()
-    hp_render_2 = font_bold.render(hp_text_2, True, (0, 255, 0))
-    
-    # transform size of image_with_hp_2 to fit the player_2_hp_slot
-    x = player_2_hp_slot.get_relative_rect().width
-    y = player_2_hp_slot.get_relative_rect().height
-    image_with_hp_2 = pygame.transform.scale(image_with_hp_2, (x, y))
-    text_rect_2 = hp_render_2.get_rect(center=(x//2, y//2))
-    image_with_hp_2.blit(hp_render_2, text_rect_2)
-    player_2_hp_slot.set_image(image_with_hp_2)
 
 
 # =====================================
@@ -647,23 +729,7 @@ def csw_get_selected_cards() -> list[cards.Card]:
 
 
 
-deck_player_1: list[cards.Card] = []
-deck_player_2: list[cards.Card] = []
-hand_player_1: list[cards.Card] = []
-hand_player_2: list[cards.Card] = []
-field_player_1: list[cards.Card] = []
-field_player_2: list[cards.Card] = []
-foxtail_player_1: int = 9 # foxtail is used as cost resource
-foxtail_player_2: int = 9
-current_player: int = 2  # 1 or 2
-player_hp_1: int = 20
-player_hp_2: int = 20
-game_turn: int = 1
-game_concluded: bool = False
-player_1_max_enhance_turns: int = 1
-player_2_max_enhance_turns: int = 1
-player_1_enhance_used_this_turn: int = 0
-player_2_enhance_used_this_turn: int = 0
+global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
 
 def start_new_game():
     # fetch decks, deck and deck for cpu are selected by player
@@ -686,233 +752,33 @@ def start_new_game():
         example_deck_2.append(card)
 
     text_box.set_text(text_box_introduction_text)
+    global global_vars_shcg
+    global_vars_shcg = SHCGGameState(current_player=2)
+    global_vars_shcg.decks = {1: example_deck_1, 2: example_deck_2}
 
-    global deck_player_1, deck_player_2
-    deck_player_1 = example_deck_1.copy()
-    deck_player_2 = example_deck_2.copy()
-
-    random.shuffle(deck_player_1)
-    random.shuffle(deck_player_2)
-
-    global hand_player_1, hand_player_2, foxtail_player_1, foxtail_player_2
-    global field_player_1, field_player_2, current_player
-    global player_hp_1, player_hp_2, game_turn, game_concluded
-    global player_1_max_enhance_turns, player_2_max_enhance_turns
-    hand_player_1 = []
-    hand_player_2 = []
-    foxtail_player_1 = 9
-    foxtail_player_2 = 9
-    current_player = 2
-    player_hp_1 = 20
-    player_hp_2 = 20
-    draw_player_hp_ui()
-    game_turn = 1
-    game_concluded = False
-    player_1_max_enhance_turns = 1
-    player_2_max_enhance_turns = 1
-    field_player_1 = []
-    field_player_2 = []
     # draw UI
-    draw_tail_ui(1)
-    draw_tail_ui(2)
+    global_vars_shcg.draw_player_hp_ui()
+    global_vars_shcg.draw_tail_ui(1)
+    global_vars_shcg.draw_tail_ui(2)
     # draw hand
-    draw_hand_ui(1)
-    draw_hand_ui(2)
+    global_vars_shcg.draw_hand_ui(1)
+    global_vars_shcg.draw_hand_ui(2)
     # draw deck
-    draw_deck_ui(1)
-    draw_deck_ui(2)
+    global_vars_shcg.draw_deck_ui(1)
+    global_vars_shcg.draw_deck_ui(2)
     # draw field
-    draw_field_ui(1)
-    draw_field_ui(2)
-    text_box.append_html_text(f"Player {current_player}'s turn. \n")
-    text_box.append_html_text(f"Turn {game_turn}. \n")
+    global_vars_shcg.draw_field_ui(1)
+    global_vars_shcg.draw_field_ui(2)
+    text_box.append_html_text(f"Player {global_vars_shcg.current_player}'s turn. \n")
+    text_box.append_html_text(f"Turn {global_vars_shcg.turn}. \n")
 
     
 start_new_game()
 
 
-def draw_card_tail(player):
-    # comsume 1 foxtail to draw a card
-    global deck_player_1, deck_player_2, hand_player_1, hand_player_2
-    if player == 1 and len(hand_player_1) >= 9:
-        text_box.append_html_text(f"Player 1's hand is full. Cannot draw a card. \n")
-        return
-    if player == 2 and len(hand_player_2) >= 9:
-        text_box.append_html_text(f"Player 2's hand is full. Cannot draw a card. \n")
-        return
-    if foxtail_player_1 > 0 and player == 1:
-        use_foxtail(player, 1)
-    elif foxtail_player_2 > 0 and player == 2:
-        use_foxtail(player, 1)
-    else:
-        text_box.append_html_text(f"Player {player} does not have enough foxtail to draw a card. \n")
-        return
-    if player == 1:
-        if deck_player_1:
-            drawn_card = deck_player_1.pop()
-            hand_player_1.append(drawn_card)
-            draw_hand_ui(1)
-            text_box.append_html_text(f"Player 1 drew a card: {drawn_card}. \n")
-        else:
-            text_box.append_html_text(f"Player 1's deck is empty. Cannot draw a card. \n")
-    else:
-        if deck_player_2:
-            drawn_card = deck_player_2.pop()
-            hand_player_2.append(drawn_card)
-            draw_hand_ui(2)
-            text_box.append_html_text(f"Player 2 drew a card: {drawn_card}. \n")
-        else:
-            text_box.append_html_text(f"Player 2's deck is empty. Cannot draw a card. \n")
-
-
-def assign_card_to_field_from_hand(player, card: cards.Card):
-    global hand_player_1, hand_player_2, field_player_1, field_player_2
-    # remove from hand, add to field
-    if player == 1 and len(field_player_1) <= 4:
-        if foxtail_player_1 >= card.cost:
-            use_foxtail(1, card.cost)
-            hand_player_1.remove(card)
-            if card.type == 'follower':
-                card.summoned_this_turn = True
-            text_box.append_html_text(f"Player 1 played {card}. \n")
-            field_player_1.append(card)
-            draw_hand_ui(1)
-            draw_field_ui(1)
-        else:
-            text_box.append_html_text(f"Player 1 does not have enough foxtail to play {card}. \n")
-            return
-    elif player == 2 and len(field_player_2) <= 4:
-        if foxtail_player_2 >= card.cost:
-            use_foxtail(2, card.cost)
-            hand_player_2.remove(card)
-            if card.type == 'follower':
-                card.summoned_this_turn = True
-            text_box.append_html_text(f"Player 2 played {card}. \n")
-            field_player_2.append(card)
-            draw_hand_ui(2)
-            draw_field_ui(2)
-        else:
-            text_box.append_html_text(f"Player 2 does not have enough foxtail to play {card.name}. \n")
-            return
-    else:
-        return
-
-
-def attack_with_follower(player, attacker: cards.Follower, target: cards.Follower | str):
-    global field_player_1, field_player_2, player_hp_1, player_hp_2
-    if player == 1:
-        if attacker not in field_player_1:
-            text_box.append_html_text(f"Player 1's attacker is not on the field. \n")
-            return
-        if isinstance(target, cards.Follower):
-            if target not in field_player_2:
-                text_box.append_html_text(f"Player 2's target is not on the field. \n")
-                return
-            else:
-                # attack follower
-                text_box.append_html_text(f"{attacker} is about to attack {target}. \n")
-                target.hp -= attacker.attack
-                attacker.hp -= target.attack
-                if target.hp <= 0:
-                    field_player_2.remove(target)
-                    text_box.append_html_text(f"Player 2's {target} was destroyed. \n")
-                if attacker.hp <= 0:
-                    field_player_1.remove(attacker)
-                    text_box.append_html_text(f"Player 1's {attacker} was destroyed. \n")
-                attacker.update_can_attack_status()
-                draw_field_ui(1)
-                draw_field_ui(2)
-        elif target == "leader":
-            player_take_damage(2, attacker.attack)
-            attacker.update_can_attack_status()
-            draw_field_ui(1)
-        else:
-            text_box.append_html_text(f"Invalid target for attack. \n")
-            return
-    else:
-        if attacker not in field_player_2:
-            text_box.append_html_text(f"Player 2's attacker is not on the field. \n")
-            return
-        if isinstance(target, cards.Follower):
-            if target not in field_player_1:
-                text_box.append_html_text(f"Player 1's target is not on the field. \n")
-                return
-            # attack follower
-            text_box.append_html_text(f"{attacker} is about to attack {target}. \n")
-            target.hp -= attacker.attack
-            attacker.hp -= target.attack
-            if target.hp <= 0:
-                field_player_1.remove(target)
-                text_box.append_html_text(f"Player 1's {target} was destroyed. \n")
-            if attacker.hp <= 0:
-                field_player_2.remove(attacker)
-                text_box.append_html_text(f"Player 2's {attacker} was destroyed. \n")
-            attacker.update_can_attack_status()
-            draw_field_ui(1)
-            draw_field_ui(2)
-        elif target == "leader":
-            player_take_damage(1, attacker.attack)
-            attacker.update_can_attack_status()
-            draw_field_ui(2)
-        else:
-            text_box.append_html_text(f"Invalid target for attack. \n")
-            return
-
-
-def player_take_damage(player: int, amount: int):
-    global player_hp_1, player_hp_2, game_concluded
-    assert amount >= 0
-    if player == 1:
-        player_hp_1 -= amount
-        text_box.append_html_text(f"Player 1 took {amount} damage, remaining HP: {player_hp_1}. \n")
-        if amount > 0:
-            draw_player_hp_ui()
-    else:
-        player_hp_2 -= amount
-        text_box.append_html_text(f"Player 2 took {amount} damage, remaining HP: {player_hp_2}. \n")
-        if amount > 0:
-            draw_player_hp_ui()
-    if player_hp_1 <= 0:
-        text_box.append_html_text(f"Player 2 wins! \n")
-        game_concluded = True
-    elif player_hp_2 <= 0:
-        text_box.append_html_text(f"Player 1 wins! \n")
-        game_concluded = True
 
 
 
-def end_turn_and_switch_player():
-    global current_player, foxtail_player_1, foxtail_player_2, game_turn
-    global player_1_enhance_used_this_turn, player_2_enhance_used_this_turn
-    if game_concluded:
-        text_box.append_html_text("The game has concluded. Start a new game instead.\n")
-        return
-    if current_player == 1:
-        current_player = 2
-        foxtail_player_2 = 9
-        draw_tail_ui(2)
-        for card in field_player_2:
-            if card.type == 'follower':
-                card.summoned_this_turn = False
-                card.reset_attack_status()
-    else:
-        current_player = 1
-        foxtail_player_1 = 9
-        draw_tail_ui(1)
-        # reset followers' can attack status
-        for card in field_player_1:
-            if card.type == 'follower':
-                card.summoned_this_turn = False
-                card.reset_attack_status()
-
-    draw_field_ui(1)
-    draw_field_ui(2)
-    game_turn += 1
-    player_1_enhance_used_this_turn = 0
-    player_2_enhance_used_this_turn = 0
-    text_box.set_text(text_box_introduction_text)
-    text_box.append_html_text(f"Player {current_player}'s turn. \n")
-    text_box.append_html_text(f"Turn {game_turn}. \n")
 
 
 
@@ -961,7 +827,7 @@ if __name__ == "__main__":
                 pass
 
             # left click
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not game_concluded:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not global_vars_shcg.concluded:
                 if current_player == 1:
                     if top_of_deck_marker_player_1 and top_of_deck_marker_player_1.rect.collidepoint(event.pos):
                         ui_drag_and_drop_target_orig_pos = (top_of_deck_marker_player_1.rect.x, image_slot_leader_1.rect.y)

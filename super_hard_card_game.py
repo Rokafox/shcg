@@ -828,16 +828,16 @@ if __name__ == "__main__":
 
             # left click
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not global_vars_shcg.concluded:
-                if current_player == 1:
-                    if top_of_deck_marker_player_1 and top_of_deck_marker_player_1.rect.collidepoint(event.pos):
-                        ui_drag_and_drop_target_orig_pos = (top_of_deck_marker_player_1.rect.x, image_slot_leader_1.rect.y)
+                if global_vars_shcg.current_player == 1:
+                    if global_vars_shcg.top_of_the_deck_ui_marker[1] and global_vars_shcg.top_of_the_deck_ui_marker[1].rect.collidepoint(event.pos):
+                        ui_drag_and_drop_target_orig_pos = (global_vars_shcg.top_of_the_deck_ui_marker[1].rect.x, image_slot_leader_1.rect.y)
                         ui_drag_and_drop_usage = "draw_card_player_1"
-                        ui_drag_and_drop_target = top_of_deck_marker_player_1
+                        ui_drag_and_drop_target = global_vars_shcg.top_of_the_deck_ui_marker[1]
                     for index, card_slot in enumerate(hand_slots_leader_1):
                         if card_slot.rect.collidepoint(event.pos):
                             # find which card in hand this is
-                            if index < len(hand_player_1):
-                                the_selected_card = hand_player_1[index]
+                            if index < len(global_vars_shcg.hands[1]):
+                                the_selected_card = global_vars_shcg.hands[1][index]
                             ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
                             ui_drag_and_drop_usage = "play_card_player_1"
                             ui_drag_and_drop_target = card_slot
@@ -845,8 +845,8 @@ if __name__ == "__main__":
                     for index, card_slot in enumerate(field_slots_leader_1):
                         if card_slot.rect.collidepoint(event.pos):
                             # find which card on field this is
-                            if index < len(field_player_1):
-                                the_selected_card = field_player_1[index]
+                            if index < len(global_vars_shcg.fields[1]):
+                                the_selected_card = global_vars_shcg.fields[1][index]
                             if the_selected_card and the_selected_card.type == 'follower' and the_selected_card.can_attack_status > 0:
                                 ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
                                 ui_drag_and_drop_usage = "attack_with_follower_player_1"

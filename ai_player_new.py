@@ -628,9 +628,9 @@ class MinimaxAI:
             max_eval = float('-inf')
 
             # Generate all possible turn sequences
-            sequences = self._generate_turn_sequences(state, current_player, max_actions=6)
+            sequences = self._generate_turn_sequences(state, current_player, max_actions=8)
 
-            for actions in sequences[:100]:  # Limit for performance
+            for actions in sequences:  # Limit for performance
                 test_state = state.copy()
                 for action in actions:
                     self._apply_action(test_state, current_player, action)
@@ -654,9 +654,9 @@ class MinimaxAI:
             min_eval = float('inf')
 
             # Generate all possible turn sequences for opponent
-            sequences = self._generate_turn_sequences(state, current_player, max_actions=6)
+            sequences = self._generate_turn_sequences(state, current_player, max_actions=8)
 
-            for actions in sequences[:100]:  # Limit for performance
+            for actions in sequences:  # Limit for performance
                 test_state = state.copy()
                 for action in actions:
                     self._apply_action(test_state, current_player, action)

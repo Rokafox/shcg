@@ -44,10 +44,10 @@ class SHCGGameState:
         """
         At any time, the current player can consume 1 foxtail to draw a card. No restriction unless hand is full.
         """
-        if self.decks[player] == [] or self.hands[player] >= 9:
+        if self.decks[player] == [] or len(self.hands[player]) >= 9:
             return
         if self.foxtail[player] > 0:
-            self.use_foxtail(player, 1)
+            self.use_foxtail(player, 1, ui_draw, ui_set_text)
         else:
             return
         drawn_card = self.decks[player].pop()
@@ -64,10 +64,9 @@ class SHCGGameState:
             return
         if self.foxtail[player] < card.cost:
             return
-        self.use_foxtail(player, card.cost)
+        self.use_foxtail(player, card.cost, ui_draw, ui_set_text)
         self.hands[player].remove(card)
         if card.type == 'follower':
-            card.summoned_this_turn = True
             self.fields[player].append(card)
         elif card.type == 'spell':
             pass
@@ -81,7 +80,8 @@ class SHCGGameState:
 
 
     def follower_attack(self, player, attacker: cards.Follower, target: cards.Follower | str, ui_draw, ui_set_text):
-        assert attacker.can_attack_status > 0, "This follower cannot attack now."
+        assert attacker.attack_ability > 0, "This follower cannot attack."
+        assert attacker.can_attack_this_turn == True, "This follower cannot attack this turn."
         assert attacker.type == 'follower', "Attacker must be a follower."
         assert attacker in self.fields[player], "Attacker is not on the field."
         if isinstance(target, cards.Follower):
@@ -95,17 +95,17 @@ class SHCGGameState:
                 if ui_set_text:
                     text_box.append_html_text(f"Player {self.opponent}'s {target} was destroyed.\n")
             if attacker.hp <= 0:
-                self.fields[self.player].remove(attacker)
+                self.fields[self.current_player].remove(attacker)
                 if ui_set_text:
                     text_box.append_html_text(f"Player {player}'s {attacker} was destroyed.\n")
-            attacker.update_can_attack_status()
+            attacker.after_attack_effect()
             if ui_draw:
                 self.draw_field_ui(1)
                 self.draw_field_ui(2)
         elif target == "leader":
             # リーダーへの攻撃
-            self.player_take_damage(self.opponent, attacker.attack)
-            attacker.update_can_attack_status()
+            self.player_take_damage(self.opponent, attacker.attack, ui_draw, ui_set_text)
+            attacker.after_attack_effect()
             self.draw_field_ui(player)
         else:
             raise Exception("Should not reach here.")
@@ -115,7 +115,7 @@ class SHCGGameState:
         assert amount >= 0
         self.hp[player] -= amount
         if ui_set_text:
-            text_box.append_html_text(f"Player {player} took {amount} damage, remaining HP: {hp[player]}.\n")
+            text_box.append_html_text(f"Player {player} took {amount} damage, remaining HP: {self.hp[player]}.\n")
         if amount > 0 and ui_draw:
             self.draw_player_hp_ui()
         if self.hp[player] <= 0:
@@ -134,11 +134,15 @@ class SHCGGameState:
         self.current_player = self.opponent
         self.foxtail[self.current_player] = 9
         for card in self.fields[self.current_player]:
-            if card.type == 'follower':
-                card.summoned_this_turn = False
-                card.reset_attack_status()
+            card.start_of_turn_on_field_effect(self.current_player)
         self.turn += 1
-        self.enhance_used = {1: 0, 2: 0}
+        self.enhance_used_this_turn = {1: 0, 2: 0}
+        # If both players have no cards in deck, the game ends in a draw
+        if self.decks[1] == [] and self.decks[2] == []:
+            self.concluded = True
+            if ui_set_text:
+                text_box.append_html_text("Draw.\n")
+            return
         if ui_draw:
             self.draw_tail_ui(self.current_player)
             self.draw_field_ui(1)
@@ -154,15 +158,14 @@ class SHCGGameState:
         assert amount >= 0
         if amount == 0:
             return
-        global tail_indicators_leader_1, tail_indicators_leader_2
-        global tail_indicators_leader_1_active, tail_indicators_leader_2_active
+        global global_vars_tail_indicators, global_vars_tail_indicators_active
         foxtail_prev = self.foxtail[player]
         if self.foxtail[player] >= amount:
             self.foxtail[player] -= amount
             if ui_draw:
                 for i in range(self.foxtail[player], foxtail_prev):
-                    tail_indicators_leader_1[i].set_image(image_others["405"])
-                    tail_indicators_leader_1_active.remove(tail_indicators_leader_1[i])
+                    global_vars_tail_indicators[player][i].set_image(image_others["405"])
+                    global_vars_tail_indicators_active[player].remove(global_vars_tail_indicators[player][i])
         else:
             raise ValueError("Not enough foxtail")
 
@@ -172,14 +175,13 @@ class SHCGGameState:
         assert amount >= 0
         if amount == 0:
             return
-        global tail_indicators_leader_1, tail_indicators_leader_2
-        global tail_indicators_leader_1_active, tail_indicators_leader_2_active
+        global global_vars_tail_indicators, global_vars_tail_indicators_active
         foxtail_prev = self.foxtail[player]
         if self.foxtail[player] + amount <= 9:
             self.foxtail[player] += amount
         for i in range(foxtail_prev, self.foxtail[player]):
-            tail_indicators_leader_1[i].set_image(image_others["foxtail"])
-            tail_indicators_leader_1_active.append(tail_indicators_leader_1[i])
+            global_vars_tail_indicators[player][i].set_image(image_others["foxtail"])
+            global_vars_tail_indicators_active[player].append(global_vars_tail_indicators[player][i])
         else:
             self.foxtail[player] = 9
             self.draw_tail_ui(1)
@@ -189,17 +191,15 @@ class SHCGGameState:
     # ====================================
 
     def draw_deck_ui(self, player):
-        deck = []
+        deck = self.decks[player]
+        if not deck:
+            return
         if player == 1: # 'top'
             base_x = 1500 - 100 - 50
             base_y = 50
-            deck = self.decks[1]
         else:  # 'bottom'
             base_x = 1500 - 100 - 50
             base_y = 900 - 145 - 50
-            deck = self.decks[2]
-        if not deck:
-            return
         for i in range(len(deck)):
             offset = i * 1
             card_ui = pygame_gui.elements.UIImage(
@@ -216,51 +216,42 @@ class SHCGGameState:
     def draw_hand_ui(self, player):
         self.hands[player] = sorted(self.hands[player], key=lambda x: x.cost)
         hand = self.hands[player]
-        if player == 1: # 'top'
-            slots = hand_slots_leader_1
-        else:  # 'bottom'
-            slots = hand_slots_leader_2
+        global global_vars_hand_slots
+        slots = global_vars_hand_slots[player]
         for i in range(9):
             if i < len(hand):
                 slots[i].set_image(draw_card(hand[i]))
                 slots[i].set_tooltip(hand[i].tooltip_str(), delay=0.1, wrap_width=300)
             else:
                 slots[i].set_image(image_405_card_slot)
+                slots[i].set_tooltip("", delay=0.1, wrap_width=300)
         return
 
 
     def draw_field_ui(self, player):
         self.fields[player] = sorted(self.fields[player], key=lambda x: x.cost)
         field = self.fields[player]
-        if player == 1: # 'top'
-            slots = field_slots_leader_1
-        else:  # 'bottom'
-            slots = field_slots_leader_2
+        global global_vars_field_slots
+        slots = global_vars_field_slots[player]
         for i in range(5):
             if i < len(field):
                 slots[i].set_image(draw_card(field[i], show_attack_status_indicator=True))
                 slots[i].set_tooltip(field[i].tooltip_str(), delay=0.1, wrap_width=300)
             else:
                 slots[i].set_image(image_405_card_slot)
+                slots[i].set_tooltip("", delay=0.1, wrap_width=300)
         return
 
 
     def draw_tail_ui(self, player):
         # fill tail indicators to default value (9) according to foxtail count
         foxtail = self.foxtail[player]
-        if player == 1:
-            indicators = tail_indicators_leader_1
-            tail_indicators_leader_1_active = []
-        else:
-            indicators = tail_indicators_leader_2
-            tail_indicators_leader_2_active = []
+        global global_vars_tail_indicators, global_vars_tail_indicators_active
+        indicators = global_vars_tail_indicators[player]
         for i in range(9):
             if i < foxtail:
                 indicators[i].set_image(image_others["foxtail"])  # filled
-                if player == 1:
-                    tail_indicators_leader_1_active.append(indicators[i])
-                else:
-                    tail_indicators_leader_2_active.append(indicators[i])
+                global_vars_tail_indicators_active[player].append(indicators[i])
             else:
                 indicators[i].set_image(image_others["405"])  # empty
         return
@@ -318,29 +309,29 @@ image_cards: dict[str, pygame.Surface] = {}
 image_leader: dict[str, pygame.Surface] = {}
 image_others: dict[str, pygame.Surface] = {}
 
-for name in image_files_cards:
-    image_path_jpg = f"image/cards/{name}.jpg"
-    image_path_png = f"image/cards/{name}.png"
+for _ in image_files_cards:
+    image_path_jpg = f"image/cards/{_}.jpg"
+    image_path_png = f"image/cards/{_}.png"
     if os.path.exists(image_path_jpg):
-        image_cards[name] = pygame.image.load(image_path_jpg)
+        image_cards[_] = pygame.image.load(image_path_jpg)
     elif os.path.exists(image_path_png):
-        image_cards[name] = pygame.image.load(image_path_png)
+        image_cards[_] = pygame.image.load(image_path_png)
 
-for name in image_files_leader:
-    image_path_jpg = f"image/leader/{name}.jpg"
-    image_path_png = f"image/leader/{name}.png"
+for _ in image_files_leader:
+    image_path_jpg = f"image/leader/{_}.jpg"
+    image_path_png = f"image/leader/{_}.png"
     if os.path.exists(image_path_jpg):
-        image_leader[name] = pygame.image.load(image_path_jpg)
+        image_leader[_] = pygame.image.load(image_path_jpg)
     elif os.path.exists(image_path_png):
-        image_leader[name] = pygame.image.load(image_path_png)
+        image_leader[_] = pygame.image.load(image_path_png)
 
-for name in image_files_others:
-    image_path_jpg = f"image/others/{name}.jpg"
-    image_path_png = f"image/others/{name}.png"
+for _ in image_files_others:
+    image_path_jpg = f"image/others/{_}.jpg"
+    image_path_png = f"image/others/{_}.png"
     if os.path.exists(image_path_jpg):
-        image_others[name] = pygame.image.load(image_path_jpg)
+        image_others[_] = pygame.image.load(image_path_jpg)
     elif os.path.exists(image_path_png):
-        image_others[name] = pygame.image.load(image_path_png)
+        image_others[_] = pygame.image.load(image_path_png)
 
 # NOTE:
 # a special image image_others["405"] is full transparent to represent no image
@@ -382,25 +373,6 @@ pygame.draw.rect(image_405_card_slot, deep_dark_blue, pygame.Rect(0, 0, 100, 145
 # Example UI Components
 # =====================================
 
-
-image_slot_leader_1 = pygame_gui.elements.UIImage(pygame.Rect((50, 50), (200, 200)),
-                                    pygame.Surface((200, 200)),
-                                    ui_manager)
-image_slot_leader_1.set_image(image_others["404coyote"])
-
-image_slot_leader_2 = pygame_gui.elements.UIImage(pygame.Rect((50, 900 - 200 - 50), (200, 200)),
-                                    pygame.Surface((200, 200)),
-                                    ui_manager)
-image_slot_leader_2.set_image(image_others["404coyote"])
-
-player_1_hp_slot = pygame_gui.elements.UIImage(pygame.Rect((50, 260), (200, 50)),
-                                    pygame.Surface((200, 50)),
-                                    ui_manager)
-
-player_2_hp_slot = pygame_gui.elements.UIImage(pygame.Rect((50, 900 - 300), (200, 50)),
-                                    pygame.Surface((200, 50)),
-                                    ui_manager)
-
 label_leader_1 = pygame_gui.elements.UILabel(pygame.Rect((50, 10), (200, 50)),
                                     "Player 1",
                                     ui_manager)
@@ -427,7 +399,7 @@ text_box_introduction_text = "======================================\n"
 text_box.set_text(text_box_introduction_text)
 
 
-def draw_card(card, show_attack_status_indicator: bool = False) -> pygame.Surface:
+def draw_card(card: cards.Card, show_attack_status_indicator: bool = False) -> pygame.Surface:
     card_surface = pygame.Surface((100, 145))
     
     # 強化済みカードは別画像を使用
@@ -447,7 +419,6 @@ def draw_card(card, show_attack_status_indicator: bool = False) -> pygame.Surfac
         scaled_card_img = pygame.transform.scale(image_others["404coyote"], (100, 145))
         card_surface.blit(scaled_card_img, (0, 0))
     
-    font = pygame.font.Font(None, 28)
     font_bold = pygame.font.Font(None, 32)
     cost_text = str(card.cost)
     for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
@@ -456,7 +427,7 @@ def draw_card(card, show_attack_status_indicator: bool = False) -> pygame.Surfac
     cost_render = font_bold.render(cost_text, True, (255, 215, 0))
     card_surface.blit(cost_render, (8, 8))
     
-    if hasattr(card, 'type') and card.type == 'follower':
+    if card.type == 'follower':
         attack_text = str(card.attack)
         for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
             attack_outline = font_bold.render(attack_text, True, (0, 0, 0))
@@ -473,18 +444,18 @@ def draw_card(card, show_attack_status_indicator: bool = False) -> pygame.Surfac
         card_surface.blit(hp_render, (92 - hp_width, 120))
     
     if show_attack_status_indicator:  # show can attack status for followers
-        if hasattr(card, 'type') and card.type == 'follower':
-            if card.can_attack_status == 0:
+        if card.type == 'follower':
+            if card.attack_ability == 0 or card.can_attack_this_turn == False:
                 # cannot attack, gray
                 indicator_color = (150, 150, 150)
-            elif card.can_attack_status == 1:
+            elif card.attack_ability == 1:
                 # can attack follower, yellow
                 indicator_color = (255, 255, 50)
-            elif card.can_attack_status == 2:
+            elif card.attack_ability == 2:
                 # can attack player, green
                 indicator_color = (50, 255, 50)
             else:
-                raise ValueError(f"Unknown can_attack_status: {card.can_attack_status}")
+                raise ValueError(f"Unknown attack ability: {card.attack_ability}")
             # outline the card with the indicator color
             pygame.draw.rect(card_surface, indicator_color, pygame.Rect(0, 0, 100, 145), 2)
     
@@ -502,60 +473,36 @@ def draw_card(card, show_attack_status_indicator: bool = False) -> pygame.Surfac
     return card_surface
 
 
-# Hand of player (9 slots each)
-hand_slots_leader_2 = []
-for i in range(9):
-    slot = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 110, 700), (100, 145)),
-                                        pygame.Surface((100, 145)),
-                                        ui_manager)
-    slot.set_image(image_others["404coyote"]) # Temporary use 404coyote instead of transparent image
-    hand_slots_leader_2.append(slot)
+def create_slots(count, start_pos, size, spacing, image_key):
+    slots = []
+    for i in range(count):
+        slot = pygame_gui.elements.UIImage(
+            pygame.Rect((start_pos[0] + i * spacing, start_pos[1]), size),
+            pygame.Surface(size),
+            ui_manager
+        )
+        slot.set_image(image_others[image_key])
+        slots.append(slot)
+    return slots
 
-hand_slots_leader_1 = []
-for i in range(9):
-    slot = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 110, 50), (100, 145)),
-                                        pygame.Surface((100, 145)),
-                                        ui_manager)
-    slot.set_image(image_others["404coyote"])
-    hand_slots_leader_1.append(slot)
+global_vars_hand_slots = {1: create_slots(9, (300, 50), (100, 145), 110, "404coyote"), 
+                          2: create_slots(9, (300, 700), (100, 145), 110, "404coyote")}
 
-# field slots of each player (5 slots each)
-field_slots_leader_1 = []
-for i in range(5):
-    slot = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 120, 300), (100, 145)),
-                                        pygame.Surface((100, 145)),
-                                        ui_manager)
-    slot.set_image(image_others["404coyote"])
-    field_slots_leader_1.append(slot)
+global_vars_field_slots = {1: create_slots(5, (300, 300), (100, 145), 120, "404coyote"), 
+                           2: create_slots(5, (300, 450), (100, 145), 120, "404coyote")}
 
-field_slots_leader_2 = []
-for i in range(5):
-    slot = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 120, 450), (100, 145)),
-                                        pygame.Surface((100, 145)),
-                                        ui_manager)
-    slot.set_image(image_others["404coyote"])
-    field_slots_leader_2.append(slot)
+global_vars_tail_indicators = {1: create_slots(9, (300, 220), (32, 32), 40, "405"), 
+                               2: create_slots(9, (300, 648), (32, 32), 40, "405")}
+global_vars_tail_indicators_active = {1: [], 2: []}
 
+global_vars_leader_slots = {1: create_slots(1, (50, 50), (200, 200), 0, "404coyote"),
+                            2: create_slots(1, (50, 900 - 200 - 50), (200, 200), 0, "404coyote")}
 
-# Tail indicators (how many foxtail this player have currently), just above hand slots, from left to right, 32 x 32, max 9
-tail_indicators_leader_1 = []
-tail_indicators_leader_1_active = []
-for i in range(9):
-    indicator = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 40, 200 + 20), (32, 32)),
-                                        pygame.Surface((32, 32)),
-                                        ui_manager)
-    indicator.set_image(image_others["405"])
-    tail_indicators_leader_1.append(indicator)
+global_vars_player_hp_slots = {1: create_slots(1, (50, 260), (200, 50), 0, "405"),
+                               2: create_slots(1, (50, 900 - 300), (200, 50), 0, "405")}
 
-tail_indicators_leader_2 = []
-tail_indicators_leader_2_active = []
-for i in range(9):
-    indicator = pygame_gui.elements.UIImage(pygame.Rect((300 + i * 40, 700 - 20 - 32), (32, 32)),
-                                        pygame.Surface((32, 32)),
-                                        ui_manager)
-    indicator.set_image(image_others["405"])
-    tail_indicators_leader_2.append(indicator)
-
+player_1_hp_slot = global_vars_player_hp_slots[1][0]
+player_2_hp_slot = global_vars_player_hp_slots[2][0]
 
 # =====================================
 # End of Example UI Components
@@ -567,7 +514,6 @@ def build_component_tooltips():
     """
     All tooltips here. Delay should always be 0.1
     """
-    image_slot_leader_1.set_tooltip("Example tooltip.", delay=0.1, wrap_width=300)
     settings_button.set_tooltip("Open settings window.", delay=0.1, wrap_width=300)
 
 
@@ -612,37 +558,22 @@ theme_selection_menu = None
 
 def change_theme(theme=None):
     global global_vars_theme
-    if theme:
-        global_vars_theme = theme
-    else:
-        global_vars_theme = theme_selection_menu.selected_option[0]
-    if global_vars_theme == "Yellow Theme":
-        ui_manager_lower.get_theme().load_theme("theme_light_yellow.json")
-        ui_manager.get_theme().load_theme("theme_light_yellow.json")
-        ui_manager_overlay.get_theme().load_theme("theme_light_yellow.json")
-    elif global_vars_theme == "Purple Theme":
-        ui_manager_lower.get_theme().load_theme("theme_light_purple.json")
-        ui_manager.get_theme().load_theme("theme_light_purple.json")
-        ui_manager_overlay.get_theme().load_theme("theme_light_purple.json")
-    elif global_vars_theme == "Red Theme":
-        ui_manager_lower.get_theme().load_theme("theme_light_red.json")
-        ui_manager.get_theme().load_theme("theme_light_red.json")
-        ui_manager_overlay.get_theme().load_theme("theme_light_red.json")
-    elif global_vars_theme == "Blue Theme":
-        ui_manager_lower.get_theme().load_theme("theme_light_blue.json")
-        ui_manager.get_theme().load_theme("theme_light_blue.json")
-        ui_manager_overlay.get_theme().load_theme("theme_light_blue.json")
-    elif global_vars_theme == "Green Theme":
-        ui_manager_lower.get_theme().load_theme("theme_light_green.json")
-        ui_manager.get_theme().load_theme("theme_light_green.json")
-        ui_manager_overlay.get_theme().load_theme("theme_light_green.json")
-    elif global_vars_theme == "Pink Theme":
-        ui_manager_lower.get_theme().load_theme("theme_light_pink.json")
-        ui_manager.get_theme().load_theme("theme_light_pink.json")
-        ui_manager_overlay.get_theme().load_theme("theme_light_pink.json")
+    THEME_FILES = {
+        "Yellow Theme": "theme_light_yellow.json",
+        "Purple Theme": "theme_light_purple.json",
+        "Red Theme": "theme_light_red.json",
+        "Blue Theme": "theme_light_blue.json",
+        "Green Theme": "theme_light_green.json",
+        "Pink Theme": "theme_light_pink.json"
+    }
+    global_vars_theme = theme if theme else theme_selection_menu.selected_option[0]
+    if global_vars_theme in THEME_FILES:
+        theme_file = THEME_FILES[global_vars_theme]
+        ui_manager_lower.get_theme().load_theme(theme_file)
+        ui_manager.get_theme().load_theme(theme_file)
+        ui_manager_overlay.get_theme().load_theme(theme_file)
     else:
         raise ValueError(f"Unknown theme: {global_vars_theme}")
-    
     ui_manager_lower.rebuild_all_from_changed_theme_data()
     ui_manager.rebuild_all_from_changed_theme_data()
     ui_manager_overlay.rebuild_all_from_changed_theme_data()
@@ -828,150 +759,84 @@ if __name__ == "__main__":
 
             # left click
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not global_vars_shcg.concluded:
-                if global_vars_shcg.current_player == 1:
-                    if global_vars_shcg.top_of_the_deck_ui_marker[1] and global_vars_shcg.top_of_the_deck_ui_marker[1].rect.collidepoint(event.pos):
-                        ui_drag_and_drop_target_orig_pos = (global_vars_shcg.top_of_the_deck_ui_marker[1].rect.x, image_slot_leader_1.rect.y)
-                        ui_drag_and_drop_usage = "draw_card_player_1"
-                        ui_drag_and_drop_target = global_vars_shcg.top_of_the_deck_ui_marker[1]
-                    for index, card_slot in enumerate(hand_slots_leader_1):
-                        if card_slot.rect.collidepoint(event.pos):
-                            # find which card in hand this is
-                            if index < len(global_vars_shcg.hands[1]):
-                                the_selected_card = global_vars_shcg.hands[1][index]
+                cp = global_vars_shcg.current_player
+                if global_vars_shcg.top_of_the_deck_ui_marker[cp] and global_vars_shcg.top_of_the_deck_ui_marker[cp].rect.collidepoint(event.pos):
+                    ui_drag_and_drop_target_orig_pos = (global_vars_shcg.top_of_the_deck_ui_marker[cp].rect.x, global_vars_shcg.top_of_the_deck_ui_marker[cp].rect.y)
+                    ui_drag_and_drop_usage = "draw_card_player"
+                    ui_drag_and_drop_target = global_vars_shcg.top_of_the_deck_ui_marker[cp]
+                for index, card_slot in enumerate(global_vars_hand_slots[cp]):
+                    if card_slot.rect.collidepoint(event.pos):
+                        # find which card in hand this is
+                        if index < len(global_vars_shcg.hands[cp]):
+                            the_selected_card = global_vars_shcg.hands[cp][index]
+                        ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
+                        ui_drag_and_drop_usage = "play_card_player"
+                        ui_drag_and_drop_target = card_slot
+                # follower on field if can attack, can be dragged to opponent followers or leader to attack
+                for index, card_slot in enumerate(global_vars_field_slots[cp]):
+                    if card_slot.rect.collidepoint(event.pos):
+                        # find which card on field this is
+                        if index < len(global_vars_shcg.fields[cp]):
+                            the_selected_card = global_vars_shcg.fields[cp][index]
+                        if the_selected_card and the_selected_card.type == 'follower' and the_selected_card.attack_ability > 0 and the_selected_card.can_attack_this_turn:
                             ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
-                            ui_drag_and_drop_usage = "play_card_player_1"
+                            ui_drag_and_drop_usage = "attack_with_follower_player"
                             ui_drag_and_drop_target = card_slot
-                    # follower on field if can attack, can be dragged to opponent followers or leader to attack
-                    for index, card_slot in enumerate(field_slots_leader_1):
-                        if card_slot.rect.collidepoint(event.pos):
-                            # find which card on field this is
-                            if index < len(global_vars_shcg.fields[1]):
-                                the_selected_card = global_vars_shcg.fields[1][index]
-                            if the_selected_card and the_selected_card.type == 'follower' and the_selected_card.can_attack_status > 0:
-                                ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
-                                ui_drag_and_drop_usage = "attack_with_follower_player_1"
-                                ui_drag_and_drop_target = card_slot
-                    for index, tail in enumerate(tail_indicators_leader_1_active):
-                        if tail.rect.collidepoint(event.pos):
-                            ui_drag_and_drop_target_orig_pos = (tail.rect.x, tail.rect.y)
-                            ui_drag_and_drop_usage = "use_foxtail_player_1"
-                            ui_drag_and_drop_target = tail
-
-                elif current_player == 2:
-                    if top_of_deck_marker_player_2 and top_of_deck_marker_player_2.rect.collidepoint(event.pos):
-                        ui_drag_and_drop_target_orig_pos = (top_of_deck_marker_player_2.rect.x, image_slot_leader_2.rect.y)
-                        ui_drag_and_drop_usage = "draw_card_player_2"
-                        ui_drag_and_drop_target = top_of_deck_marker_player_2
-                    for index, card_slot in enumerate(hand_slots_leader_2):
-                        if card_slot.rect.collidepoint(event.pos):
-                            # find which card in hand this is
-                            if index < len(hand_player_2):
-                                the_selected_card = hand_player_2[index]
-                                print(f"Selected card: {the_selected_card.name}")
-                                print(f"Index on hand: {index}")
-                                print(hand_player_2)
-                            ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
-                            ui_drag_and_drop_usage = "play_card_player_2"
-                            ui_drag_and_drop_target = card_slot
-                    # follower on field if can attack, can be dragged to opponent followers or leader to attack
-                    for index, card_slot in enumerate(field_slots_leader_2):
-                        if card_slot.rect.collidepoint(event.pos):
-                            # find which card on field this is
-                            if index < len(field_player_2):
-                                the_selected_card = field_player_2[index]
-                            if the_selected_card and the_selected_card.type == 'follower' and the_selected_card.can_attack_status > 0:
-                                ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
-                                ui_drag_and_drop_usage = "attack_with_follower_player_2"
-                                ui_drag_and_drop_target = card_slot
-                    for index, tail in enumerate(tail_indicators_leader_2_active):
-                        if tail.rect.collidepoint(event.pos):
-                            ui_drag_and_drop_target_orig_pos = (tail.rect.x, tail.rect.y)
-                            ui_drag_and_drop_usage = "use_foxtail_player_2"
-                            ui_drag_and_drop_target = tail
+                for index, tail in enumerate(global_vars_tail_indicators_active[cp]):
+                    if tail.rect.collidepoint(event.pos):
+                        ui_drag_and_drop_target_orig_pos = (tail.rect.x, tail.rect.y)
+                        ui_drag_and_drop_usage = "use_foxtail_player"
+                        ui_drag_and_drop_target = tail
 
             if event.type == pygame.MOUSEBUTTONUP:
                 # drag and drop
                 if ui_drag_and_drop_target != None:
-                    if ui_drag_and_drop_usage == "draw_card_player_1":
-                        # if collide with any hand slot of player 1, call draw card
-                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in hand_slots_leader_1]):
-                            draw_card_tail(1)
+                    cp = global_vars_shcg.current_player
+
+                    if ui_drag_and_drop_usage == "draw_card_player":
+                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in global_vars_hand_slots[cp]]):
+                            global_vars_shcg.draw_card_with_foxtail(cp, ui_draw=True, ui_set_text=True)
                         ui_drag_and_drop_target.kill()
-                        draw_deck_ui(1)
-                    elif ui_drag_and_drop_usage == "draw_card_player_2":
-                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in hand_slots_leader_2]):
-                            draw_card_tail(2)
-                        ui_drag_and_drop_target.kill()
-                        draw_deck_ui(2)
-                    elif ui_drag_and_drop_usage == "play_card_player_1":
-                        # if collide with any field slot of player 1, call assign card to field from hand
-                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in field_slots_leader_1]):
+                        global_vars_shcg.draw_deck_ui(cp)
+
+                    elif ui_drag_and_drop_usage == "play_card_player":
+                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in global_vars_field_slots[cp]]):
                             if the_selected_card:
-                                assign_card_to_field_from_hand(1, the_selected_card)
+                                global_vars_shcg.play_card(cp, the_selected_card, ui_draw=True, ui_set_text=True)
                                 the_selected_card = None
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
-                    elif ui_drag_and_drop_usage == "play_card_player_2":
-                        if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in field_slots_leader_2]):
-                            if the_selected_card:
-                                assign_card_to_field_from_hand(2, the_selected_card)
-                                the_selected_card = None
-                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
-                    elif ui_drag_and_drop_usage == "attack_with_follower_player_1":
-                        # if collide with any opponent field slot or leader, call attack with follower
-                        for index, slot in enumerate(field_slots_leader_2):
+
+                    elif ui_drag_and_drop_usage == "attack_with_follower_player":
+                        # opponent = 2 if cp == 1 else 1
+                        opponent = global_vars_shcg.opponent
+                        for index, slot in enumerate(global_vars_field_slots[opponent]):
                             if slot.rect.collidepoint(event.pos):
                                 if the_selected_card:
                                     target_card = None
-                                    if index < len(field_player_2):
-                                        target_card = field_player_2[index]
+                                    if index < len(global_vars_shcg.fields[opponent]):
+                                        target_card = global_vars_shcg.fields[opponent][index]
                                     if target_card and target_card.type == 'follower':
-                                        attack_with_follower(1, the_selected_card, target_card)
-                        if image_slot_leader_2.rect.collidepoint(event.pos) and the_selected_card.can_attack_status >= 2:
-                            attack_with_follower(1, the_selected_card, "leader")
+                                        global_vars_shcg.follower_attack(cp, the_selected_card, target_card, ui_draw=True, ui_set_text=True)
+                        if global_vars_leader_slots[opponent][0].rect.collidepoint(event.pos) and the_selected_card.attack_ability >= 2:
+                            global_vars_shcg.follower_attack(cp, the_selected_card, "leader", ui_draw=True, ui_set_text=True)
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
-                    elif ui_drag_and_drop_usage == "attack_with_follower_player_2":
-                        for index, slot in enumerate(field_slots_leader_1):
-                            if slot.rect.collidepoint(event.pos):
-                                if the_selected_card:
-                                    target_card = None
-                                    if index < len(field_player_1):
-                                        target_card = field_player_1[index]
-                                    if target_card and target_card.type == 'follower':
-                                        attack_with_follower(2, the_selected_card, target_card)
-                        if image_slot_leader_1.rect.collidepoint(event.pos) and the_selected_card.can_attack_status >= 2:
-                            attack_with_follower(2, the_selected_card, "leader")
-                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
-                    elif ui_drag_and_drop_usage == "use_foxtail_player_1":
-                        if player_1_enhance_used_this_turn >= player_1_max_enhance_turns:
-                            text_box.append_html_text("All enhance actions of player 1 used for this turn. \n")
+
+                    elif ui_drag_and_drop_usage == "use_foxtail_player":
+                        if global_vars_shcg.enhance_used_this_turn[cp] >= global_vars_shcg.max_enhance_allowed_per_turn[cp]:
+                            text_box.append_html_text(f"All enhance actions of player {cp} used for this turn. \n")
                         else:
-                            # if any enhanceable follower on field, call enhance on that card
-                            for index, slot in enumerate(field_slots_leader_1):
+                            for index, slot in enumerate(global_vars_field_slots[cp]):
                                 if slot.rect.collidepoint(event.pos):
-                                    if index < len(field_player_1):
-                                        target_card = field_player_1[index]
+                                    if index < len(global_vars_shcg.fields[cp]):
+                                        target_card = global_vars_shcg.fields[cp][index]
                                         if target_card.type == 'follower' and target_card.can_enhance:
-                                            target_card.enhance()
-                                            text_box.append_html_text(f"Player 1 enhanced {target_card}. \n")
-                                            player_1_enhance_used_this_turn += 1
-                                            draw_field_ui(1)
-                                            use_foxtail(1, 1)
+                                            target_card.on_enhance_effect(cp)
+                                            text_box.append_html_text(f"Player {cp} enhanced {target_card}. \n")
+                                            global_vars_shcg.enhance_used_this_turn[cp] += 1
+                                            global_vars_shcg.draw_field_ui(cp)
+                                            global_vars_shcg.use_foxtail(cp, 1, ui_draw=True, ui_set_text=True)
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
-                    elif ui_drag_and_drop_usage == "use_foxtail_player_2":
-                        if player_2_enhance_used_this_turn >= player_2_max_enhance_turns:
-                            text_box.append_html_text("All enhance actions of player 2 used for this turn. \n")
-                        else:
-                            for index, slot in enumerate(field_slots_leader_2):
-                                if slot.rect.collidepoint(event.pos):
-                                    if index < len(field_player_2):
-                                        target_card = field_player_2[index]
-                                        if target_card.type == 'follower' and target_card.can_enhance:
-                                            target_card.enhance()
-                                            text_box.append_html_text(f"Player 2 enhanced {target_card}. \n")
-                                            player_2_enhance_used_this_turn += 1
-                                            draw_field_ui(2)
-                                            use_foxtail(2, 1)
-                        ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
+
                     else:
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
@@ -990,7 +855,7 @@ if __name__ == "__main__":
                 if event.ui_element == new_game_button:
                     start_new_game()
                 if event.ui_element == end_turn_button:
-                    end_turn_and_switch_player()
+                    global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
                 if event.ui_element == csw_confirm_button:
                     selected_cards = csw_get_selected_cards()
                     text_box.append_html_text(f"Selected cards: {', '.join(str(card) for card in selected_cards)}. \n")

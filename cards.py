@@ -11,6 +11,15 @@ class Card:
             s += f"{self.description}\n"
         return s
 
+    def on_play_effect(self, player: int):
+        pass
+
+    def on_leave_field_effect(self, player: int):
+        pass
+
+    def start_of_turn_on_field_effect(self, player: int):
+        pass
+
 
 class Follower(Card):
     def __init__(self, name, cost, attack, hp, can_enhance):
@@ -23,11 +32,10 @@ class Follower(Card):
         self.is_enhanced: bool = False
         self.summoned_this_turn: bool = True
         self.enhanced_this_turn: bool = False
-        self.can_attack_status: int = 0  # 0: cannot attack, 1: can attack follower, 2: can attack player
-        self.how_many_attacks_max: int = 1  # Number of attacks per turn
-        self.how_many_attacks_done: int = 0  # Number of attacks done this turn
-        self.f = "" # summon effect
-        self.l = "" # last word effect 
+        self.attack_ability: int = 0  # 0: cannot attack, 1: can attack follower, 2: can attack player
+        self.how_many_attacks_max_of_turn: int = 1  # Number of attacks per turn
+        self.how_many_attacks_done_of_turn: int = 0  # Number of attacks done this turn
+        self.can_attack_this_turn: bool = False
     
     def tooltip_str(self):
         s = f"{self.name}\n"
@@ -38,18 +46,33 @@ class Follower(Card):
             s += f"{self.description}\n"
         return s
 
-    def update_can_attack_status(self):
-        self.how_many_attacks_done += 1
-        if self.how_many_attacks_done >= self.how_many_attacks_max:
-            self.can_attack_status = 0  # Cannot attack anymore this turn
+    def advance_attack_ability(self):
+        """
+        increase the attack ability by 1, up to 2
+        """
+        if self.attack_ability < 2:
+            self.attack_ability += 1
 
-    def reset_attack_status(self):
-        self.how_many_attacks_done = 0
-        self.can_attack_status = 0
-        if not self.summoned_this_turn:
-            self.can_attack_status = 2  # Can attack player
+    def decrease_attack_ability(self):
+        """
+        decrease the attack ability by 1, down to 0
+        """
+        if self.attack_ability > 0:
+            self.attack_ability -= 1
+    
+    def start_of_turn_on_field_effect(self, player):
+        self.enhanced_this_turn = False
+        self.how_many_attacks_done_of_turn = 0
+        self.summoned_this_turn = False
+        self.advance_attack_ability()
+        self.can_attack_this_turn = True
 
-    def enhance(self):
+    def after_attack_effect(self):
+        self.how_many_attacks_done_of_turn += 1
+        if self.how_many_attacks_done_of_turn >= self.how_many_attacks_max_of_turn:
+            self.can_attack_this_turn = False
+
+    def on_enhance_effect_default(self):
         if self.can_enhance and not self.enhanced_this_turn:
             self.attack += 2
             self.hp += 2
@@ -57,8 +80,12 @@ class Follower(Card):
             self.can_enhance = False
             self.enhanced_this_turn = True
             self.is_enhanced = True
-            if self.how_many_attacks_done < self.how_many_attacks_max and self.can_attack_status < 1:
-                self.can_attack_status = 1
+            self.advance_attack_ability()
+            if self.how_many_attacks_done_of_turn < self.how_many_attacks_max_of_turn:
+                self.can_attack_this_turn = True
+            
+    def on_enhance_effect(self, player: int):
+        self.on_enhance_effect_default()
 
     def __repr__(self):
         return f"{self.name} ({self.attack}/{self.hp})"

@@ -4,6 +4,8 @@ class Card:
         self.cost = cost
         self.type = card_type
         self.description = ""
+        self.request_card_selection_on_play: str = "" # e.g., "field"
+        self.request_card_selection_on_play_amount: int = 0
 
     def tooltip_str(self):
         s = f"{self.name}\n"
@@ -109,21 +111,35 @@ class Amulet(Card):
 
 # ==============================
 # Classic
+# Each cost is evaluated as 4 points
 # ==============================
 
 class ゴブリン(Follower):
     def __init__(self):
-        super().__init__(name="ゴブリン", cost=1, attack=1, hp=1, can_enhance=True)
+        super().__init__(name="ゴブリン", cost=1, attack=2, hp=2, can_enhance=True)
         self.description = "ゴブリンの世界にあるのはエモノだけ。欲しいものを持った獲物、奪い取って身に着けた得物。"
         self.description_e = "ゴブリンは純粋に、無垢に、エモノを追いかけ回す。彼らを見れば分かる通り、純粋も無垢も善の同義語ではない。"
 
 class ファイター(Follower):
     def __init__(self):
-        super().__init__(name="ファイター", cost=2, attack=2, hp=2, can_enhance=False)
+        super().__init__(name="ファイター", cost=2, attack=4, hp=4, can_enhance=False)
         self.description = "争いだらけの世界の中で、頼れるのは自分だけ。この得た力だけは、決して裏切らない。"
 
 class ゴリアテ(Follower):
     def __init__(self):
-        super().__init__(name="ゴリアテ", cost=3, attack=3, hp=3, can_enhance=True)
+        super().__init__(name="ゴリアテ", cost=3, attack=6, hp=6, can_enhance=True)
         self.description = "見上げた時にはもう遅い。巨人はお前を見下ろすこともなく踏み潰す。"
         self.description_e = "思い出が染みついた家も、思い出を振り返る人も、巨人にとっては踏みしめるべき道に過ぎない。"
+
+class ガブリエル(Follower):
+    def __init__(self):
+        super().__init__(name="ガブリエル", cost=6, attack=4, hp=3, can_enhance=False)
+        self.description = "他のフォロワー1体を選ぶ。それは攻撃力+4/体力+3する。"
+        self.request_card_selection_on_play = "field"
+        self.request_card_selection_on_play_amount = 1
+
+    def on_play_effect(self, player: int, target_follower: Follower | None = None):
+        if target_follower is not None:
+            target_follower.attack += 4
+            target_follower.hp += 3
+            target_follower.max_hp += 3

@@ -60,12 +60,21 @@ class SHCGGameState:
 
 
     def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text):
+        global single_card_selection_dropdown_field
         if len(self.fields[player]) > 4 and card.type != 'spell':
             return
         if self.foxtail[player] < card.cost:
             return
         self.use_foxtail(player, card.cost, ui_draw, ui_set_text)
         self.hands[player].remove(card)
+        if card.request_card_selection_on_play:
+            target = None
+            if card.request_card_selection_on_play == "field":
+                for i, c in enumerate(self.fields[player]):
+                    if f"{i + 1} {str(c)}" == single_card_selection_dropdown_field.selected_option[0]:
+                        target = c
+                        break 
+            card.on_play_effect(player, target_follower=target)
         if card.type == 'follower':
             self.fields[player].append(card)
         elif card.type == 'spell':
@@ -240,6 +249,7 @@ class SHCGGameState:
             else:
                 slots[i].set_image(image_405_card_slot)
                 slots[i].set_tooltip("", delay=0.1, wrap_width=300)
+        update_single_card_selection_dropdown_field_options(field)
         return
 
 
@@ -381,9 +391,25 @@ label_leader_2 = pygame_gui.elements.UILabel(pygame.Rect((50, 900 - 60), (200, 5
                                     "Player 2",
                                     ui_manager)
 
-end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 300), (1600 - 1320 -20, 295)),
+end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 300), (260, 50)),
                                     text='End Turn',
                                     manager=ui_manager,)
+
+single_card_selection_dropdown_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
+                                                                  starting_option="",
+                                                                  relative_rect=pygame.Rect((1320, 360), (260, 50)),
+                                                                  manager=ui_manager,)
+
+def update_single_card_selection_dropdown_field_options(options: list[cards.Card]):
+    if not options:
+        return
+    global single_card_selection_dropdown_field
+    single_card_selection_dropdown_field.kill()
+    card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(options)]
+    single_card_selection_dropdown_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
+                                                                      starting_option=card_list[0],
+                                                                      relative_rect=pygame.Rect((1320, 360), (260, 50)),
+                                                                      manager=ui_manager,)
 
 settings_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 330), (200, 50)),
                                     text='Settings',
@@ -580,86 +606,6 @@ def change_theme(theme=None):
     build_component_tooltips() # This is needed as theme switching resets tooltips delay and wrap width
 
 
-
-card_selection_window = None
-card_selection_checkboxes: list[tuple[pygame_gui.elements.UICheckBox, cards.Card]] = []
-csw_confirm_button = None
-
-def build_selection_window(card_list: list[cards.Card]):
-    """
-    Some cards, when activating effect, may require selection from card or field
-    A window, draw cards, use UICheckBox, button to confirm selection
-    """
-    global card_selection_window, card_selection_checkboxes, csw_confirm_button
-    
-    try:
-        card_selection_window.kill()
-    except Exception:
-        pass
-    
-    card_selection_window = pygame_gui.elements.UIWindow(
-        pygame.Rect((400, 200), (800, 500)),
-        ui_manager_overlay,
-        window_display_title="Select Card",
-        object_id="#card_selection_window",
-        resizable=False
-    )
-    
-    # Store checkboxes for later reference
-    card_selection_checkboxes = []
-    
-    # Layout settings
-    cards_per_row = 4
-    checkbox_width = 30
-    checkbox_height = 30
-    padding_x = 150
-    padding_y = 10
-    start_x = 10
-    start_y = 10
-    
-    for i, card in enumerate(card_list):
-        # Calculate grid position
-        row = i // cards_per_row
-        col = i % cards_per_row
-        
-        x = start_x + col * (checkbox_width + padding_x)
-        y = start_y + row * (checkbox_height + padding_y)
-        
-        checkbox = pygame_gui.elements.UICheckBox(
-            pygame.Rect((x, y), (checkbox_width, checkbox_height)),
-            str(card),
-            ui_manager_overlay,
-            container=card_selection_window
-        )
-        # checkbox.set_tooltip(card.tooltip_str, delay=0.1, wrap_width=300) # Does not work
-        
-        # Store reference to checkbox and associated card
-        card_selection_checkboxes.append((checkbox, card))
-    
-    # Confirm button at bottom right
-    csw_confirm_button = pygame_gui.elements.UIButton(
-        pygame.Rect((600, 410), (180, 40)),
-        text='Confirm Selection',
-        manager=ui_manager_overlay,
-        container=card_selection_window,
-        object_id="#csw_confirm_button"
-    )
-    
-
-
-def csw_get_selected_cards() -> list[cards.Card]:
-    """
-    Returns list of cards that were selected via checkboxes
-    """
-    global card_selection_checkboxes
-    selected = []
-    for checkbox, card in card_selection_checkboxes:
-        if checkbox.is_checked:
-            selected.append(card)
-    return selected
-
-
-
 global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
 
 def start_new_game():
@@ -672,14 +618,16 @@ def start_new_game():
         ゴブリン = cards.ゴブリン()
         ファイター = cards.ファイター()
         ゴリアテ = cards.ゴリアテ()
-        card = random.choice([ゴブリン, ファイター, ゴリアテ])
+        ガブリエル = cards.ガブリエル()
+        card = random.choice([ゴブリン, ファイター, ゴリアテ, ガブリエル])
         example_deck_1.append(card)
 
     for i in range(40):
         ゴブリン = cards.ゴブリン()
         ファイター = cards.ファイター()
         ゴリアテ = cards.ゴリアテ()
-        card = random.choice([ゴブリン, ファイター, ゴリアテ])
+        ガブリエル = cards.ガブリエル()
+        card = random.choice([ゴブリン, ファイター, ゴリアテ, ガブリエル])
         example_deck_2.append(card)
 
     text_box.set_text(text_box_introduction_text)
@@ -856,10 +804,6 @@ if __name__ == "__main__":
                     start_new_game()
                 if event.ui_element == end_turn_button:
                     global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
-                if event.ui_element == csw_confirm_button:
-                    selected_cards = csw_get_selected_cards()
-                    text_box.append_html_text(f"Selected cards: {', '.join(str(card) for card in selected_cards)}. \n")
-                    card_selection_window.kill()
 
             if event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
                 pass

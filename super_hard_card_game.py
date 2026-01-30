@@ -755,7 +755,6 @@ if __name__ == "__main__":
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
                     elif ui_drag_and_drop_usage == "attack_with_follower_player":
-                        # opponent = 2 if cp == 1 else 1
                         opponent = global_vars_shcg.opponent
                         for index, slot in enumerate(global_vars_field_slots[opponent]):
                             if slot.rect.collidepoint(event.pos):

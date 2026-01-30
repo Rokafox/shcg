@@ -4,11 +4,14 @@ class Card:
         self.cost = cost
         self.type = card_type
         self.description = ""
+        self.effect_description = ""
         self.request_card_selection_on_play: str = "" # e.g., "field"
         self.request_card_selection_on_play_amount: int = 0
 
     def tooltip_str(self):
         s = f"{self.name}\n"
+        if self.effect_description:
+            s += f"{self.effect_description}\n"
         if self.description:
             s += f"{self.description}\n"
         return s
@@ -42,6 +45,8 @@ class Follower(Card):
     def tooltip_str(self):
         s = f"{self.name}\n"
         s += f"Attack: {self.attack}  HP: {self.hp}/{self.max_hp}\n"
+        if self.effect_description:
+            s += f"{self.effect_description}\n"
         if self.is_enhanced and self.description_e:
             s += f"{self.description_e}\n"
         elif self.description:
@@ -133,8 +138,8 @@ class ゴリアテ(Follower):
 
 class ガブリエル(Follower):
     def __init__(self):
-        super().__init__(name="ガブリエル", cost=6, attack=4, hp=3, can_enhance=False)
-        self.description = "他のフォロワー1体を選ぶ。それは攻撃力+4/体力+3する。"
+        super().__init__(name="ガブリエル", cost=4, attack=4, hp=3, can_enhance=False)
+        self.effect_description = "場に出す時、他のフォロワー1体を選ぶ。それは攻撃力+4/体力+3する。"
         self.request_card_selection_on_play = "field"
         self.request_card_selection_on_play_amount = 1
 

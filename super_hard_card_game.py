@@ -4,6 +4,7 @@ import itertools
 import pygame, pygame_gui
 import cards
 import random
+import ai_player
 
 
 pygame.init()
@@ -59,7 +60,7 @@ class SHCGGameState:
             # draw_deck_ui is unnecessary as it is handled by pygame event
 
 
-    def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text):
+    def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, ai_target: cards.Card | None = None):
         global single_card_selection_dropdown_field
         if len(self.fields[player]) > 4 and card.type != 'spell':
             return
@@ -68,12 +69,12 @@ class SHCGGameState:
         self.use_foxtail(player, card.cost, ui_draw, ui_set_text)
         self.hands[player].remove(card)
         if card.request_card_selection_on_play:
-            target = None
-            if card.request_card_selection_on_play == "field":
+            target = ai_target  # Use AI-provided target if available
+            if target is None and card.request_card_selection_on_play == "field":
                 for i, c in enumerate(self.fields[player]):
                     if f"{i + 1} {str(c)}" == single_card_selection_dropdown_field.selected_option[0]:
                         target = c
-                        break 
+                        break
             card.on_play_effect(player, target_follower=target)
         if card.type == 'follower':
             self.fields[player].append(card)
@@ -550,7 +551,7 @@ build_component_tooltips()
 # =====================================
 
 def build_settings_window():
-    global theme_selection_menu, settings_window
+    global theme_selection_menu, settings_window, ai_player1_toggle, ai_player2_toggle
     try:
         settings_window.kill()
     except Exception as e:
@@ -560,7 +561,7 @@ def build_settings_window():
         # If ever needed
         return s
 
-    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 300), (400, 200)),
+    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 250), (400, 280)),
                                         ui_manager,
                                         window_display_title=local_translate("Settings"),
                                         object_id="#settings_window",
@@ -577,9 +578,41 @@ def build_settings_window():
                                                             ui_manager,
                                                             container=settings_window,)
 
+    # AI Player Settings
+    ai_settings_label = pygame_gui.elements.UILabel(pygame.Rect((10, 60), (340, 35)),
+                                        local_translate("AI Player Settings:"),
+                                        ui_manager,
+                                        container=settings_window)
+
+    ai_player1_label = pygame_gui.elements.UILabel(pygame.Rect((10, 100), (160, 35)),
+                                        local_translate("AI controls Player 1:"),
+                                        ui_manager,
+                                        container=settings_window)
+
+    ai_player1_toggle = pygame_gui.elements.UIButton(
+                                        relative_rect=pygame.Rect((200, 100), (100, 35)),
+                                        text="ON" if global_vars_ai_manager.ai_enabled[1] else "OFF",
+                                        manager=ui_manager,
+                                        container=settings_window,
+                                        object_id="#ai_player1_toggle")
+
+    ai_player2_label = pygame_gui.elements.UILabel(pygame.Rect((10, 145), (160, 35)),
+                                        local_translate("AI controls Player 2:"),
+                                        ui_manager,
+                                        container=settings_window)
+
+    ai_player2_toggle = pygame_gui.elements.UIButton(
+                                        relative_rect=pygame.Rect((200, 145), (100, 35)),
+                                        text="ON" if global_vars_ai_manager.ai_enabled[2] else "OFF",
+                                        manager=ui_manager,
+                                        container=settings_window,
+                                        object_id="#ai_player2_toggle")
+
 
 settings_window = None
 theme_selection_menu = None
+ai_player1_toggle = None
+ai_player2_toggle = None
 
 
 def change_theme(theme=None):
@@ -607,6 +640,7 @@ def change_theme(theme=None):
 
 
 global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
+global_vars_ai_manager: ai_player.AIManager = ai_player.AIManager()
 
 def start_new_game():
     # fetch decks, deck and deck for cpu are selected by player
@@ -803,6 +837,15 @@ if __name__ == "__main__":
                     start_new_game()
                 if event.ui_element == end_turn_button:
                     global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
+                # AI toggle buttons
+                if ai_player1_toggle and event.ui_element == ai_player1_toggle:
+                    global_vars_ai_manager.ai_enabled[1] = not global_vars_ai_manager.ai_enabled[1]
+                    global_vars_ai_manager.enable_ai(1, global_vars_ai_manager.ai_enabled[1])
+                    ai_player1_toggle.set_text("ON" if global_vars_ai_manager.ai_enabled[1] else "OFF")
+                if ai_player2_toggle and event.ui_element == ai_player2_toggle:
+                    global_vars_ai_manager.ai_enabled[2] = not global_vars_ai_manager.ai_enabled[2]
+                    global_vars_ai_manager.enable_ai(2, global_vars_ai_manager.ai_enabled[2])
+                    ai_player2_toggle.set_text("ON" if global_vars_ai_manager.ai_enabled[2] else "OFF")
 
             if event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
                 pass
@@ -814,6 +857,24 @@ if __name__ == "__main__":
             ui_manager_lower.process_events(event)
             ui_manager.process_events(event)
             ui_manager_overlay.process_events(event)
+
+        # AI Turn Logic
+        if not global_vars_shcg.concluded and global_vars_ai_manager.is_ai_turn(global_vars_shcg):
+            current_time = pygame.time.get_ticks()
+            if current_time - global_vars_ai_manager.last_ai_action_time >= global_vars_ai_manager.ai_action_delay:
+                ai = global_vars_ai_manager.get_current_ai(global_vars_shcg)
+                if ai:
+                    actions = ai.take_turn(
+                        global_vars_shcg,
+                        ui_draw=True,
+                        ui_set_text=True,
+                        update_dropdown_func=update_single_card_selection_dropdown_field_options,
+                        text_box=text_box
+                    )
+                    global_vars_ai_manager.last_ai_action_time = current_time
+                    if not actions:
+                        # AI has no more actions, end turn
+                        global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
 
         ui_manager_lower.update(time_delta)
         ui_manager.update(time_delta)

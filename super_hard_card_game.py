@@ -211,6 +211,7 @@ class SHCGGameState:
         else:  # 'bottom'
             base_x = 1500 - 100 - 50
             base_y = 900 - 145 - 50
+        deck_tooltip_str = " | ".join([f"{i + 1}: {str(card)}" for i, card in enumerate(deck)])
         for i in range(len(deck)):
             offset = i * 1
             card_ui = pygame_gui.elements.UIImage(
@@ -221,6 +222,7 @@ class SHCGGameState:
             card_ui.set_image(draw_card(deck[i]))
             if i == len(deck) - 1:
                 self.top_of_the_deck_ui_marker[player] = card_ui
+                card_ui.set_tooltip(deck_tooltip_str, delay=0.1, wrap_width=600)
         return
 
 
@@ -397,9 +399,13 @@ end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 
                                     text='End Turn',
                                     manager=ui_manager,)
 
+single_card_selection_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 355), (260, 35)),
+                                    "Select a card on current player field:",
+                                    ui_manager,)
+
 single_card_selection_dropdown_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
                                                                   starting_option="",
-                                                                  relative_rect=pygame.Rect((1320, 360), (260, 50)),
+                                                                  relative_rect=pygame.Rect((1320, 395), (260, 35)),
                                                                   manager=ui_manager,)
 
 def update_single_card_selection_dropdown_field_options(options: list[cards.Card]):

@@ -676,27 +676,6 @@ class MinimaxAI:
 
             return min_eval
 
-    # def get_gabriel_target(self, state: GameStateSnapshot) -> Optional[cards.Follower]:
-    #     """Find the best target for Gabriel's effect."""
-    #     player = self.player_number
-    #     followers = [f for f in state.fields[player] if f.type == 'follower']
-
-    #     if not followers:
-    #         return None
-
-    #     # Prioritize followers that can attack soon
-    #     def target_priority(f):
-    #         priority = 0
-    #         if f.can_attack_this_turn:
-    #             priority += 3
-    #         if f.attack_ability >= 1:
-    #             priority += 2
-    #         priority += f.attack / 10
-    #         return priority
-
-    #     followers.sort(key=target_priority, reverse=True)
-    #     return followers[0]
-
 
 class MinimaxAIPlayer:
     """

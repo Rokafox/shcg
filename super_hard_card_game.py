@@ -250,7 +250,7 @@ class SHCGGameState:
             else:
                 slots[i].set_image(image_405_card_slot)
                 slots[i].set_tooltip("", delay=0.1, wrap_width=300)
-        update_single_card_selection_dropdown_field_options(field)
+        update_single_card_selection_dropdown_field_options(self.fields[self.current_player]) # must be current player innstead of player
         return
 
 

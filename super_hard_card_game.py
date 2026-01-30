@@ -4,7 +4,6 @@ import itertools
 import pygame, pygame_gui
 import cards
 import random
-import ai_player
 import ai_player_new
 
 
@@ -114,7 +113,8 @@ class SHCGGameState:
                 self.draw_field_ui(1)
                 self.draw_field_ui(2)
         elif target == "leader":
-            # リーダーへの攻撃
+            if ui_set_text:
+                text_box.append_html_text(f"{attacker} is attacking Player {self.opponent}.\n")
             self.player_take_damage(self.opponent, attacker.attack, ui_draw, ui_set_text)
             attacker.after_attack_effect()
             self.draw_field_ui(player)
@@ -130,7 +130,7 @@ class SHCGGameState:
         if amount > 0 and ui_draw:
             self.draw_player_hp_ui()
         if self.hp[player] <= 0:
-            winner = self.opponent
+            winner = 3 - player
             if ui_set_text:
                 text_box.append_html_text(f"Player {winner} wins!\n")
             self.concluded = True
@@ -159,7 +159,7 @@ class SHCGGameState:
             self.draw_field_ui(1)
             self.draw_field_ui(2)
         if ui_set_text:
-            text_box.set_text(text_box_introduction_text)
+            text_box.append_html_text(text_box_introduction_text)
             text_box.append_html_text(f"Player {self.current_player}'s turn.\n")
             text_box.append_html_text(f"Turn {self.turn}.\n")
 
@@ -564,7 +564,7 @@ def build_settings_window():
         return s
 
     # Get current AI manager based on toggle
-    current_ai_manager = global_vars_minimax_ai_manager if global_vars_use_minimax_ai else global_vars_ai_manager
+    current_ai_manager = global_vars_minimax_ai_manager
 
     settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 200), (400, 380)),
                                         ui_manager,
@@ -613,36 +613,17 @@ def build_settings_window():
                                         container=settings_window,
                                         object_id="#ai_player2_toggle")
 
-    # AI Type Selection (Heuristic vs Minimax)
-    ai_type_label = pygame_gui.elements.UILabel(pygame.Rect((10, 190), (160, 35)),
-                                        local_translate("AI Type:"),
-                                        ui_manager,
-                                        container=settings_window)
-
-    ai_type_toggle = pygame_gui.elements.UIButton(
-                                        relative_rect=pygame.Rect((200, 190), (140, 35)),
-                                        text="Minimax" if global_vars_use_minimax_ai else "Heuristic",
-                                        manager=ui_manager,
-                                        container=settings_window,
-                                        object_id="#ai_type_toggle")
-
     # AI Depth Selection (for Minimax)
-    ai_depth_label = pygame_gui.elements.UILabel(pygame.Rect((10, 235), (160, 35)),
+    ai_depth_label = pygame_gui.elements.UILabel(pygame.Rect((10, 190), (160, 35)),
                                         local_translate("AI Depth:"),
                                         ui_manager,
                                         container=settings_window)
 
     ai_depth_dropdown = pygame_gui.elements.UIDropDownMenu(["1", "2", "3", "4"],
                                                           str(global_vars_minimax_ai_manager.depth),
-                                                          pygame.Rect((200, 235), (100, 35)),
+                                                          pygame.Rect((200, 190), (100, 35)),
                                                           ui_manager,
                                                           container=settings_window,)
-
-    # AI Explanation
-    ai_explanation = pygame_gui.elements.UILabel(pygame.Rect((10, 280), (360, 50)),
-                                        "Minimax: Chess-like AI (slower, stronger)\nHeuristic: Rule-based AI (faster, weaker)",
-                                        ui_manager,
-                                        container=settings_window)
 
 
 settings_window = None
@@ -678,7 +659,6 @@ def change_theme(theme=None):
 
 
 global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
-global_vars_ai_manager: ai_player.AIManager = ai_player.AIManager()
 global_vars_minimax_ai_manager: ai_player_new.MinimaxAIManager = ai_player_new.MinimaxAIManager(depth=2)
 global_vars_use_minimax_ai: bool = True  # Default to new minimax AI
 
@@ -724,6 +704,7 @@ def start_new_game():
     global_vars_shcg.draw_field_ui(2)
     text_box.append_html_text(f"Player {global_vars_shcg.current_player}'s turn. \n")
     text_box.append_html_text(f"Turn {global_vars_shcg.turn}. \n")
+    global_vars_minimax_ai_manager.ai_clear_pending_actions()
 
     
 start_new_game()
@@ -878,7 +859,7 @@ if __name__ == "__main__":
                 if event.ui_element == end_turn_button:
                     global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
                 # AI toggle buttons
-                current_ai_manager = global_vars_minimax_ai_manager if global_vars_use_minimax_ai else global_vars_ai_manager
+                current_ai_manager = global_vars_minimax_ai_manager
                 if ai_player1_toggle and event.ui_element == ai_player1_toggle:
                     current_ai_manager.ai_enabled[1] = not current_ai_manager.ai_enabled[1]
                     current_ai_manager.enable_ai(1, current_ai_manager.ai_enabled[1])
@@ -887,16 +868,6 @@ if __name__ == "__main__":
                     current_ai_manager.ai_enabled[2] = not current_ai_manager.ai_enabled[2]
                     current_ai_manager.enable_ai(2, current_ai_manager.ai_enabled[2])
                     ai_player2_toggle.set_text("ON" if current_ai_manager.ai_enabled[2] else "OFF")
-                # AI type toggle
-                if ai_type_toggle and event.ui_element == ai_type_toggle:
-                    global_vars_use_minimax_ai = not global_vars_use_minimax_ai
-                    ai_type_toggle.set_text("Minimax" if global_vars_use_minimax_ai else "Heuristic")
-                    # Sync AI enabled states between managers
-                    new_manager = global_vars_minimax_ai_manager if global_vars_use_minimax_ai else global_vars_ai_manager
-                    old_manager = global_vars_ai_manager if global_vars_use_minimax_ai else global_vars_minimax_ai_manager
-                    for p in [1, 2]:
-                        new_manager.ai_enabled[p] = old_manager.ai_enabled[p]
-                        new_manager.enable_ai(p, old_manager.ai_enabled[p])
 
             if event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
                 pass
@@ -917,7 +888,7 @@ if __name__ == "__main__":
             ui_manager_overlay.process_events(event)
 
         # AI Turn Logic - use appropriate AI manager based on toggle
-        active_ai_manager = global_vars_minimax_ai_manager if global_vars_use_minimax_ai else global_vars_ai_manager
+        active_ai_manager = global_vars_minimax_ai_manager
         if not global_vars_shcg.concluded and active_ai_manager.is_ai_turn(global_vars_shcg):
             current_time = pygame.time.get_ticks()
             if current_time - active_ai_manager.last_ai_action_time >= active_ai_manager.ai_action_delay:

@@ -145,12 +145,7 @@ class GameSimulator:
         # Apply on-play effects
         if hasattr(card, 'request_card_selection_on_play') and card.request_card_selection_on_play == "field":
             if target is not None and hasattr(card, 'on_play_effect'):
-                # For Gabriel-like effects
-                if isinstance(card, cards.ガブリエル):
-                    if target is not None:
-                        target.attack += 4
-                        target.hp += 3
-                        target.max_hp += 3
+                card.on_play_effect(player, target)
 
         if card.type == 'follower':
             state.fields[player].append(card)
@@ -185,10 +180,7 @@ class GameSimulator:
             if attacker.hp <= 0:
                 state.fields[player].remove(attacker)
             else:
-                # Attacker survives, mark as attacked
-                attacker.how_many_attacks_done_of_turn += 1
-                if attacker.how_many_attacks_done_of_turn >= attacker.how_many_attacks_max_of_turn:
-                    attacker.can_attack_this_turn = False
+                attacker.after_attack_effect()
 
         elif target == "leader":
             if attacker.attack_ability < 2:
@@ -198,9 +190,7 @@ class GameSimulator:
                 state.concluded = True
                 state.winner = player
 
-            attacker.how_many_attacks_done_of_turn += 1
-            if attacker.how_many_attacks_done_of_turn >= attacker.how_many_attacks_max_of_turn:
-                attacker.can_attack_this_turn = False
+            attacker.after_attack_effect()
 
         return True
 
@@ -221,20 +211,7 @@ class GameSimulator:
         state.enhance_used_this_turn[player] += 1
 
         # Apply enhance effect
-        follower.attack += 2
-        follower.hp += 2
-        follower.max_hp += 2
-        follower.can_enhance = False
-        follower.is_enhanced = True
-        follower.enhanced_this_turn = True
-
-        # Advance attack ability
-        if follower.attack_ability < 2:
-            follower.attack_ability += 1
-
-        # Can attack again if has attacks remaining
-        if follower.how_many_attacks_done_of_turn < follower.how_many_attacks_max_of_turn:
-            follower.can_attack_this_turn = True
+        follower.on_enhance_effect(player)
 
         return True
 
@@ -256,19 +233,14 @@ class GameSimulator:
         """End the current turn and start the opponent's turn."""
         state.current_player = state.opponent
         state.foxtail[state.current_player] = 9
-        state.enhance_used_this_turn = {1: 0, 2: 0}
-        state.turn += 1
 
         # Apply start of turn effects to current player's followers
         for card in state.fields[state.current_player]:
-            if card.type == 'follower':
-                card.enhanced_this_turn = False
-                card.how_many_attacks_done_of_turn = 0
-                card.summoned_this_turn = False
-                if card.attack_ability < 2:
-                    card.attack_ability += 1
-                card.can_attack_this_turn = True
+            card.start_of_turn_on_field_effect(state.current_player)
 
+        state.enhance_used_this_turn = {1: 0, 2: 0}
+        state.turn += 1
+        
         # Check for draw (both decks empty)
         if not state.decks[1] and not state.decks[2]:
             state.concluded = True
@@ -364,13 +336,9 @@ class Evaluator:
     """
 
     # Weight constants for evaluation
-    HP_WEIGHT = 10.0
-    FIELD_POWER_WEIGHT = 2.0
-    FIELD_COUNT_WEIGHT = 3.0
-    HAND_SIZE_WEIGHT = 1.0
-    DECK_SIZE_WEIGHT = 0.2
-    ATTACK_READY_BONUS = 1.5
-    ENHANCE_POTENTIAL_BONUS = 0.5
+    HP_WEIGHT = 2.0
+    FIELD_POWER_WEIGHT = 1.0
+    HAND_SIZE_WEIGHT = 1.0 # Every card in hand is worth 1 pt
 
     @staticmethod
     def evaluate(state: GameStateSnapshot, player: int) -> float:
@@ -392,11 +360,8 @@ class Evaluator:
 
         score = 0.0
 
-        # HP difference (weighted more heavily when HP is low)
-        hp_diff = state.hp[player] - state.hp[opponent]
-        # HP becomes more valuable when low
-        own_hp_value = state.hp[player] * (1 + (20 - state.hp[player]) / 20)
-        opp_hp_value = state.hp[opponent] * (1 + (20 - state.hp[opponent]) / 20)
+        own_hp_value = state.hp[player]
+        opp_hp_value = state.hp[opponent]
         score += (own_hp_value - opp_hp_value) * Evaluator.HP_WEIGHT
 
         # Field power (total attack + hp of followers)
@@ -404,43 +369,8 @@ class Evaluator:
         opp_field_power = sum(f.attack + f.hp for f in state.fields[opponent] if f.type == 'follower')
         score += (own_field_power - opp_field_power) * Evaluator.FIELD_POWER_WEIGHT
 
-        # Field count (board presence)
-        own_field_count = len([f for f in state.fields[player] if f.type == 'follower'])
-        opp_field_count = len([f for f in state.fields[opponent] if f.type == 'follower'])
-        score += (own_field_count - opp_field_count) * Evaluator.FIELD_COUNT_WEIGHT
-
-        # Hand size (card advantage)
-        hand_diff = len(state.hands[player]) - len(state.hands[opponent])
-        score += hand_diff * Evaluator.HAND_SIZE_WEIGHT
-
-        # Deck size (resource advantage)
-        deck_diff = len(state.decks[player]) - len(state.decks[opponent])
-        score += deck_diff * Evaluator.DECK_SIZE_WEIGHT
-
-        # Bonus for followers that can attack this turn or next
-        for f in state.fields[player]:
-            if f.type == 'follower':
-                if f.can_attack_this_turn and f.attack_ability >= 2:
-                    score += f.attack * Evaluator.ATTACK_READY_BONUS
-                if hasattr(f, 'can_enhance') and f.can_enhance:
-                    score += Evaluator.ENHANCE_POTENTIAL_BONUS
-
-        # Penalty for opponent's ready attackers
-        for f in state.fields[opponent]:
-            if f.type == 'follower':
-                if f.attack_ability >= 1:  # Will be able to attack next turn
-                    score -= f.attack * Evaluator.ATTACK_READY_BONUS * 0.5
-
-        # Check for potential lethal
-        own_potential_damage = sum(f.attack for f in state.fields[player]
-                                   if f.type == 'follower' and f.attack_ability >= 2 and f.can_attack_this_turn)
-        if own_potential_damage >= state.hp[opponent]:
-            score += 100  # Huge bonus for having lethal
-
-        opp_potential_damage = sum(f.attack for f in state.fields[opponent]
-                                   if f.type == 'follower' and f.attack_ability >= 1)
-        if opp_potential_damage >= state.hp[player]:
-            score -= 50  # Penalty for opponent having potential lethal next turn
+        # Hand size
+        score += len(state.hands[player])
 
         return score
 
@@ -746,26 +676,26 @@ class MinimaxAI:
 
             return min_eval
 
-    def get_gabriel_target(self, state: GameStateSnapshot) -> Optional[cards.Follower]:
-        """Find the best target for Gabriel's effect."""
-        player = self.player_number
-        followers = [f for f in state.fields[player] if f.type == 'follower']
+    # def get_gabriel_target(self, state: GameStateSnapshot) -> Optional[cards.Follower]:
+    #     """Find the best target for Gabriel's effect."""
+    #     player = self.player_number
+    #     followers = [f for f in state.fields[player] if f.type == 'follower']
 
-        if not followers:
-            return None
+    #     if not followers:
+    #         return None
 
-        # Prioritize followers that can attack soon
-        def target_priority(f):
-            priority = 0
-            if f.can_attack_this_turn:
-                priority += 3
-            if f.attack_ability >= 1:
-                priority += 2
-            priority += f.attack / 10
-            return priority
+    #     # Prioritize followers that can attack soon
+    #     def target_priority(f):
+    #         priority = 0
+    #         if f.can_attack_this_turn:
+    #             priority += 3
+    #         if f.attack_ability >= 1:
+    #             priority += 2
+    #         priority += f.attack / 10
+    #         return priority
 
-        followers.sort(key=target_priority, reverse=True)
-        return followers[0]
+    #     followers.sort(key=target_priority, reverse=True)
+    #     return followers[0]
 
 
 class MinimaxAIPlayer:
@@ -778,6 +708,11 @@ class MinimaxAIPlayer:
         self.player_number = player_number
         self.minimax_ai = MinimaxAI(player_number, max_depth=depth)
         self.pending_actions: List[Tuple] = []
+        self.action_index = 0
+
+    def clear_pending_actions(self):
+        """Clear any pending actions."""
+        self.pending_actions = []
         self.action_index = 0
 
     def take_turn(self, game_state: 'SHCGGameState', ui_draw: bool, ui_set_text: bool,
@@ -902,8 +837,14 @@ class MinimaxAIManager:
         self.depth = depth
         self.ai_players: dict[int, MinimaxAIPlayer | None] = {1: None, 2: None}
         self.ai_enabled: dict[int, bool] = {1: False, 2: False}
-        self.ai_action_delay: int = 300  # milliseconds between AI actions (faster than original)
+        self.ai_action_delay: int = 600  # milliseconds between AI actions
         self.last_ai_action_time: int = 0
+
+    def ai_clear_pending_actions(self):
+        """Clear pending actions for a specific AI player."""
+        for ai_player in self.ai_players.values():
+            if ai_player is not None:
+                ai_player.clear_pending_actions()
 
     def enable_ai(self, player: int, enabled: bool = True):
         """Enable or disable AI for a player."""

@@ -413,7 +413,8 @@ class MinimaxAI:
         best_actions = []
 
         # Generate and evaluate all possible action sequences
-        all_sequences = self._generate_turn_sequences(state, self.player_number, max_actions=10)
+        # No max_actions limit - foxtail must be used as much as possible
+        all_sequences = self._generate_turn_sequences(state, self.player_number)
 
         for actions in all_sequences:
             # Apply actions to a copy of the state
@@ -450,21 +451,30 @@ class MinimaxAI:
         return best_actions
 
     def _generate_turn_sequences(self, state: GameStateSnapshot, player: int,
-                                  max_actions: int = 10) -> List[List[Tuple]]:
+                                  max_actions: int = 100) -> List[List[Tuple]]:
         """
         Generate all reasonable action sequences for a turn.
-        Uses iterative deepening to find good sequences without exhaustive search.
+        Uses BFS to find sequences where foxtail is exhausted.
+
+        Rules enforced:
+        - Action length is unlimited (up to max_actions for safety)
+        - Ending turn early is NOT allowed
+        - Foxtail must be used as much as possible until none remains
+        - Only terminal sequences are returned (foxtail=0 or no more actions possible)
         """
-        sequences = [[]]  # Start with empty sequence (do nothing)
+        sequences = []  # No empty sequence - ending early is not allowed
 
         # Use BFS to generate action sequences
         queue = [(state.copy(), [])]
         visited_states = set()
 
-        while queue and len(sequences) < 500:  # Limit total sequences
+        while queue and len(sequences) < 1000:  # Limit total sequences for performance
             current_state, current_actions = queue.pop(0)
 
             if len(current_actions) >= max_actions:
+                # Safety limit reached - add this as a terminal sequence
+                if current_actions:  # Only add non-empty sequences
+                    sequences.append(current_actions)
                 continue
 
             # Generate state hash for deduplication
@@ -476,14 +486,30 @@ class MinimaxAI:
             # Try all possible next actions
             next_actions = self._get_all_actions(current_state, player)
 
+            # If no more actions possible OR foxtail is 0, this is a terminal sequence
+            if not next_actions or current_state.foxtail[player] == 0:
+                if current_actions:  # Only add non-empty sequences
+                    sequences.append(current_actions)
+                continue
+
             for action in next_actions:
                 new_state = current_state.copy()
                 if self._apply_action(new_state, player, action):
                     new_sequence = current_actions + [action]
-                    sequences.append(new_sequence)
 
-                    if not new_state.concluded:
+                    if new_state.concluded:
+                        # Game ended - this is a terminal sequence
+                        sequences.append(new_sequence)
+                    elif new_state.foxtail[player] == 0:
+                        # Foxtail exhausted - this is a terminal sequence
+                        sequences.append(new_sequence)
+                    else:
+                        # Continue exploring
                         queue.append((new_state, new_sequence))
+
+        # If no sequences found (edge case), allow pass but this shouldn't happen
+        if not sequences:
+            sequences = [[]]
 
         return sequences
 
@@ -627,8 +653,8 @@ class MinimaxAI:
             # AI's turn - maximize score
             max_eval = float('-inf')
 
-            # Generate all possible turn sequences
-            sequences = self._generate_turn_sequences(state, current_player, max_actions=8)
+            # Generate all possible turn sequences (foxtail must be exhausted)
+            sequences = self._generate_turn_sequences(state, current_player)
 
             for actions in sequences:  # Limit for performance
                 test_state = state.copy()
@@ -653,8 +679,8 @@ class MinimaxAI:
             # Opponent's turn - minimize score
             min_eval = float('inf')
 
-            # Generate all possible turn sequences for opponent
-            sequences = self._generate_turn_sequences(state, current_player, max_actions=8)
+            # Generate all possible turn sequences for opponent (foxtail must be exhausted)
+            sequences = self._generate_turn_sequences(state, current_player)
 
             for actions in sequences:  # Limit for performance
                 test_state = state.copy()

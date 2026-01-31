@@ -96,6 +96,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.effect_description = getattr(card, 'effect_description', '')
         new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')
         new_card.request_card_selection_on_play_amount = getattr(card, 'request_card_selection_on_play_amount', 0)
+        new_card.request_card_target_on_play = getattr(card, 'request_card_target_on_play', '')
         # Follower specific
         new_card.description_e = getattr(card, 'description_e', '')
         new_card.attack = card.attack
@@ -120,6 +121,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.effect_description = getattr(card, 'effect_description', '')
         new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')
         new_card.request_card_selection_on_play_amount = getattr(card, 'request_card_selection_on_play_amount', 0)
+        new_card.request_card_target_on_play = getattr(card, 'request_card_target_on_play', '')
         return new_card
 
 
@@ -143,15 +145,31 @@ class GameSimulator:
         state.hands[player].remove(card)
 
         # Apply on-play effects
-        if hasattr(card, 'request_card_selection_on_play') and card.request_card_selection_on_play == "field":
-            if target is not None and hasattr(card, 'on_play_effect'):
+        if card.request_card_selection_on_play:
+            if card.request_card_selection_on_play == "field":
                 card.on_play_effect(player, target)
+
+        if card.request_card_target_on_play:
+            if card.request_card_target_on_play == "deck_top":
+                target_card = None
+                if state.decks[player]:
+                    target_card = state.decks[player][-1]
+                card.on_play_effect(player, target_card=target_card)
 
         if card.type == 'follower':
             state.fields[player].append(card)
         elif card.type == 'amulet':
             state.fields[player].append(card)
-        # Spells don't go to field
+        elif card.type == 'spell':
+            if card.name == "天なる大河":
+                num_cards = len(state.hands[player])
+                while state.hands[player]:
+                    c = state.hands[player].pop()
+                    state.decks[player].insert(0, c)  # Place at bottom of deck
+                for _ in range(num_cards + 1):
+                    if state.decks[player]:
+                        drawn_card = state.decks[player].pop()
+                        state.hands[player].append(drawn_card)
 
         return True
 
@@ -230,6 +248,15 @@ class GameSimulator:
 
     @staticmethod
     def end_turn(state: GameStateSnapshot):
+
+        if len(state.fields[state.current_player]) == 1 and state.fields[state.current_player][0].name == "唯我の絶傑・マゼルベイン":
+            mazelbain = state.fields[state.current_player][0]
+            damage_amount = 5 if mazelbain.is_enhanced else 3
+            for follower in state.fields[state.opponent][:]:  # Copy the list to avoid modification during iteration
+                follower.hp -= damage_amount
+                if follower.hp <= 0:
+                    state.fields[state.opponent].remove(follower)
+
         """End the current turn and start the opponent's turn."""
         state.current_player = state.opponent
         state.foxtail[state.current_player] = 9
@@ -359,7 +386,7 @@ class Evaluator:
                 return 0.0  # Draw
 
         # it is bad if the opponent can win next turn by direct attack
-        opp_active_attackers = [f for f in state.fields[opponent] if f.type == 'follower' and f.attack_ability >= 1]
+        opp_active_attackers = [f for f in state.fields[opponent] if f.type == 'follower' and f.attack_ability >= 2]
         if sum(f.attack for f in opp_active_attackers) >= state.hp[player]:
             return float('-inf')
 
@@ -389,7 +416,7 @@ class MinimaxAI:
     Calculates optimal moves by looking ahead several turns.
     """
 
-    def __init__(self, player_number: int, max_depth: int = 2):
+    def __init__(self, player_number: int, max_depth: int = 1):
         """
         Initialize the AI.
 
@@ -419,6 +446,17 @@ class MinimaxAI:
         # Find all possible turn action sequences and evaluate them
         best_score = float('-inf')
         best_actions = []
+
+        # if direct attack can win the game, do it immediately
+        active_attackers = [f for f in state.fields[self.player_number] if f.type == 'follower' and f.can_attack_this_turn and f.attack_ability >= 2]
+        if sum(f.attack for f in active_attackers) >= state.hp[3 - self.player_number]:
+            actions = []
+            for attacker in active_attackers:
+                actions.append(('attack', attacker, "leader"))
+            actions.append(('end_turn',))
+            print(f"AI Player {self.player_number} found direct attack win actions: {actions}")
+            return actions
+
 
         # Generate and evaluate all possible action sequences
         # No max_actions limit - foxtail must be used as much as possible
@@ -476,7 +514,7 @@ class MinimaxAI:
         queue = [(state.copy(), [])]
         visited_states = set()
 
-        while queue and len(sequences) < 1000:  # Limit total sequences for performance
+        while queue and len(sequences) < 9999:  # Limit total sequences for performance
             current_state, current_actions = queue.pop(0)
 
             if len(current_actions) >= max_actions:
@@ -717,7 +755,7 @@ class MinimaxAIPlayer:
     but uses minimax for decision making.
     """
 
-    def __init__(self, player_number: int, depth: int = 2):
+    def __init__(self, player_number: int, depth: int = 1):
         self.player_number = player_number
         self.minimax_ai = MinimaxAI(player_number, max_depth=depth)
         self.pending_actions: List[Tuple] = []

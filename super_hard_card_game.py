@@ -30,7 +30,7 @@ class SHCGGameState:
         self.decks: dict[int, list[cards.Card]] = {1: [], 2: []}
         self.hands: dict[int, list[cards.Card]] = {1: [], 2: []}
         self.fields: dict[int, list[cards.Card]] = {1: [], 2: []}
-        self.hp = {1: 20, 2: 20}
+        self.hp = {1: 24, 2: 20}
         self.foxtail = {1: 9, 2: 9}
         self.enhance_used_this_turn = {1: 0, 2: 0}
         self.max_enhance_allowed_per_turn = {1: 1, 2: 1}
@@ -62,6 +62,7 @@ class SHCGGameState:
 
     def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, ai_target: cards.Card | None = None):
         global single_card_selection_dropdown_field
+        require_draw_deck_ui = False
         if len(self.fields[player]) > 4 and card.type != 'spell':
             return
         if self.foxtail[player] < card.cost:
@@ -76,10 +77,25 @@ class SHCGGameState:
                         target = c
                         break
             card.on_play_effect(player, target_follower=target)
+        if card.request_card_target_on_play:
+            if card.request_card_target_on_play == "deck_top":
+                target_card = None
+                if self.decks[player]:
+                    target_card = self.decks[player][-1]
+            card.on_play_effect(player, target_card=target_card)
         if card.type == 'follower':
             self.fields[player].append(card)
         elif card.type == 'spell':
-            pass
+            if card.name == "天なる大河":
+                num_cards = len(self.hands[player])
+                while self.hands[player]:
+                    c = self.hands[player].pop()
+                    self.decks[player].insert(0, c)  # Place at bottom of deck
+                for _ in range(num_cards + 1):
+                    if self.decks[player]:
+                        drawn_card = self.decks[player].pop()
+                        self.hands[player].append(drawn_card)
+                require_draw_deck_ui = True
         elif card.type == 'amulet':
             self.fields[player].append(card)
         if ui_set_text:
@@ -87,6 +103,8 @@ class SHCGGameState:
         if ui_draw:
             self.draw_hand_ui(player)
             self.draw_field_ui(player)
+        if require_draw_deck_ui:
+            self.draw_deck_ui(player)
 
 
     def follower_attack(self, player, attacker: cards.Follower, target: cards.Follower | str, ui_draw, ui_set_text):
@@ -139,6 +157,17 @@ class SHCGGameState:
 
 
     def end_turn(self, ui_draw, ui_set_text):
+        # 唯我の絶傑・マゼルベイン
+        # 自分のエンドフェイズが来た、自分のフェルトこれしかないとき、相手の場のフォロワーすべてに3ダメージ。進化後なら5ダメージ。
+        if len(self.fields[self.current_player]) == 1 and self.fields[self.current_player][0].name == "唯我の絶傑・マゼルベイン":
+            mazelbain = self.fields[self.current_player][0]
+            damage_amount = 5 if mazelbain.is_enhanced else 3
+            for follower in self.fields[self.opponent][:]:  # Copy the list to avoid modification during iteration
+                follower.hp -= damage_amount
+                if follower.hp <= 0:
+                    self.fields[self.opponent].remove(follower)
+                    if ui_set_text:
+                        text_box.append_html_text(f"Player {self.opponent}'s {follower} was destroyed.\n")
         if self.concluded:
             text_box.append_html_text("The game has concluded. Start a new game instead.\n")
             return
@@ -559,7 +588,6 @@ build_component_tooltips()
 
 def build_settings_window():
     global theme_selection_menu, settings_window, ai_player1_toggle, ai_player2_toggle
-    global ai_type_toggle, ai_depth_dropdown
     try:
         settings_window.kill()
     except Exception as e:
@@ -572,7 +600,7 @@ def build_settings_window():
     # Get current AI manager based on toggle
     current_ai_manager = global_vars_minimax_ai_manager
 
-    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 200), (400, 380)),
+    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 200), (400, 250)),
                                         ui_manager,
                                         window_display_title=local_translate("Settings"),
                                         object_id="#settings_window",
@@ -620,24 +648,24 @@ def build_settings_window():
                                         object_id="#ai_player2_toggle")
 
     # AI Depth Selection (for Minimax)
-    ai_depth_label = pygame_gui.elements.UILabel(pygame.Rect((10, 190), (160, 35)),
-                                        local_translate("AI Depth:"),
-                                        ui_manager,
-                                        container=settings_window)
+    # Removed as depth more than 1 is difficult to calculate in reasonable time
+    # ai_depth_label = pygame_gui.elements.UILabel(pygame.Rect((10, 190), (160, 35)),
+    #                                     local_translate("AI Depth:"),
+    #                                     ui_manager,
+    #                                     container=settings_window)
 
-    ai_depth_dropdown = pygame_gui.elements.UIDropDownMenu(["1", "2", "3", "4"],
-                                                          str(global_vars_minimax_ai_manager.depth),
-                                                          pygame.Rect((200, 190), (100, 35)),
-                                                          ui_manager,
-                                                          container=settings_window,)
+    # ai_depth_dropdown = pygame_gui.elements.UIDropDownMenu(["1", "2", "3", "4"],
+    #                                                       str(global_vars_minimax_ai_manager.depth),
+    #                                                       pygame.Rect((200, 190), (100, 35)),
+    #                                                       ui_manager,
+    #                                                       container=settings_window,)
 
 
 settings_window = None
 theme_selection_menu = None
 ai_player1_toggle = None
 ai_player2_toggle = None
-ai_type_toggle = None
-ai_depth_dropdown = None
+# ai_depth_dropdown = None
 
 
 def change_theme(theme=None):
@@ -674,21 +702,10 @@ def start_new_game():
     # draw UI components
     example_deck_1: list[cards.Card] = []
     example_deck_2: list[cards.Card] = []
-    for i in range(40):
-        ゴブリン = cards.ゴブリン()
-        ファイター = cards.ファイター()
-        ゴリアテ = cards.ゴリアテ()
-        ガブリエル = cards.ガブリエル()
-        card = random.choice([ゴブリン, ファイター, ゴリアテ, ガブリエル])
-        example_deck_1.append(card)
-
-    for i in range(40):
-        ゴブリン = cards.ゴブリン()
-        ファイター = cards.ファイター()
-        ゴリアテ = cards.ゴリアテ()
-        ガブリエル = cards.ガブリエル()
-        card = random.choice([ゴブリン, ファイター, ゴリアテ, ガブリエル])
-        example_deck_2.append(card)
+    card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
+                  cards.天なる大河, cards.唯我の絶傑マゼルベイン]
+    example_deck_1 = [random.choice(card_types)() for _ in range(40)]
+    example_deck_2 = [random.choice(card_types)() for _ in range(40)]
 
     text_box.set_text(text_box_introduction_text)
     global global_vars_shcg
@@ -881,13 +898,13 @@ if __name__ == "__main__":
             if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
                 if event.ui_element == theme_selection_menu:
                     change_theme()
-                if ai_depth_dropdown and event.ui_element == ai_depth_dropdown:
-                    new_depth = int(ai_depth_dropdown.selected_option[0])
-                    global_vars_minimax_ai_manager.depth = new_depth
-                    # Recreate AI players with new depth
-                    for p in [1, 2]:
-                        if global_vars_minimax_ai_manager.ai_enabled[p]:
-                            global_vars_minimax_ai_manager.ai_players[p] = ai_player_new.MinimaxAIPlayer(p, depth=new_depth)
+                # if ai_depth_dropdown and event.ui_element == ai_depth_dropdown:
+                #     new_depth = int(ai_depth_dropdown.selected_option[0])
+                #     global_vars_minimax_ai_manager.depth = new_depth
+                #     # Recreate AI players with new depth
+                #     for p in [1, 2]:
+                #         if global_vars_minimax_ai_manager.ai_enabled[p]:
+                #             global_vars_minimax_ai_manager.ai_players[p] = ai_player_new.MinimaxAIPlayer(p, depth=new_depth)
 
             ui_manager_lower.process_events(event)
             ui_manager.process_events(event)

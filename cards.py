@@ -7,6 +7,7 @@ class Card:
         self.effect_description = ""
         self.request_card_selection_on_play: str = "" # e.g., "field"
         self.request_card_selection_on_play_amount: int = 0
+        self.request_card_target_on_play: str = ""
 
     def tooltip_str(self):
         s = f"{self.name}\n"
@@ -115,7 +116,7 @@ class Amulet(Card):
 
 
 # ==============================
-# Classic
+# Followers
 # Each cost is evaluated as 4 points
 # ==============================
 
@@ -148,3 +149,33 @@ class ガブリエル(Follower):
             target_follower.attack += 4
             target_follower.hp += 3
             target_follower.max_hp += 3
+
+
+class ハンサ(Follower):
+    def __init__(self):
+        super().__init__(name="ハンサ", cost=1, attack=0, hp=3, can_enhance=False)
+        self.description = "聖鳥は純朴な瞳を誘い、旺盛な食欲を誘う。「ボクはキミたちの心を映す鏡さ！」"
+        self.effect_description = "場に出す時、これは攻撃力+Xする。Xは「自分のデッキの上1枚カードのコスト」である。"
+        self.request_card_target_on_play = "deck_top"
+
+    def on_play_effect(self, player: int, target_card: Card | None = None):
+        if target_card is not None:
+            self.attack += target_card.cost
+
+
+class 唯我の絶傑マゼルベイン(Follower):
+    def __init__(self):
+        super().__init__(name="唯我の絶傑・マゼルベイン", cost=4, attack=5, hp=5, can_enhance=True)
+        self.effect_description = "自分のエンドフェイズが来た、自分のフェルトこれしかないとき、相手の場のフォロワーすべてに3ダメージ。進化後なら5ダメージ。"
+
+
+
+# ==============================
+# Spells
+# ==============================
+
+class 天なる大河(Spell):
+    def __init__(self):
+        super().__init__(name="天なる大河", cost=1)
+        self.description = "宝石を零したような光景を、憧憬するは人の常。神話となった者だけが、憧れ叶えて天へと至る。"
+        self.effect_description = "手札の全てのカードをデッキの下に置く。同じ枚数+1枚のカードをデッキから引く。"

@@ -179,3 +179,21 @@ class 天なる大河(Spell):
         super().__init__(name="天なる大河", cost=1)
         self.description = "宝石を零したような光景を、憧憬するは人の常。神話となった者だけが、憧れ叶えて天へと至る。"
         self.effect_description = "手札の全てのカードをデッキの下に置く。同じ枚数+1枚のカードをデッキから引く。"
+
+class ミヒライテ(Spell):
+    def __init__(self):
+        super().__init__(name="ミヒライテ", cost=1)
+        self.effect_description = "自分の場のフォロワー1体を選ぶ。それは攻撃力+2/体力+1する。それが『唯我の絶傑・マゼルベイン』なら、代わりに攻撃力+4/体力+2する。"
+        self.request_card_selection_on_play = "field"
+        self.request_card_selection_on_play_amount = 1
+
+    def on_play_effect(self, player: int, target_follower: Follower | None = None):
+        if target_follower is not None:
+            if target_follower.name == "唯我の絶傑・マゼルベイン":
+                target_follower.attack += 4
+                target_follower.hp += 2
+                target_follower.max_hp += 2
+            else:
+                target_follower.attack += 2
+                target_follower.hp += 1
+                target_follower.max_hp += 1

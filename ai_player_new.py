@@ -358,6 +358,11 @@ class Evaluator:
             else:
                 return 0.0  # Draw
 
+        # it is bad if the opponent can win next turn by direct attack
+        opp_active_attackers = [f for f in state.fields[opponent] if f.type == 'follower' and f.attack_ability >= 1]
+        if sum(f.attack for f in opp_active_attackers) >= state.hp[player]:
+            return float('-inf')
+
         score = 0.0
 
         own_hp_value = state.hp[player]
@@ -371,6 +376,9 @@ class Evaluator:
 
         # Hand size
         score += len(state.hands[player])
+
+
+
 
         return score
 

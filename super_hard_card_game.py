@@ -665,7 +665,7 @@ def change_theme(theme=None):
 
 
 global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
-global_vars_minimax_ai_manager: ai_player_new.MinimaxAIManager = ai_player_new.MinimaxAIManager(depth=2)
+global_vars_minimax_ai_manager: ai_player_new.MinimaxAIManager = ai_player_new.MinimaxAIManager(depth=1)
 global_vars_use_minimax_ai: bool = True  # Default to new minimax AI
 
 def start_new_game():

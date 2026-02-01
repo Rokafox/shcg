@@ -45,10 +45,13 @@ class Follower(Card):
         self.how_many_attacks_max_of_turn: int = 1  # Number of attacks per turn
         self.how_many_attacks_done_of_turn: int = 0  # Number of attacks done this turn
         self.can_attack_this_turn: bool = False
+        self.ability_protect: bool = False  # Opponent's followers cannot target leader while this follower is on field
     
     def tooltip_str(self):
         s = f"{self.name}\n"
         s += f"Attack: {self.attack}  HP: {self.hp}/{self.max_hp}\n"
+        if self.ability_protect:
+            s += "【守護】\n"
         if self.effect_description:
             s += f"{self.effect_description}\n"
         if self.is_enhanced and self.description_e:
@@ -171,6 +174,13 @@ class 唯我の絶傑マゼルベイン(Follower):
         super().__init__(name="唯我の絶傑・マゼルベイン", cost=4, attack=5, hp=5, can_enhance=True)
         self.effect_description = "自分のエンドフェイズが来た、自分のフェルトこれしかないとき、相手の場のフォロワーすべてに3ダメージ。進化後なら5ダメージ。"
 
+
+class 機構翼の少女ローザ(Follower):
+    def __init__(self):
+        super().__init__(name="機構翼の少女・ローザ", cost=2, attack=1, hp=3, can_enhance=True)
+        self.description = "相応なんでしょう、私には、この鳥籠の世界が。飛べるだけで幸せなんです。だから、きっとこれでいい。"
+        self.description_e = "壮観なんでしょう、本当の空から見下ろす景色は。桃源郷はここなんです。だけど、いつかはきっと――。"
+        self.ability_protect = True
 
 
 # ==============================

@@ -110,6 +110,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.how_many_attacks_max_of_turn = card.how_many_attacks_max_of_turn
         new_card.how_many_attacks_done_of_turn = card.how_many_attacks_done_of_turn
         new_card.can_attack_this_turn = card.can_attack_this_turn
+        new_card.ability_protect = card.ability_protect
         return new_card
     else:
         # For spells and amulets, create a simple copy
@@ -162,8 +163,10 @@ class GameSimulator:
                     if target.hp <= 0:
                         if target in state.fields[player]:
                             state.fields[player].remove(target)
+                            print(f"Dealt 6 damage to friendly {target.name}. New HP: {target.hp}")
                         else:
                             state.fields[3 - player].remove(target)
+                            print(f"Dealt 6 damage to enemy {target.name}. New HP: {target.hp}")
                 else:
                     # フォロワーがないとき、相手のリーダーに6ダメージ。
                     if not state.fields[player] and not state.fields[3 - player]:
@@ -356,20 +359,29 @@ class MoveGenerator:
         attacks = []
         opponent = 3 - player
 
+        # check if opponent has any followers with ability_protect
+        # if so, only those followers can be attacked
+        protect_exists = any([c.ability_protect for c in state.fields[opponent]])
         for follower in state.fields[player]:
             if follower.type != 'follower':
                 continue
             if not follower.can_attack_this_turn or follower.attack_ability <= 0:
                 continue
 
-            # Can attack opponent followers
-            for target in state.fields[opponent]:
-                if target.type == 'follower':
-                    attacks.append((follower, target))
+            if protect_exists:
+                # Can only attack followers with ability_protect
+                for target in state.fields[opponent]:
+                    if target.type == 'follower' and target.ability_protect:
+                        attacks.append((follower, target))
+            else:
+                # Can attack opponent followers
+                for target in state.fields[opponent]:
+                    if target.type == 'follower':
+                        attacks.append((follower, target))
 
-            # Can attack leader if attack_ability >= 2
-            if follower.attack_ability >= 2:
-                attacks.append((follower, "leader"))
+                # Can attack leader if attack_ability >= 2
+                if follower.attack_ability >= 2:
+                    attacks.append((follower, "leader"))
 
         return attacks
 
@@ -412,6 +424,7 @@ class Evaluator:
         Positive = player is winning, Negative = opponent is winning.
         Returns infinity for wins, -infinity for losses.
         """
+        # NOTE: this method is called after the player's turn ends
         opponent = 3 - player
 
         # Check for game end
@@ -423,10 +436,29 @@ class Evaluator:
             else:
                 return 0.0  # Draw
 
-        # it is bad if the opponent can win next turn by direct attack
-        opp_active_attackers = [f for f in state.fields[opponent] if f.type == 'follower' and f.attack_ability >= 2]
-        if sum(f.attack for f in opp_active_attackers) >= state.hp[player]:
-            return float('-inf')
+        # 相手がこのターンに直接攻撃で勝てる場合は悪手じゃ
+        protect_exists = any([c.ability_protect for c in state.fields[player]])
+        if not protect_exists:
+            total_threat = 0
+            max_semi_threat = 0
+            semi_threat_found = False
+
+            for f in state.fields[opponent]:
+                if f.type == 'follower' and f.can_attack_this_turn:
+                    if f.attack_ability >= 2:
+                        # 直接攻撃できる脅威
+                        total_threat += f.attack
+                    elif f.attack_ability == 1 and f.can_enhance and f.attack > max_semi_threat:
+                        # 強化可能な潜在的脅威（最大のものだけ追跡）
+                        semi_threat_found = True
+                        max_semi_threat = f.attack
+
+            # 強化後の脅威を加算（+2は強化ボーナス）
+            if max_semi_threat > 0 and semi_threat_found:
+                total_threat += max_semi_threat + 2
+
+            if total_threat >= state.hp[player]:
+                return float('-inf')
 
         score = 0.0
 
@@ -485,17 +517,6 @@ class MinimaxAI:
         best_score = float('-inf')
         best_actions = []
 
-        # if direct attack can win the game, do it immediately
-        active_attackers = [f for f in state.fields[self.player_number] if f.type == 'follower' and f.can_attack_this_turn and f.attack_ability >= 2]
-        if sum(f.attack for f in active_attackers) >= state.hp[3 - self.player_number]:
-            actions = []
-            for attacker in active_attackers:
-                actions.append(('attack', attacker, "leader"))
-            actions.append(('end_turn',))
-            print(f"AI Player {self.player_number} found direct attack win actions: {actions}")
-            return actions
-
-
         # Generate and evaluate all possible action sequences
         # No max_actions limit - foxtail must be used as much as possible
         all_sequences = self._generate_turn_sequences(state, self.player_number)
@@ -552,7 +573,7 @@ class MinimaxAI:
         queue = [(state.copy(), [])]
         visited_states = set()
 
-        while queue and len(sequences) < 9999:  # Limit total sequences for performance
+        while queue and len(sequences) < 99999:  # Limit total sequences for performance
             current_state, current_actions = queue.pop(0)
 
             if len(current_actions) >= max_actions:
@@ -711,6 +732,7 @@ class MinimaxAI:
                  alpha: float, beta: float) -> float:
         """
         Minimax with alpha-beta pruning.
+        Not used.
 
         Args:
             state: Current game state

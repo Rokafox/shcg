@@ -95,6 +95,8 @@ class SHCGGameState:
                             if f"OP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
                                 target = c
                                 break
+                if ui_set_text:
+                    text_box.append_html_text(f"Player {player} selected target {target} for playing {card}.\n")
             if card.name == "ミヒライテ" and target is None:
                 # 自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。
                 if not self.fields[player]:
@@ -784,8 +786,11 @@ def start_new_game():
     # draw UI components
     example_deck_1: list[cards.Card] = []
     example_deck_2: list[cards.Card] = []
-    card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
-                  cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト]
+    # card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
+    #               cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
+    #               cards.機構翼の少女ローザ]
+    card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.フェアリーアサルト,
+                  cards.機構翼の少女ローザ]
     example_deck_1 = [random.choice(card_types)() for _ in range(40)]
     example_deck_2 = [random.choice(card_types)() for _ in range(40)]
 
@@ -917,6 +922,7 @@ if __name__ == "__main__":
 
                     elif ui_drag_and_drop_usage == "attack_with_follower_player":
                         opponent = global_vars_shcg.opponent
+                        protect_exists = any([c.ability_protect for c in global_vars_shcg.fields[opponent]])
                         for index, slot in enumerate(global_vars_field_slots[opponent]):
                             if slot.rect.collidepoint(event.pos):
                                 if the_selected_card:
@@ -924,9 +930,17 @@ if __name__ == "__main__":
                                     if index < len(global_vars_shcg.fields[opponent]):
                                         target_card = global_vars_shcg.fields[opponent][index]
                                     if target_card and target_card.type == 'follower':
-                                        global_vars_shcg.follower_attack(cp, the_selected_card, target_card, ui_draw=True, ui_set_text=True)
+                                        # if target_card .ability_protect is false but there exists other followers
+                                        # on opponent field with ability_protect true, cannot attack this target
+                                        if protect_exists and not target_card.ability_protect:
+                                            text_box.append_html_text(f"Cannot attack {target_card} because other followers have 【守護】. \n")
+                                        else:
+                                            global_vars_shcg.follower_attack(cp, the_selected_card, target_card, ui_draw=True, ui_set_text=True)
                         if global_vars_leader_slots[opponent][0].rect.collidepoint(event.pos) and the_selected_card.attack_ability >= 2:
-                            global_vars_shcg.follower_attack(cp, the_selected_card, "leader", ui_draw=True, ui_set_text=True)
+                            if protect_exists:
+                                text_box.append_html_text(f"Cannot attack because one of their followers have 【守護】. \n")
+                            else:
+                                global_vars_shcg.follower_attack(cp, the_selected_card, "leader", ui_draw=True, ui_set_text=True)
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
                     elif ui_drag_and_drop_usage == "use_foxtail_player":

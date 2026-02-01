@@ -267,11 +267,28 @@ class SHCGGameState:
             self.foxtail[player] = 9
             self.draw_tail_ui(1)
 
+    def on_card_enhanced(self, player, target_card: cards.Follower):
+        if target_card.name == "機構翼の少女・ローザ":
+            # draw 1 card
+            if self.decks[player] and len(self.hands[player]) < 9:
+                drawn_card = self.decks[player].pop()
+                self.hands[player].append(drawn_card)
+                text_box.append_html_text(f"Player {player} drew 1 card {drawn_card} due to 機構翼の少女・ローザ's effect. \n")
+                self.draw_hand_ui(player)
+                self.draw_deck_ui(player)
+
+
+
     # ====================================
     # UI functions
     # ====================================
 
+
     def draw_deck_ui(self, player):
+        global global_vars_deck_slots
+        if global_vars_deck_slots[player]:
+            for card_ui in global_vars_deck_slots[player]:
+                card_ui.kill()
         deck = self.decks[player]
         if not deck:
             return
@@ -290,6 +307,7 @@ class SHCGGameState:
                 ui_manager
             )
             card_ui.set_image(draw_card(deck[i]))
+            global_vars_deck_slots[player].append(card_ui)
             if i == len(deck) - 1:
                 self.top_of_the_deck_ui_marker[player] = card_ui
                 card_ui.set_tooltip(deck_tooltip_str, delay=0.1, wrap_width=600)
@@ -456,6 +474,8 @@ pygame.draw.rect(image_405_card_slot, deep_dark_blue, pygame.Rect(0, 0, 100, 145
 # =====================================
 # Example UI Components
 # =====================================
+
+global_vars_deck_slots: dict[int, list[pygame_gui.elements.UIImage]] = {1: [], 2: []}
 
 label_leader_1 = pygame_gui.elements.UILabel(pygame.Rect((50, 10), (200, 50)),
                                     "Player 1",
@@ -786,10 +806,8 @@ def start_new_game():
     # draw UI components
     example_deck_1: list[cards.Card] = []
     example_deck_2: list[cards.Card] = []
-    # card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
-    #               cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
-    #               cards.機構翼の少女ローザ]
-    card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.フェアリーアサルト,
+    card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
+                  cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
                   cards.機構翼の少女ローザ]
     example_deck_1 = [random.choice(card_types)() for _ in range(40)]
     example_deck_2 = [random.choice(card_types)() for _ in range(40)]
@@ -953,6 +971,7 @@ if __name__ == "__main__":
                                         target_card = global_vars_shcg.fields[cp][index]
                                         if target_card.type == 'follower' and target_card.can_enhance:
                                             target_card.on_enhance_effect(cp)
+                                            global_vars_shcg.on_card_enhanced(cp, target_card)
                                             text_box.append_html_text(f"Player {cp} enhanced {target_card}. \n")
                                             global_vars_shcg.enhance_used_this_turn[cp] += 1
                                             global_vars_shcg.draw_field_ui(cp)

@@ -183,6 +183,7 @@ class 機構翼の少女ローザ(Follower):
         super().__init__(name="機構翼の少女・ローザ", cost=2, attack=1, hp=3, can_enhance=True)
         self.description = "相応なんでしょう、私には、この鳥籠の世界が。飛べるだけで幸せなんです。だから、きっとこれでいい。"
         self.description_e = "壮観なんでしょう、本当の空から見下ろす景色は。桃源郷はここなんです。だけど、いつかはきっと――。"
+        self.effect_description = "進化時1枚引く。"
         self.ability_protect = True
 
 

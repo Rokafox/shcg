@@ -165,10 +165,10 @@ class GameSimulator:
                     if target.hp <= 0:
                         if target in state.fields[player]:
                             state.fields[player].remove(target)
-                            print(f"Dealt 6 damage to friendly {target.name}. New HP: {target.hp}")
+                            # print(f"Dealt 6 damage to friendly {target.name}. New HP: {target.hp}")
                         else:
                             state.fields[3 - player].remove(target)
-                            print(f"Dealt 6 damage to enemy {target.name}. New HP: {target.hp}")
+                            # print(f"Dealt 6 damage to enemy {target.name}. New HP: {target.hp}")
                 else:
                     # フォロワーがないとき、相手のリーダーに6ダメージ。
                     assert not state.fields[player] and not state.fields[3 - player]
@@ -259,6 +259,13 @@ class GameSimulator:
 
         # Apply enhance effect
         follower.on_enhance_effect(player)
+        # additional effects handled in on_enhance_effect
+        if follower.name == "機構翼の少女・ローザ":
+            # 1枚引く
+            if state.decks[player] and len(state.hands[player]) < 9:
+                drawn_card = state.decks[player].pop()
+                state.hands[player].append(drawn_card)
+                print(f"Player {player} drew a card due to Rosa's enhance effect.")
 
         return True
 
@@ -676,9 +683,8 @@ class MinimaxAI:
                     break
             if actual_card is None:
                 raise Exception("Card to play not found in hand.")
-                # return False
 
-            # Find actual target if needed
+            # Some card requires target
             actual_target = None
             if target is not None:
                 # find in field, hand
@@ -713,7 +719,7 @@ class MinimaxAI:
                         actual_target = f
                         break
                 if actual_target is None:
-                    return False
+                    raise Exception("Attack target not found on field.")
 
             return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)
 
@@ -726,7 +732,7 @@ class MinimaxAI:
                     actual_follower = f
                     break
             if actual_follower is None:
-                return False
+                raise Exception("Follower to enhance not found on field.")
 
             return GameSimulator.enhance_follower(state, player, actual_follower)
 
@@ -794,7 +800,7 @@ class MinimaxAIPlayer:
                     break
 
             if actual_card is None:
-                return self.take_turn(game_state, ui_draw, ui_set_text, text_box)
+                raise Exception("Card to play not found in hand.")
 
             # Find actual target if needed
             actual_target = None
@@ -803,6 +809,8 @@ class MinimaxAIPlayer:
                     if f.unique_id == target_template.unique_id:
                         actual_target = f
                         break
+                if actual_target is None:
+                    raise Exception("Target for card play not found.")
 
             game_state.play_card(player, actual_card, ui_draw, ui_set_text, ai_target=actual_target, is_ai_player=True)
             return [('play', actual_card)]
@@ -818,7 +826,7 @@ class MinimaxAIPlayer:
                     break
 
             if actual_attacker is None:
-                return self.take_turn(game_state, ui_draw, ui_set_text, text_box)
+                raise Exception("Attacker not found on field.")
 
             # Find actual target
             if target_template == "leader":
@@ -832,7 +840,7 @@ class MinimaxAIPlayer:
                         break
 
                 if actual_target is None:
-                    return self.take_turn(game_state, ui_draw, ui_set_text, text_box)
+                    raise Exception("Attack target not found on field.")
 
             game_state.follower_attack(player, actual_attacker, actual_target, ui_draw, ui_set_text)
             return [('attack', actual_attacker, actual_target)]
@@ -848,11 +856,12 @@ class MinimaxAIPlayer:
                     break
 
             if actual_follower is None:
-                return self.take_turn(game_state, ui_draw, ui_set_text, text_box)
+                raise Exception("Follower to enhance not found on field.")
 
             actual_follower.on_enhance_effect(player)
             game_state.enhance_used_this_turn[player] += 1
             game_state.use_foxtail(player, 1, ui_draw, ui_set_text)
+            game_state.on_card_enhanced(player, actual_follower)
             if ui_draw:
                 game_state.draw_field_ui(player)
             if ui_set_text and text_box:

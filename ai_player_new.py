@@ -119,6 +119,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.name = card.name
         new_card.cost = card.cost
         new_card.type = card.type
+        new_card.unique_id = card.unique_id
         new_card.description = getattr(card, 'description', '')
         new_card.effect_description = getattr(card, 'effect_description', '')
         new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')

@@ -73,6 +73,8 @@ class SHCGGameState:
         if card.request_card_selection_on_play:
             if is_ai_player:
                 target = ai_target
+                if ui_set_text:
+                    text_box.append_html_text(f"AI Player {player} selected target {target} for playing {card}.\n")
             else:
                 target = None
                 if card.request_card_selection_on_play == "field":
@@ -80,12 +82,12 @@ class SHCGGameState:
                         if f"{i + 1} {str(c)}" == scsd_player_field.selected_option[0]:
                             target = c
                             break
-                if card.request_card_selection_on_play == "field_opponent":
+                elif card.request_card_selection_on_play == "field_opponent":
                     for i, c in enumerate(self.fields[3 - player]):
                         if f"{i + 1} {str(c)}" == scsd_opponent_field.selected_option[0]:
                             target = c
                             break
-                if card.request_card_selection_on_play == "field_both":
+                elif card.request_card_selection_on_play == "field_both":
                     for i, c in enumerate(self.fields[player]):
                         if f"CP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
                             target = c
@@ -267,8 +269,56 @@ class SHCGGameState:
             self.foxtail[player] = 9
             self.draw_tail_ui(1)
 
-    def on_card_enhanced(self, player, target_card: cards.Follower):
-        if target_card.name == "機構翼の少女・ローザ":
+    def on_card_enhanced(self, player, enhanced_card: cards.Follower, ai_target: cards.Card | None, is_ai_player: bool, ui_set_text,
+                         ui_draw):
+        if enhanced_card.request_card_selection_on_enhance:
+            if is_ai_player:
+                target = ai_target
+                if ui_set_text:
+                    text_box.append_html_text(f"AI Player {player} selected target {target} when enhancing {enhanced_card}.\n")
+            else:
+                target = None
+                if enhanced_card.request_card_selection_on_enhance == "field":
+                    for i, c in enumerate(self.fields[player]):
+                        if f"{i + 1} {str(c)}" == scsd_player_field.selected_option[0]:
+                            target = c
+                            break
+                elif enhanced_card.request_card_selection_on_enhance == "field_opponent":
+                    for i, c in enumerate(self.fields[3 - player]):
+                        if f"{i + 1} {str(c)}" == scsd_opponent_field.selected_option[0]:
+                            target = c
+                            break
+                elif enhanced_card.request_card_selection_on_enhance == "field_both":
+                    for i, c in enumerate(self.fields[player]):
+                        if f"CP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
+                            target = c
+                            break
+                    if target is None:
+                        for i, c in enumerate(self.fields[3 - player]):
+                            if f"OP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
+                                target = c
+                                break
+                if ui_set_text:
+                    text_box.append_html_text(f"Player {player} selected target {target} when enhancing {enhanced_card}.\n")
+            if enhanced_card.name == "飢餓の使徒":
+                # 場の他のフォロワー1体を選ぶ。それに3ダメージ。それは攻撃力+3する。
+                # if target is not self
+                if target is not None and target != enhanced_card:
+                    target.hp -= 3
+                    target.attack += 3
+                    if target.hp <= 0:
+                        if target in self.fields[player]:
+                            self.fields[player].remove(target)
+                        else:
+                            self.fields[3 - player].remove(target)
+                        if ui_set_text:
+                            text_box.append_html_text(f"{target} was destroyed by 飢餓の使徒's enhance effect.\n")
+                    if ui_draw:
+                        self.draw_field_ui(player)
+                        self.draw_field_ui(3 - player)
+                if ui_set_text:
+                    text_box.append_html_text(f"Player {player} selected target {target} when enhancing {enhanced_card}.\n")
+        if enhanced_card.name == "機構翼の少女・ローザ":
             # draw 1 card
             if self.decks[player] and len(self.hands[player]) < 9:
                 drawn_card = self.decks[player].pop()
@@ -808,7 +858,7 @@ def start_new_game():
     example_deck_2: list[cards.Card] = []
     card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
                   cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
-                  cards.機構翼の少女ローザ]
+                  cards.機構翼の少女ローザ, cards.飢餓の使徒]
     example_deck_1 = [random.choice(card_types)() for _ in range(40)]
     example_deck_2 = [random.choice(card_types)() for _ in range(40)]
 
@@ -971,7 +1021,11 @@ if __name__ == "__main__":
                                         target_card = global_vars_shcg.fields[cp][index]
                                         if target_card.type == 'follower' and target_card.can_enhance:
                                             target_card.on_enhance_effect(cp)
-                                            global_vars_shcg.on_card_enhanced(cp, target_card)
+                                            global_vars_shcg.on_card_enhanced(cp, target_card,
+                                                                              ai_target=None,
+                                                                              is_ai_player=False,
+                                                                              ui_draw=True,
+                                                                              ui_set_text=True)
                                             text_box.append_html_text(f"Player {cp} enhanced {target_card}. \n")
                                             global_vars_shcg.enhance_used_this_turn[cp] += 1
                                             global_vars_shcg.draw_field_ui(cp)

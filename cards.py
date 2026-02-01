@@ -44,6 +44,7 @@ class Follower(Card):
         self.is_enhanced: bool = False
         self.summoned_this_turn: bool = True
         self.enhanced_this_turn: bool = False
+        self.request_card_selection_on_enhance: str = ""
         self.attack_ability: int = 0  # 0: cannot attack, 1: can attack follower, 2: can attack player
         self.how_many_attacks_max_of_turn: int = 1  # Number of attacks per turn
         self.how_many_attacks_done_of_turn: int = 0  # Number of attacks done this turn
@@ -186,6 +187,22 @@ class 機構翼の少女ローザ(Follower):
         self.effect_description = "進化時1枚引く。"
         self.ability_protect = True
 
+class 飢餓の使徒(Follower):
+    def __init__(self):
+        super().__init__(name="飢餓の使徒", cost=2, attack=2, hp=2, can_enhance=True)
+        self.description_e = "必死になって、追い立てられて、身を捩るほどに苦悩して。無垢なままでは終わってしまうわよ。"
+        self.effect_description = "場に出す時、自分の場の他のフォロワー1体を選ぶ。それは突進を持つ。" \
+        "進化時、場のフォロワー1体を選ぶ。それに3ダメージ。それは攻撃力+3する。これを選ぶ時、この効果は無効になる。"
+        self.request_card_selection_on_enhance = "field_both"
+        self.request_card_selection_on_play = "field"
+        self.request_card_selection_on_play_amount = 1
+
+    def on_play_effect(self, player: int, target_follower: Follower | None = None):
+        if target_follower is not None:
+            if target_follower.attack_ability < 1:
+                target_follower.advance_attack_ability()
+                if target_follower.how_many_attacks_done_of_turn < target_follower.how_many_attacks_max_of_turn:
+                    target_follower.can_attack_this_turn = True
 
 # ==============================
 # Spells
@@ -222,6 +239,7 @@ class フェアリーアサルト(Spell):
         self.effect_description = "場のフォロワー1体を選び、それに6ダメージ。" \
         "場にフォロワーがないとき、相手のリーダーに6ダメージ。"
         self.request_card_selection_on_play = "field_both"
+        self.request_card_selection_on_play_amount = 1
 
     def on_play_effect(self, player: int, target_follower: Follower | None = None):
         pass

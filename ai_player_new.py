@@ -148,13 +148,29 @@ class GameSimulator:
         if card.request_card_selection_on_play:
             if card.request_card_selection_on_play == "field":
                 card.on_play_effect(player, target)
-            if target is None and card.name == "ミヒライテ":
+            if card.name == "ミヒライテ" and target is None:
                 # 自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。
                 if not state.fields[player]:
                     state.hp[3 - player] -= 1
                     if state.hp[3 - player] <= 0:
                         state.concluded = True
                         state.winner = player
+            if card.name == "フェアリーアサルト":
+                if target is not None:
+                    # 場のフォロワー1体を選び、それに6ダメージ。
+                    target.hp -= 6
+                    if target.hp <= 0:
+                        if target in state.fields[player]:
+                            state.fields[player].remove(target)
+                        else:
+                            state.fields[3 - player].remove(target)
+                else:
+                    # フォロワーがないとき、相手のリーダーに6ダメージ。
+                    if not state.fields[player] and not state.fields[3 - player]:
+                        state.hp[3 - player] -= 6
+                        if state.hp[3 - player] <= 0:
+                            state.concluded = True
+                            state.winner = player
 
         if card.request_card_target_on_play:
             if card.request_card_target_on_play == "deck_top":
@@ -304,14 +320,28 @@ class MoveGenerator:
                 continue
 
             # Handle targeting cards
-            if hasattr(card, 'request_card_selection_on_play'):
-                if card.request_card_selection_on_play == "field":
-                    # Needs a target on field
-                    targets = [f for f in state.fields[player] if f.type == 'follower']
-                    if targets:
-                        for target in targets:
-                            playable.append((card, target))
-                # If no targets, can't play
+            if card.request_card_selection_on_play == "field":
+                # If target available, add all possible targets, else add None
+                targets = [f for f in state.fields[player] if f.type == 'follower']
+                if targets:
+                    for target in targets:
+                        playable.append((card, target))
+                else:
+                    playable.append((card, None))
+            elif card.request_card_selection_on_play == "field_opponent":
+                targets = [f for f in state.fields[3 - player] if f.type == 'follower']
+                if targets:
+                    for target in targets:
+                        playable.append((card, target))
+                else:
+                    playable.append((card, None))
+            elif card.request_card_selection_on_play == "field_both":
+                targets = [f for f in state.fields[player] + state.fields[3 - player] if f.type == 'follower']
+                if targets:
+                    for target in targets:
+                        playable.append((card, target))
+                else:
+                    playable.append((card, None))
             else:
                 playable.append((card, None))
 
@@ -825,7 +855,7 @@ class MinimaxAIPlayer:
                         actual_target = f
                         break
 
-            game_state.play_card(player, actual_card, ui_draw, ui_set_text, ai_target=actual_target)
+            game_state.play_card(player, actual_card, ui_draw, ui_set_text, ai_target=actual_target, is_ai_player=True)
             return [('play', actual_card)]
 
         elif action_type == 'attack':

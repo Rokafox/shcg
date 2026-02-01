@@ -187,7 +187,7 @@ class ミヒライテ(Spell):
     def __init__(self):
         super().__init__(name="ミヒライテ", cost=1)
         self.effect_description = "自分の場のフォロワー1体を選ぶ。それは攻撃力+2/体力+1する。それが『唯我の絶傑・マゼルベイン』なら、代わりに攻撃力+4/体力+2する。" \
-        " 自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。"
+        "自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。"
         self.request_card_selection_on_play = "field"
         self.request_card_selection_on_play_amount = 1
 
@@ -205,9 +205,9 @@ class ミヒライテ(Spell):
 class フェアリーアサルト(Spell):
     def __init__(self):
         super().__init__(name="フェアリーアサルト", cost=2)
-        self.effect_description = "場のフォロワー1体を選び、それに6ダメージ。"
+        self.effect_description = "場のフォロワー1体を選び、それに6ダメージ。" \
+        "場にフォロワーがないとき、相手のリーダーに6ダメージ。"
         self.request_card_selection_on_play = "field_both"
 
     def on_play_effect(self, player: int, target_follower: Follower | None = None):
-        if target_follower is not None:
-            target_follower.hp -= 6
+        pass

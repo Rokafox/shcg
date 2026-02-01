@@ -1,8 +1,11 @@
+import random
+
 class Card:
     def __init__(self, name, cost, card_type):
         self.name = name
         self.cost = cost
         self.type = card_type
+        self.unique_id: int = random.randint(1, 1_000_000_000)
         self.description = ""
         self.effect_description = ""
         self.request_card_selection_on_play: str = "" # e.g., "field"

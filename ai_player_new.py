@@ -92,6 +92,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.name = card.name
         new_card.cost = card.cost
         new_card.type = card.type
+        new_card.unique_id = card.unique_id
         new_card.description = card.description
         new_card.effect_description = getattr(card, 'effect_description', '')
         new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')
@@ -151,11 +152,11 @@ class GameSimulator:
                 card.on_play_effect(player, target)
             if card.name == "ミヒライテ" and target is None:
                 # 自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。
-                if not state.fields[player]:
-                    state.hp[3 - player] -= 1
-                    if state.hp[3 - player] <= 0:
-                        state.concluded = True
-                        state.winner = player
+                assert not state.fields[player]
+                state.hp[3 - player] -= 1
+                if state.hp[3 - player] <= 0:
+                    state.concluded = True
+                    state.winner = player
             if card.name == "フェアリーアサルト":
                 if target is not None:
                     # 場のフォロワー1体を選び、それに6ダメージ。
@@ -169,11 +170,12 @@ class GameSimulator:
                             print(f"Dealt 6 damage to enemy {target.name}. New HP: {target.hp}")
                 else:
                     # フォロワーがないとき、相手のリーダーに6ダメージ。
-                    if not state.fields[player] and not state.fields[3 - player]:
-                        state.hp[3 - player] -= 6
-                        if state.hp[3 - player] <= 0:
-                            state.concluded = True
-                            state.winner = player
+                    assert not state.fields[player] and not state.fields[3 - player]
+                    state.hp[3 - player] -= 6
+                    if state.hp[3 - player] <= 0:
+                        state.concluded = True
+                        state.winner = player
+
 
         if card.request_card_target_on_play:
             if card.request_card_target_on_play == "deck_top":
@@ -651,7 +653,7 @@ class MinimaxAI:
         for follower in MoveGenerator.get_enhanceable_followers(state, player):
             actions.append(('enhance', follower))
 
-        # Draw (limit to avoid spam)
+        # Draw
         if MoveGenerator.can_draw_card(state, player):
             actions.append(('draw',))
 
@@ -664,21 +666,27 @@ class MinimaxAI:
         if action_type == 'play':
             card, target = action[1], action[2]
             # Find the actual card in the state's hand
+            # print(type(card))
+            # print(type(target))
             actual_card = None
             for c in state.hands[player]:
-                if c.name == card.name and c.cost == card.cost:
+                if c.unique_id == card.unique_id:
                     actual_card = c
                     break
             if actual_card is None:
-                return False
+                raise Exception("Card to play not found in hand.")
+                # return False
 
             # Find actual target if needed
             actual_target = None
             if target is not None:
-                for f in state.fields[player]:
-                    if f.name == target.name and f.attack == target.attack and f.hp == target.hp:
+                # find in field, hand
+                for f in state.fields[player] + state.fields[3 - player] + state.hands[player] + state.hands[3 - player]:
+                    if f.unique_id == target.unique_id:
                         actual_target = f
                         break
+                if actual_target is None:
+                    raise Exception("Target for card play not found.")
 
             return GameSimulator.play_card(state, player, actual_card, actual_target)
 
@@ -687,12 +695,11 @@ class MinimaxAI:
             # Find actual attacker
             actual_attacker = None
             for f in state.fields[player]:
-                if (f.name == attacker.name and f.attack == attacker.attack and
-                    f.hp == attacker.hp and f.can_attack_this_turn):
+                if (f.unique_id == attacker.unique_id and f.can_attack_this_turn):
                     actual_attacker = f
                     break
             if actual_attacker is None:
-                return False
+                raise Exception("Attacker not found on field.")
 
             # Find actual target
             if target == "leader":
@@ -701,7 +708,7 @@ class MinimaxAI:
                 actual_target = None
                 opponent = 3 - player
                 for f in state.fields[opponent]:
-                    if f.name == target.name and f.attack == target.attack and f.hp == target.hp:
+                    if f.unique_id == target.unique_id:
                         actual_target = f
                         break
                 if actual_target is None:
@@ -714,8 +721,7 @@ class MinimaxAI:
             # Find actual follower
             actual_follower = None
             for f in state.fields[player]:
-                if (f.name == follower.name and f.attack == follower.attack and
-                    f.hp == follower.hp and hasattr(f, 'can_enhance') and f.can_enhance):
+                if (f.unique_id == follower.unique_id and f.can_enhance):
                     actual_follower = f
                     break
             if actual_follower is None:
@@ -727,86 +733,6 @@ class MinimaxAI:
             return GameSimulator.draw_card(state, player)
 
         return False
-
-    def _minimax(self, state: GameStateSnapshot, depth: int, is_maximizing: bool,
-                 alpha: float, beta: float) -> float:
-        """
-        Minimax with alpha-beta pruning.
-        Not used.
-
-        Args:
-            state: Current game state
-            depth: Remaining depth to search
-            is_maximizing: True if it's the AI's turn
-            alpha: Best score for maximizing player
-            beta: Best score for minimizing player
-
-        Returns:
-            Evaluation score
-        """
-        self.nodes_evaluated += 1
-
-        # Terminal conditions
-        if state.concluded:
-            return Evaluator.evaluate(state, self.player_number)
-
-        if depth <= 0:
-            return Evaluator.evaluate(state, self.player_number)
-
-        current_player = state.current_player
-
-        if is_maximizing:
-            # AI's turn - maximize score
-            max_eval = float('-inf')
-
-            # Generate all possible turn sequences (foxtail must be exhausted)
-            sequences = self._generate_turn_sequences(state, current_player)
-
-            for actions in sequences:  # Limit for performance
-                test_state = state.copy()
-                for action in actions:
-                    self._apply_action(test_state, current_player, action)
-
-                GameSimulator.end_turn(test_state)
-
-                if test_state.concluded:
-                    eval_score = Evaluator.evaluate(test_state, self.player_number)
-                else:
-                    eval_score = self._minimax(test_state, depth - 1, False, alpha, beta)
-
-                max_eval = max(max_eval, eval_score)
-                alpha = max(alpha, eval_score)
-
-                if beta <= alpha:
-                    break  # Beta cutoff
-
-            return max_eval
-        else:
-            # Opponent's turn - minimize score
-            min_eval = float('inf')
-
-            # Generate all possible turn sequences for opponent (foxtail must be exhausted)
-            sequences = self._generate_turn_sequences(state, current_player)
-
-            for actions in sequences:  # Limit for performance
-                test_state = state.copy()
-                for action in actions:
-                    self._apply_action(test_state, current_player, action)
-
-                GameSimulator.end_turn(test_state)
-
-                if test_state.concluded:
-                    eval_score = Evaluator.evaluate(test_state, self.player_number)
-                else:
-                    eval_score = self._minimax(test_state, depth - 1, True, alpha, beta)
-
-                min_eval = min(min_eval, eval_score)
-                beta = min(beta, eval_score)
-
-                if beta <= alpha:
-                    break  # Alpha cutoff
-
-            return min_eval
 
 
 class MinimaxAIPlayer:
@@ -862,7 +788,7 @@ class MinimaxAIPlayer:
             # Find the actual card in hand
             actual_card = None
             for c in game_state.hands[player]:
-                if c.name == card_template.name and c.cost == card_template.cost:
+                if c.unique_id == card_template.unique_id:
                     actual_card = c
                     break
 
@@ -872,8 +798,8 @@ class MinimaxAIPlayer:
             # Find actual target if needed
             actual_target = None
             if target_template is not None:
-                for f in game_state.fields[player]:
-                    if f.type == 'follower' and f.name == target_template.name:
+                for f in game_state.fields[player] + game_state.fields[3 - player] + game_state.hands[player] + game_state.hands[3 - player]:
+                    if f.unique_id == target_template.unique_id:
                         actual_target = f
                         break
 
@@ -886,8 +812,7 @@ class MinimaxAIPlayer:
             # Find actual attacker
             actual_attacker = None
             for f in game_state.fields[player]:
-                if (f.type == 'follower' and f.name == attacker_template.name and
-                    f.can_attack_this_turn):
+                if (f.type == 'follower' and f.unique_id == attacker_template.unique_id):
                     actual_attacker = f
                     break
 
@@ -901,7 +826,7 @@ class MinimaxAIPlayer:
                 actual_target = None
                 opponent = 3 - player
                 for f in game_state.fields[opponent]:
-                    if f.type == 'follower' and f.name == target_template.name:
+                    if f.type == 'follower' and f.unique_id == target_template.unique_id:
                         actual_target = f
                         break
 
@@ -917,8 +842,7 @@ class MinimaxAIPlayer:
             # Find actual follower
             actual_follower = None
             for f in game_state.fields[player]:
-                if (f.type == 'follower' and f.name == follower_template.name and
-                    hasattr(f, 'can_enhance') and f.can_enhance):
+                if (f.type == 'follower' and f.unique_id == follower_template.unique_id and f.can_enhance):
                     actual_follower = f
                     break
 

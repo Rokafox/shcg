@@ -6,6 +6,9 @@ class Card:
         self.description = ""
         self.effect_description = ""
         self.request_card_selection_on_play: str = "" # e.g., "field"
+        # field: player field
+        # field_opponent: opponent field
+        # field_both: both fields
         self.request_card_selection_on_play_amount: int = 0
         self.request_card_target_on_play: str = ""
 
@@ -153,7 +156,7 @@ class ガブリエル(Follower):
 
 class ハンサ(Follower):
     def __init__(self):
-        super().__init__(name="ハンサ", cost=1, attack=0, hp=3, can_enhance=False)
+        super().__init__(name="ハンサ", cost=1, attack=0, hp=2, can_enhance=False)
         self.description = "聖鳥は純朴な瞳を誘い、旺盛な食欲を誘う。「ボクはキミたちの心を映す鏡さ！」"
         self.effect_description = "場に出す時、これは攻撃力+Xする。Xは「自分のデッキの上1枚カードのコスト」である。"
         self.request_card_target_on_play = "deck_top"
@@ -183,7 +186,8 @@ class 天なる大河(Spell):
 class ミヒライテ(Spell):
     def __init__(self):
         super().__init__(name="ミヒライテ", cost=1)
-        self.effect_description = "自分の場のフォロワー1体を選ぶ。それは攻撃力+2/体力+1する。それが『唯我の絶傑・マゼルベイン』なら、代わりに攻撃力+4/体力+2する。"
+        self.effect_description = "自分の場のフォロワー1体を選ぶ。それは攻撃力+2/体力+1する。それが『唯我の絶傑・マゼルベイン』なら、代わりに攻撃力+4/体力+2する。" \
+        " 自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。"
         self.request_card_selection_on_play = "field"
         self.request_card_selection_on_play_amount = 1
 
@@ -197,3 +201,13 @@ class ミヒライテ(Spell):
                 target_follower.attack += 2
                 target_follower.hp += 1
                 target_follower.max_hp += 1
+
+class フェアリーアサルト(Spell):
+    def __init__(self):
+        super().__init__(name="フェアリーアサルト", cost=2)
+        self.effect_description = "場のフォロワー1体を選び、それに6ダメージ。"
+        self.request_card_selection_on_play = "field_both"
+
+    def on_play_effect(self, player: int, target_follower: Follower | None = None):
+        if target_follower is not None:
+            target_follower.hp -= 6

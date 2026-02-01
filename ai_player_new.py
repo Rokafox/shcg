@@ -148,6 +148,13 @@ class GameSimulator:
         if card.request_card_selection_on_play:
             if card.request_card_selection_on_play == "field":
                 card.on_play_effect(player, target)
+            if target is None and card.name == "ミヒライテ":
+                # 自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。
+                if not state.fields[player]:
+                    state.hp[3 - player] -= 1
+                    if state.hp[3 - player] <= 0:
+                        state.concluded = True
+                        state.winner = player
 
         if card.request_card_target_on_play:
             if card.request_card_target_on_play == "deck_top":
@@ -297,12 +304,13 @@ class MoveGenerator:
                 continue
 
             # Handle targeting cards
-            if hasattr(card, 'request_card_selection_on_play') and card.request_card_selection_on_play == "field":
-                # Needs a target on field
-                targets = [f for f in state.fields[player] if f.type == 'follower']
-                if targets:
-                    for target in targets:
-                        playable.append((card, target))
+            if hasattr(card, 'request_card_selection_on_play'):
+                if card.request_card_selection_on_play == "field":
+                    # Needs a target on field
+                    targets = [f for f in state.fields[player] if f.type == 'follower']
+                    if targets:
+                        for target in targets:
+                            playable.append((card, target))
                 # If no targets, can't play
             else:
                 playable.append((card, None))
@@ -767,7 +775,7 @@ class MinimaxAIPlayer:
         self.action_index = 0
 
     def take_turn(self, game_state: 'SHCGGameState', ui_draw: bool, ui_set_text: bool,
-                  update_dropdown_func=None, text_box=None) -> list:
+                  text_box=None) -> list:
         """
         Execute one action of the AI's turn.
         Returns a list with the action taken, or empty list if turn should end.
@@ -807,7 +815,7 @@ class MinimaxAIPlayer:
                     break
 
             if actual_card is None:
-                return self.take_turn(game_state, ui_draw, ui_set_text, update_dropdown_func, text_box)
+                return self.take_turn(game_state, ui_draw, ui_set_text, text_box)
 
             # Find actual target if needed
             actual_target = None
@@ -832,7 +840,7 @@ class MinimaxAIPlayer:
                     break
 
             if actual_attacker is None:
-                return self.take_turn(game_state, ui_draw, ui_set_text, update_dropdown_func, text_box)
+                return self.take_turn(game_state, ui_draw, ui_set_text, text_box)
 
             # Find actual target
             if target_template == "leader":
@@ -846,7 +854,7 @@ class MinimaxAIPlayer:
                         break
 
                 if actual_target is None:
-                    return self.take_turn(game_state, ui_draw, ui_set_text, update_dropdown_func, text_box)
+                    return self.take_turn(game_state, ui_draw, ui_set_text, text_box)
 
             game_state.follower_attack(player, actual_attacker, actual_target, ui_draw, ui_set_text)
             return [('attack', actual_attacker, actual_target)]
@@ -863,7 +871,7 @@ class MinimaxAIPlayer:
                     break
 
             if actual_follower is None:
-                return self.take_turn(game_state, ui_draw, ui_set_text, update_dropdown_func, text_box)
+                return self.take_turn(game_state, ui_draw, ui_set_text, text_box)
 
             actual_follower.on_enhance_effect(player)
             game_state.enhance_used_this_turn[player] += 1

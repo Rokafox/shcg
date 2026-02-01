@@ -61,7 +61,7 @@ class SHCGGameState:
 
 
     def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, ai_target: cards.Card | None = None):
-        global single_card_selection_dropdown_field
+        global scsd_player_field, scsd_opponent_field, scsd_all_field, text_box
         require_draw_deck_ui = False
         if len(self.fields[player]) > 4 and card.type != 'spell':
             return
@@ -73,9 +73,28 @@ class SHCGGameState:
             target = ai_target  # Use AI-provided target if available
             if target is None and card.request_card_selection_on_play == "field":
                 for i, c in enumerate(self.fields[player]):
-                    if f"{i + 1} {str(c)}" == single_card_selection_dropdown_field.selected_option[0]:
+                    if f"{i + 1} {str(c)}" == scsd_player_field.selected_option[0]:
                         target = c
                         break
+            if target is None and card.request_card_selection_on_play == "field_opponent":
+                for i, c in enumerate(self.fields[3 - player]):
+                    if f"{i + 1} {str(c)}" == scsd_opponent_field.selected_option[0]:
+                        target = c
+                        break
+            if target is None and card.request_card_selection_on_play == "field_both":
+                for i, c in enumerate(self.fields[player]):
+                    if f"CP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
+                        target = c
+                        break
+                if target is None:
+                    for i, c in enumerate(self.fields[3 - player]):
+                        if f"OP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
+                            target = c
+                            break
+            if target is None and card.name == "ミヒライテ":
+                # 自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。
+                if not self.fields[player]:
+                    self.player_take_damage(3 - player, 1, ui_draw, ui_set_text)
             card.on_play_effect(player, target_follower=target)
         if card.request_card_target_on_play:
             if card.request_card_target_on_play == "deck_top":
@@ -282,7 +301,7 @@ class SHCGGameState:
             else:
                 slots[i].set_image(image_405_card_slot)
                 slots[i].set_tooltip("", delay=0.1, wrap_width=300)
-        update_single_card_selection_dropdown_field_options(self.fields[self.current_player]) # must be current player innstead of player
+        update_scsd_options(self.fields[self.current_player], self.fields[3 - self.current_player]) # must be current player innstead of player
         return
 
 
@@ -428,25 +447,68 @@ end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 
                                     text='End Turn',
                                     manager=ui_manager,)
 
-single_card_selection_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 355), (260, 35)),
+scsd_player_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 355), (260, 35)),
                                     "Select a card on current player field:",
                                     ui_manager,)
 
-single_card_selection_dropdown_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                                  starting_option="",
-                                                                  relative_rect=pygame.Rect((1320, 395), (260, 35)),
-                                                                  manager=ui_manager,)
+# single card selection dropdown
+scsd_player_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
+                                                        starting_option="",
+                                                        relative_rect=pygame.Rect((1320, 395), (260, 35)),
+                                                        manager=ui_manager,)
 
-def update_single_card_selection_dropdown_field_options(options: list[cards.Card]):
-    if not options:
-        return
-    global single_card_selection_dropdown_field
-    single_card_selection_dropdown_field.kill()
-    card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(options)]
-    single_card_selection_dropdown_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
+scsd_opponent_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 435), (260, 35)),
+                                    "Select a card on opponent field:",
+                                    ui_manager,)
+
+scsd_opponent_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
+                                                        starting_option="",
+                                                        relative_rect=pygame.Rect((1320, 475), (260, 35)),
+                                                        manager=ui_manager,)
+
+scsd_all_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 515), (260, 35)),
+                                    "Select a card on either field:",
+                                    ui_manager,)
+
+scsd_all_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
+                                                        starting_option="",
+                                                        relative_rect=pygame.Rect((1320, 545), (260, 35)),
+                                                        manager=ui_manager,)
+
+def update_scsd_options(current_player_field: list[cards.Card], opponent_player_field: list[cards.Card]):
+    global scsd_player_field, scsd_opponent_field, scsd_all_field
+    scsd_player_field.kill()
+    if current_player_field:
+        card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(current_player_field)]
+    else:
+        card_list: list[str] = [""]
+    scsd_player_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
                                                                       starting_option=card_list[0],
-                                                                      relative_rect=pygame.Rect((1320, 360), (260, 50)),
+                                                                      relative_rect=pygame.Rect((1320, 395), (260, 35)),
                                                                       manager=ui_manager,)
+    scsd_opponent_field.kill()
+    if opponent_player_field:
+        card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(opponent_player_field)]
+    else:
+        card_list: list[str] = [""]
+    scsd_opponent_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
+                                                                      starting_option=card_list[0],
+                                                                      relative_rect=pygame.Rect((1320, 475), (260, 35)),
+                                                                      manager=ui_manager,)
+    scsd_all_field.kill()
+    if current_player_field or opponent_player_field:
+        card_list: list[str] = []
+        for i, card in enumerate(current_player_field):
+            card_list.append(f"CP {i + 1} {str(card)}")
+        for i, card in enumerate(opponent_player_field):
+            card_list.append(f"OP {i + 1} {str(card)}")
+    else:
+        card_list: list[str] = [""]
+    scsd_all_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
+                                                                      starting_option=card_list[0],
+                                                                      relative_rect=pygame.Rect((1320, 545), (260, 35)),
+                                                                      manager=ui_manager,)
+
 
 settings_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 330), (200, 50)),
                                     text='Settings',
@@ -703,7 +765,7 @@ def start_new_game():
     example_deck_1: list[cards.Card] = []
     example_deck_2: list[cards.Card] = []
     card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
-                  cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ]
+                  cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト]
     example_deck_1 = [random.choice(card_types)() for _ in range(40)]
     example_deck_2 = [random.choice(card_types)() for _ in range(40)]
 
@@ -921,7 +983,6 @@ if __name__ == "__main__":
                         global_vars_shcg,
                         ui_draw=True,
                         ui_set_text=True,
-                        update_dropdown_func=update_single_card_selection_dropdown_field_options,
                         text_box=text_box
                     )
                     active_ai_manager.last_ai_action_time = current_time

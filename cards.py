@@ -1,4 +1,8 @@
 import random
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from super_hard_card_game import SHCGGameState
+
 
 class Card:
     def __init__(self, name, cost, card_type):
@@ -31,6 +35,11 @@ class Card:
 
     def start_of_turn_on_field_effect(self, player: int):
         pass
+
+    def end_of_turn_on_field_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
+        pass
+
+
 
 
 class Follower(Card):
@@ -102,8 +111,28 @@ class Follower(Card):
             if self.how_many_attacks_done_of_turn < self.how_many_attacks_max_of_turn:
                 self.can_attack_this_turn = True
             
-    def on_enhance_effect(self, player: int):
+    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect: Card | None):
         self.on_enhance_effect_default()
+
+    def take_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                    attacker: Card | None):
+        self.hp -= damage_amount
+        # find out which player's field this follower is on
+        for p in [1, 2]:
+            if self in game_state.fields[p]:
+                player = p
+                break
+        if self.hp <= 0:
+            # Follower is destroyed
+            game_state.fields[player].remove(self)
+            if set_text:
+                the_actual_textbox.append_html_text(f"{self} on field of player {player} was destroyed by {attacker}.\n")
+        else:
+            if set_text:
+                the_actual_textbox.append_html_text(f"{self} took {damage_amount} damage from {attacker}.\n")
+        if draw_ui:
+            game_state.draw_field_ui(player)
 
     def __repr__(self):
         return f"{self.name} ({self.attack}/{self.hp})"
@@ -178,6 +207,13 @@ class 唯我の絶傑マゼルベイン(Follower):
         super().__init__(name="唯我の絶傑・マゼルベイン", cost=4, attack=5, hp=5, can_enhance=True)
         self.effect_description = "自分のエンドフェイズが来た、自分のフェルトこれしかないとき、相手の場のフォロワーすべてに3ダメージ。進化後なら5ダメージ。"
 
+    def end_of_turn_on_field_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
+        if len(game_state.fields[game_state.current_player]) == 1 and game_state.fields[game_state.current_player][0].name == self.name:
+            damage_amount = 5 if self.is_enhanced else 3
+            for c in game_state.fields[game_state.opponent].copy():
+                if isinstance(c, Follower):
+                    c.take_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+
 
 class 機構翼の少女ローザ(Follower):
     def __init__(self):
@@ -186,6 +222,19 @@ class 機構翼の少女ローザ(Follower):
         self.description_e = "壮観なんでしょう、本当の空から見下ろす景色は。桃源郷はここなんです。だけど、いつかはきっと――。"
         self.effect_description = "進化時1枚引く。"
         self.ability_protect = True
+
+    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect: Card | None):
+        self.on_enhance_effect_default()
+        if game_state.decks[game_state.current_player] and len(game_state.hands[game_state.current_player]) < 9:
+            drawn_card = game_state.decks[game_state.current_player].pop()
+            game_state.hands[game_state.current_player].append(drawn_card)
+            if set_text:
+                the_actual_textbox.append_html_text(f"Player {game_state.current_player} drew 1 card {drawn_card} due to 機構翼の少女・ローザ's effect. \n")
+            if draw_ui:
+                game_state.draw_hand_ui(game_state.current_player)
+                game_state.draw_deck_ui(game_state.current_player)
+
 
 class 飢餓の使徒(Follower):
     def __init__(self):
@@ -203,6 +252,18 @@ class 飢餓の使徒(Follower):
                 target_follower.advance_attack_ability()
                 if target_follower.how_many_attacks_done_of_turn < target_follower.how_many_attacks_max_of_turn:
                     target_follower.can_attack_this_turn = True
+
+    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect: Card | None):
+        self.on_enhance_effect_default()
+        target = selected_card_for_effect
+        if target is not None and isinstance(target, Follower) and target != self:
+            target.take_damage(3, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+            target.attack += 3
+            if set_text:
+                the_actual_textbox.append_html_text(f"{target} gained +3 attack.\n")
+
+
 
 # ==============================
 # Spells

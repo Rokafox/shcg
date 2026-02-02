@@ -20,9 +20,9 @@ class GameStateSnapshot:
         self.turn: int = 1
         self.concluded: bool = False
         self.winner: Optional[int] = None
-        self.decks: dict[int, list] = {1: [], 2: []}
-        self.hands: dict[int, list] = {1: [], 2: []}
-        self.fields: dict[int, list] = {1: [], 2: []}
+        self.decks: dict[int, list[cards.Card]] = {1: [], 2: []}
+        self.hands: dict[int, list[cards.Card]] = {1: [], 2: []}
+        self.fields: dict[int, list[cards.Card]] = {1: [], 2: []}
         self.hp: dict[int, int] = {1: 20, 2: 20}
         self.foxtail: dict[int, int] = {1: 9, 2: 9}
         self.enhance_used_this_turn: dict[int, int] = {1: 0, 2: 0}
@@ -258,26 +258,9 @@ class GameSimulator:
         state.enhance_used_this_turn[player] += 1
 
         if follower.request_card_selection_on_enhance:
-            if follower.name == "飢餓の使徒":
-                # 相手の場のフォロワー1体に3ダメージ。それは攻撃力+3する。
-                # target must not be self
-                if extra_target is not None and extra_target != follower:
-                    extra_target.hp -= 3
-                    extra_target.attack += 3
-                    if extra_target.hp <= 0:
-                        if extra_target in state.fields[3 - player]:
-                            state.fields[3 - player].remove(extra_target)
-                        else:
-                            state.fields[player].remove(extra_target)
-
-        # Apply enhance effect
-        follower.on_enhance_effect(player)
-        # additional effects handled in on_enhance_effect
-        if follower.name == "機構翼の少女・ローザ":
-            # 1枚引く
-            if state.decks[player] and len(state.hands[player]) < 9:
-                drawn_card = state.decks[player].pop()
-                state.hands[player].append(drawn_card)
+            follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_target)
+        else:
+            follower.on_enhance_effect(state, False, False, None)
 
         return True
 
@@ -297,13 +280,8 @@ class GameSimulator:
     @staticmethod
     def end_turn(state: GameStateSnapshot):
 
-        if len(state.fields[state.current_player]) == 1 and state.fields[state.current_player][0].name == "唯我の絶傑・マゼルベイン":
-            mazelbain = state.fields[state.current_player][0]
-            damage_amount = 5 if mazelbain.is_enhanced else 3
-            for follower in state.fields[state.opponent][:]:  # Copy the list to avoid modification during iteration
-                follower.hp -= damage_amount
-                if follower.hp <= 0:
-                    state.fields[state.opponent].remove(follower)
+        for c in state.fields[state.current_player] + state.fields[state.opponent]:
+            c.end_of_turn_on_field_effect(state, False, False, None)
 
         """End the current turn and start the opponent's turn."""
         state.current_player = state.opponent
@@ -908,14 +886,8 @@ class MinimaxAIPlayer:
                 if actual_target is None:
                     raise Exception("Target for card play not found.")
 
-            actual_follower.on_enhance_effect(player)
-            game_state.enhance_used_this_turn[player] += 1
-            game_state.use_foxtail(player, 1, ui_draw, ui_set_text)
             game_state.on_card_enhanced(player, actual_follower, actual_target, is_ai_player=True, ui_set_text=ui_set_text, ui_draw=ui_draw)
-            if ui_draw:
-                game_state.draw_field_ui(player)
-            if ui_set_text and text_box:
-                text_box.append_html_text(f"AI Player {player} enhanced {actual_follower}.\n")
+
             return [('enhance', actual_follower)]
 
         elif action_type == 'draw':

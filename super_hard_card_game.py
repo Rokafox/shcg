@@ -200,17 +200,8 @@ class SHCGGameState:
 
 
     def end_turn(self, ui_draw, ui_set_text):
-        # 唯我の絶傑・マゼルベイン
-        # 自分のエンドフェイズが来た、自分のフェルトこれしかないとき、相手の場のフォロワーすべてに3ダメージ。進化後なら5ダメージ。
-        if len(self.fields[self.current_player]) == 1 and self.fields[self.current_player][0].name == "唯我の絶傑・マゼルベイン":
-            mazelbain = self.fields[self.current_player][0]
-            damage_amount = 5 if mazelbain.is_enhanced else 3
-            for follower in self.fields[self.opponent][:]:  # Copy the list to avoid modification during iteration
-                follower.hp -= damage_amount
-                if follower.hp <= 0:
-                    self.fields[self.opponent].remove(follower)
-                    if ui_set_text:
-                        text_box.append_html_text(f"Player {self.opponent}'s {follower} was destroyed.\n")
+        for c in self.fields[self.current_player] + self.fields[self.opponent]:
+            c.end_of_turn_on_field_effect(self, ui_draw, ui_set_text, text_box)
         if self.concluded:
             text_box.append_html_text("The game has concluded. Start a new game instead.\n")
             return
@@ -269,26 +260,43 @@ class SHCGGameState:
             self.foxtail[player] = 9
             self.draw_tail_ui(1)
 
-    def on_card_enhanced(self, player, enhanced_card: cards.Follower, ai_target: cards.Card | None, is_ai_player: bool, ui_set_text,
+    def on_card_enhanced(self, player, card_to_enhance: cards.Follower, additional_target: cards.Card | None, is_ai_player: bool, ui_set_text,
                          ui_draw):
-        if enhanced_card.request_card_selection_on_enhance:
+        # not having foxtail will return early
+        if self.foxtail[player] < 1:
+            if ui_set_text:
+                text_box.append_html_text(f"Warning: Player {player} does not have enough foxtail to enhance {card_to_enhance}.\n")
+            return
+        if self.enhance_used_this_turn[player] >= self.max_enhance_allowed_per_turn[player]:
+            if ui_set_text:
+                text_box.append_html_text(f"Warning: Player {player} has used up all enhance allowed this turn to enhance {card_to_enhance}.\n")
+            return
+        if not hasattr(card_to_enhance, 'can_enhance') or not card_to_enhance.can_enhance:
+            if ui_set_text:
+                text_box.append_html_text(f"Warning: {card_to_enhance} cannot be enhanced.\n")
+            return
+        if card_to_enhance not in self.fields[player]:
+            if ui_set_text:
+                text_box.append_html_text(f"Warning: {card_to_enhance} is not on Player {player}'s field, cannot enhance.\n")
+            return
+        if card_to_enhance.request_card_selection_on_enhance:
             if is_ai_player:
-                target = ai_target
+                target = additional_target
                 if ui_set_text:
-                    text_box.append_html_text(f"AI Player {player} selected target {target} when enhancing {enhanced_card}.\n")
+                    text_box.append_html_text(f"Target {target} selected when enhancing {card_to_enhance}.\n")
             else:
                 target = None
-                if enhanced_card.request_card_selection_on_enhance == "field":
+                if card_to_enhance.request_card_selection_on_enhance == "field":
                     for i, c in enumerate(self.fields[player]):
                         if f"{i + 1} {str(c)}" == scsd_player_field.selected_option[0]:
                             target = c
                             break
-                elif enhanced_card.request_card_selection_on_enhance == "field_opponent":
+                elif card_to_enhance.request_card_selection_on_enhance == "field_opponent":
                     for i, c in enumerate(self.fields[3 - player]):
                         if f"{i + 1} {str(c)}" == scsd_opponent_field.selected_option[0]:
                             target = c
                             break
-                elif enhanced_card.request_card_selection_on_enhance == "field_both":
+                elif card_to_enhance.request_card_selection_on_enhance == "field_both":
                     for i, c in enumerate(self.fields[player]):
                         if f"CP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
                             target = c
@@ -299,34 +307,21 @@ class SHCGGameState:
                                 target = c
                                 break
                 if ui_set_text:
-                    text_box.append_html_text(f"Player {player} selected target {target} when enhancing {enhanced_card}.\n")
-            if enhanced_card.name == "飢餓の使徒":
-                # 場の他のフォロワー1体を選ぶ。それに3ダメージ。それは攻撃力+3する。
-                # if target is not self
-                if target is not None and target != enhanced_card:
-                    target.hp -= 3
-                    target.attack += 3
-                    if target.hp <= 0:
-                        if target in self.fields[player]:
-                            self.fields[player].remove(target)
-                        else:
-                            self.fields[3 - player].remove(target)
-                        if ui_set_text:
-                            text_box.append_html_text(f"{target} was destroyed by 飢餓の使徒's enhance effect.\n")
-                    if ui_draw:
-                        self.draw_field_ui(player)
-                        self.draw_field_ui(3 - player)
-                if ui_set_text:
-                    text_box.append_html_text(f"Player {player} selected target {target} when enhancing {enhanced_card}.\n")
-        if enhanced_card.name == "機構翼の少女・ローザ":
-            # draw 1 card
-            if self.decks[player] and len(self.hands[player]) < 9:
-                drawn_card = self.decks[player].pop()
-                self.hands[player].append(drawn_card)
-                text_box.append_html_text(f"Player {player} drew 1 card {drawn_card} due to 機構翼の少女・ローザ's effect. \n")
-                self.draw_hand_ui(player)
-                self.draw_deck_ui(player)
-
+                    text_box.append_html_text(f"Target {target} selected when enhancing {card_to_enhance}.\n")
+            card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
+                                              the_actual_textbox=text_box,
+                                              selected_card_for_effect=target)
+        else:
+            card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
+                                              the_actual_textbox=text_box,
+                                              selected_card_for_effect=None)
+        
+        if ui_set_text:
+            text_box.append_html_text(f"{card_to_enhance} enhanced. \n")
+        global_vars_shcg.enhance_used_this_turn[cp] += 1
+        global_vars_shcg.use_foxtail(cp, 1, ui_draw=True, ui_set_text=True)
+        if ui_draw:
+            global_vars_shcg.draw_field_ui(cp)
 
 
     # ====================================
@@ -1019,17 +1014,13 @@ if __name__ == "__main__":
                                 if slot.rect.collidepoint(event.pos):
                                     if index < len(global_vars_shcg.fields[cp]):
                                         target_card = global_vars_shcg.fields[cp][index]
-                                        if target_card.type == 'follower' and target_card.can_enhance:
-                                            target_card.on_enhance_effect(cp)
-                                            global_vars_shcg.on_card_enhanced(cp, target_card,
-                                                                              ai_target=None,
+                                        if isinstance(target_card, cards.Follower) and target_card.can_enhance:
+                                            global_vars_shcg.on_card_enhanced(cp, card_to_enhance=target_card,
+                                                                              additional_target=None,
                                                                               is_ai_player=False,
                                                                               ui_draw=True,
                                                                               ui_set_text=True)
-                                            text_box.append_html_text(f"Player {cp} enhanced {target_card}. \n")
-                                            global_vars_shcg.enhance_used_this_turn[cp] += 1
-                                            global_vars_shcg.draw_field_ui(cp)
-                                            global_vars_shcg.use_foxtail(cp, 1, ui_draw=True, ui_set_text=True)
+
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
                     else:

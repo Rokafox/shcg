@@ -12,7 +12,8 @@ if TYPE_CHECKING:
 MAX_FIELD_SIZE = 5
 MAX_HAND_SIZE = 9
 MAX_FOXTAIL = 9
-DEFAULT_HP = 20
+DEFAULT_HP_F = 20
+DEFAULT_HP_S = 24
 DEFAULT_MAX_ENHANCE_PER_TURN = 1
 
 # AI constants
@@ -57,14 +58,14 @@ class GameStateSnapshot:
     Does not include any UI elements.
     """
     def __init__(self):
-        self.current_player: int = 1
+        self.current_player: int = 2
         self.turn: int = 1
         self.concluded: bool = False
         self.winner: Optional[int] = None
         self.decks: dict[int, list[cards.Card]] = {1: [], 2: []}
         self.hands: dict[int, list[cards.Card]] = {1: [], 2: []}
         self.fields: dict[int, list[cards.Card]] = {1: [], 2: []}
-        self.hp: dict[int, int] = {1: DEFAULT_HP, 2: DEFAULT_HP}
+        self.hp: dict[int, int] = {1: DEFAULT_HP_S, 2: DEFAULT_HP_F}
         self.foxtail: dict[int, int] = {1: MAX_FOXTAIL, 2: MAX_FOXTAIL}
         self.enhance_used_this_turn: dict[int, int] = {1: 0, 2: 0}
         self.max_enhance_allowed_per_turn: dict[int, int] = {1: DEFAULT_MAX_ENHANCE_PER_TURN, 2: DEFAULT_MAX_ENHANCE_PER_TURN}
@@ -124,7 +125,7 @@ class GameStateSnapshot:
 
         return new_snap
 
-    def player_take_damage(self, player: int, amount: int, **_kwargs) -> bool:
+    def player_take_damage(self, player: int, amount: int, *args, **_kwargs) -> bool:
         """Apply damage to a player. Returns True if player is defeated."""
         assert amount >= 0
         self.hp[player] -= amount
@@ -463,10 +464,11 @@ class Evaluator:
                 return 0.0  # Draw
 
         # 相手がこのターンに直接攻撃で勝てる場合は悪手じゃ
-        protect_exists = any(c.ability_protect for c in state.fields[player])
+        protect_exists = any([c.ability_protect for c in state.fields[player]])
         if not protect_exists:
             total_threat = 0
             max_semi_threat = 0
+            semi_threat_found = False
 
             for f in state.fields[opponent]:
                 if f.type == 'follower' and f.can_attack_this_turn:
@@ -475,10 +477,11 @@ class Evaluator:
                         total_threat += f.attack
                     elif f.attack_ability == 1 and f.can_enhance and f.attack > max_semi_threat:
                         # 強化可能な潜在的脅威（最大のものだけ追跡）
+                        semi_threat_found = True
                         max_semi_threat = f.attack
 
             # 強化後の脅威を加算（+2は強化ボーナス）
-            if max_semi_threat > 0:
+            if max_semi_threat > 0 and semi_threat_found:
                 total_threat += max_semi_threat + 2
 
             if total_threat >= state.hp[player]:
@@ -556,13 +559,7 @@ class MinimaxAI:
 
             # End the turn
             GameSimulator.end_turn(test_state)
-
-            # Evaluate using minimax for remaining depth
-            if self.max_depth > 1:
-                score = self._minimax(test_state, self.max_depth - 1, False,
-                                      float('-inf'), float('inf'))
-            else:
-                score = Evaluator.evaluate(test_state, self.player_number)
+            score = Evaluator.evaluate(test_state, self.player_number)
 
             self.nodes_evaluated += 1
 

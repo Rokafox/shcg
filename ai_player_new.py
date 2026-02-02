@@ -83,6 +83,16 @@ class GameStateSnapshot:
 
         return new_snap
 
+    def player_take_damage(self, player: int, amount: int, ui_draw, ui_set_text) -> bool:
+        assert amount >= 0
+        self.hp[player] -= amount
+        if self.hp[player] <= 0:
+            self.winner = 3 - player
+            self.concluded = True
+            return True
+        return False
+
+
 
 def _copy_card(card: cards.Card) -> cards.Card:
     """Create a deep copy of a card."""
@@ -96,8 +106,6 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.description = card.description
         new_card.effect_description = getattr(card, 'effect_description', '')
         new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')
-        new_card.request_card_selection_on_play_amount = getattr(card, 'request_card_selection_on_play_amount', 0)
-        new_card.request_card_target_on_play = getattr(card, 'request_card_target_on_play', '')
         # Follower specific
         new_card.description_e = getattr(card, 'description_e', '')
         new_card.attack = card.attack
@@ -124,8 +132,6 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.description = getattr(card, 'description', '')
         new_card.effect_description = getattr(card, 'effect_description', '')
         new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')
-        new_card.request_card_selection_on_play_amount = getattr(card, 'request_card_selection_on_play_amount', 0)
-        new_card.request_card_target_on_play = getattr(card, 'request_card_target_on_play', '')
         return new_card
 
 
@@ -150,55 +156,16 @@ class GameSimulator:
 
         # Apply on-play effects
         if card.request_card_selection_on_play:
-            card.on_play_effect(player, target)
-            if card.name == "ミヒライテ" and target is None:
-                # 自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。
-                assert not state.fields[player]
-                state.hp[3 - player] -= 1
-                if state.hp[3 - player] <= 0:
-                    state.concluded = True
-                    state.winner = player
-            if card.name == "フェアリーアサルト":
-                if target is not None:
-                    # 場のフォロワー1体を選び、それに6ダメージ。
-                    target.hp -= 6
-                    if target.hp <= 0:
-                        if target in state.fields[player]:
-                            state.fields[player].remove(target)
-                            # print(f"Dealt 6 damage to friendly {target.name}. New HP: {target.hp}")
-                        else:
-                            state.fields[3 - player].remove(target)
-                            # print(f"Dealt 6 damage to enemy {target.name}. New HP: {target.hp}")
-                else:
-                    # フォロワーがないとき、相手のリーダーに6ダメージ。
-                    assert not state.fields[player] and not state.fields[3 - player]
-                    state.hp[3 - player] -= 6
-                    if state.hp[3 - player] <= 0:
-                        state.concluded = True
-                        state.winner = player
-
-
-        if card.request_card_target_on_play:
-            if card.request_card_target_on_play == "deck_top":
-                target_card = None
-                if state.decks[player]:
-                    target_card = state.decks[player][-1]
-                card.on_play_effect(player, target_card=target_card)
+            card.on_play_effect(state, False, False, None, selected_card_for_effect=target)
+        else:
+            card.on_play_effect(state, False, False, None, None)
 
         if card.type == 'follower':
             state.fields[player].append(card)
         elif card.type == 'amulet':
             state.fields[player].append(card)
         elif card.type == 'spell':
-            if card.name == "天なる大河":
-                num_cards = len(state.hands[player])
-                while state.hands[player]:
-                    c = state.hands[player].pop()
-                    state.decks[player].insert(0, c)  # Place at bottom of deck
-                for _ in range(num_cards + 1):
-                    if state.decks[player]:
-                        drawn_card = state.decks[player].pop()
-                        state.hands[player].append(drawn_card)
+            pass
 
         return True
 
@@ -232,11 +199,7 @@ class GameSimulator:
         elif target == "leader":
             if attacker.attack_ability < 2:
                 return False
-            state.hp[opponent] -= attacker.attack
-            if state.hp[opponent] <= 0:
-                state.concluded = True
-                state.winner = player
-
+            state.player_take_damage(opponent, attacker.attack, ui_draw=False, ui_set_text=False)
             attacker.after_attack_effect()
 
         return True
@@ -282,7 +245,7 @@ class GameSimulator:
     @staticmethod
     def end_turn(state: GameStateSnapshot):
 
-        for c in state.fields[state.current_player] + state.fields[state.opponent]:
+        for c in state.fields[state.current_player].copy():
             c.end_of_turn_on_field_effect(state, False, False, None)
 
         """End the current turn and start the opponent's turn."""
@@ -835,7 +798,7 @@ class MinimaxAIPlayer:
                 if actual_target is None:
                     raise Exception("Target for card play not found.")
 
-            game_state.play_card(player, actual_card, ui_draw, ui_set_text, ai_target=actual_target, is_ai_player=True)
+            game_state.play_card(player, actual_card, ui_draw, ui_set_text, additional_target=actual_target, is_ai_player=True)
             return [('play', actual_card)]
 
         elif action_type == 'attack':

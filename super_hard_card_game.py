@@ -60,7 +60,7 @@ class SHCGGameState:
             # draw_deck_ui is unnecessary as it is handled by pygame event
 
 
-    def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, ai_target: cards.Card | None,
+    def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, additional_target: cards.Card | None,
                   is_ai_player: bool):
         global scsd_player_field, scsd_opponent_field, scsd_all_field, text_box
         require_draw_deck_ui = False
@@ -70,9 +70,11 @@ class SHCGGameState:
             return
         self.use_foxtail(player, card.cost, ui_draw, ui_set_text)
         self.hands[player].remove(card)
+        if ui_set_text:
+            text_box.append_html_text(f"Player {player} played {card}.\n")
         if card.request_card_selection_on_play:
             if is_ai_player:
-                target = ai_target
+                target = additional_target
                 if ui_set_text:
                     text_box.append_html_text(f"AI Player {player} selected target {target} for playing {card}.\n")
             else:
@@ -99,54 +101,23 @@ class SHCGGameState:
                                 break
                 if ui_set_text:
                     text_box.append_html_text(f"Player {player} selected target {target} for playing {card}.\n")
-            if card.name == "ミヒライテ" and target is None:
-                # 自分の場のフォロワーがないとき、相手のリーダーに1ダメージ。
-                if not self.fields[player]:
-                    self.player_take_damage(3 - player, 1, ui_draw, ui_set_text)
-            if card.name == "フェアリーアサルト":
-                # 場のフォロワー1体を選び、それに6ダメージ。
-                if target is not None:
-                    target.hp -= 6
-                    if target.hp <= 0:
-                        if target in self.fields[player]:
-                            self.fields[player].remove(target)
-                        else:
-                            self.fields[3 - player].remove(target)
-                        if ui_set_text:
-                            text_box.append_html_text(f"{target} was destroyed by フェアリーアサルト.\n")
-                else:
-                    # フォロワーがないとき、相手のリーダーに6ダメージ。
-                    if not self.fields[1] and not self.fields[2]:
-                        self.player_take_damage(3 - player, 6, ui_draw, ui_set_text)
-            card.on_play_effect(player, target_follower=target)
-        if card.request_card_target_on_play:
-            if card.request_card_target_on_play == "deck_top":
-                target_card = None
-                if self.decks[player]:
-                    target_card = self.decks[player][-1]
-            card.on_play_effect(player, target_card=target_card)
+            card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
+                                 the_actual_textbox=text_box,
+                                 selected_card_for_effect=target)
+        else:
+            card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
+                                 the_actual_textbox=text_box,
+                                 selected_card_for_effect=None)
         if card.type == 'follower':
             self.fields[player].append(card)
         elif card.type == 'spell':
-            if card.name == "天なる大河":
-                num_cards = len(self.hands[player])
-                while self.hands[player]:
-                    c = self.hands[player].pop()
-                    self.decks[player].insert(0, c)  # Place at bottom of deck
-                for _ in range(num_cards + 1):
-                    if self.decks[player]:
-                        drawn_card = self.decks[player].pop()
-                        self.hands[player].append(drawn_card)
-                require_draw_deck_ui = True
+            pass
         elif card.type == 'amulet':
             self.fields[player].append(card)
-        if ui_set_text:
-            text_box.append_html_text(f"Player {player} played {card}.\n")
         if ui_draw:
             self.draw_hand_ui(player)
             self.draw_field_ui(player)
             self.draw_field_ui(3 - player)
-        if require_draw_deck_ui:
             self.draw_deck_ui(player)
 
 
@@ -164,11 +135,11 @@ class SHCGGameState:
             if target.hp <= 0:
                 self.fields[self.opponent].remove(target)
                 if ui_set_text:
-                    text_box.append_html_text(f"Player {self.opponent}'s {target} was destroyed.\n")
+                    text_box.append_html_text(f"After battle, player {self.opponent}'s defender {target} was taken down by {attacker}.\n")
             if attacker.hp <= 0:
                 self.fields[self.current_player].remove(attacker)
                 if ui_set_text:
-                    text_box.append_html_text(f"Player {player}'s {attacker} was destroyed.\n")
+                    text_box.append_html_text(f"After battle, player {player}'s attacker {attacker} was taken down.\n")
             attacker.after_attack_effect()
             if ui_draw:
                 self.draw_field_ui(1)
@@ -200,7 +171,7 @@ class SHCGGameState:
 
 
     def end_turn(self, ui_draw, ui_set_text):
-        for c in self.fields[self.current_player] + self.fields[self.opponent]:
+        for c in self.fields[self.current_player].copy():
             c.end_of_turn_on_field_effect(self, ui_draw, ui_set_text, text_box)
         if self.concluded:
             text_box.append_html_text("The game has concluded. Start a new game instead.\n")
@@ -267,21 +238,15 @@ class SHCGGameState:
         # not having foxtail will return early
         assert self.foxtail[player] > 0
         if self.foxtail[player] < 1:
-            if ui_set_text:
-                text_box.append_html_text(f"Warning: Player {player} does not have enough foxtail to enhance {card_to_enhance}.\n")
             return
         if self.enhance_used_this_turn[player] >= self.max_enhance_allowed_per_turn[player]:
-            if ui_set_text:
-                text_box.append_html_text(f"Warning: Player {player} has used up all enhance allowed this turn to enhance {card_to_enhance}.\n")
             return
         if not hasattr(card_to_enhance, 'can_enhance') or not card_to_enhance.can_enhance:
-            if ui_set_text:
-                text_box.append_html_text(f"Warning: {card_to_enhance} cannot be enhanced.\n")
             return
         if card_to_enhance not in self.fields[player]:
-            if ui_set_text:
-                text_box.append_html_text(f"Warning: {card_to_enhance} is not on Player {player}'s field, cannot enhance.\n")
             return
+        if ui_set_text:
+            text_box.append_html_text(f"{card_to_enhance} enhanced by player {player}. \n")
         if card_to_enhance.request_card_selection_on_enhance:
             if is_ai_player:
                 target = additional_target
@@ -319,8 +284,6 @@ class SHCGGameState:
                                               the_actual_textbox=text_box,
                                               selected_card_for_effect=None)
         
-        if ui_set_text:
-            text_box.append_html_text(f"{card_to_enhance} enhanced. \n")
         global_vars_shcg.enhance_used_this_turn[player] += 1
         global_vars_shcg.use_foxtail(player, 1, ui_draw=True, ui_set_text=True)
         if ui_draw:
@@ -981,7 +944,7 @@ if __name__ == "__main__":
                     elif ui_drag_and_drop_usage == "play_card_player":
                         if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in global_vars_field_slots[cp]]):
                             if the_selected_card:
-                                global_vars_shcg.play_card(cp, the_selected_card, ui_draw=True, ui_set_text=True, ai_target=None,
+                                global_vars_shcg.play_card(cp, the_selected_card, ui_draw=True, ui_set_text=True, additional_target=None,
                                                            is_ai_player=False)
                                 the_selected_card = None
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)

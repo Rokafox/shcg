@@ -230,6 +230,7 @@ class SHCGGameState:
     def use_foxtail(self, player, amount, ui_draw, ui_set_text):
         # The player use this amount of foxtail
         assert amount >= 0
+        assert amount <= 9
         if amount == 0:
             return
         global global_vars_tail_indicators, global_vars_tail_indicators_active
@@ -241,6 +242,7 @@ class SHCGGameState:
                     global_vars_tail_indicators[player][i].set_image(image_others["405"])
                     global_vars_tail_indicators_active[player].remove(global_vars_tail_indicators[player][i])
         else:
+            print(f"Error: Player {player} does not have enough foxtail to use {amount}. Current foxtail: {self.foxtail[player]}")
             raise ValueError("Not enough foxtail")
 
 
@@ -263,6 +265,7 @@ class SHCGGameState:
     def on_card_enhanced(self, player, card_to_enhance: cards.Follower, additional_target: cards.Card | None, is_ai_player: bool, ui_set_text,
                          ui_draw):
         # not having foxtail will return early
+        assert self.foxtail[player] > 0
         if self.foxtail[player] < 1:
             if ui_set_text:
                 text_box.append_html_text(f"Warning: Player {player} does not have enough foxtail to enhance {card_to_enhance}.\n")
@@ -318,10 +321,10 @@ class SHCGGameState:
         
         if ui_set_text:
             text_box.append_html_text(f"{card_to_enhance} enhanced. \n")
-        global_vars_shcg.enhance_used_this_turn[cp] += 1
-        global_vars_shcg.use_foxtail(cp, 1, ui_draw=True, ui_set_text=True)
+        global_vars_shcg.enhance_used_this_turn[player] += 1
+        global_vars_shcg.use_foxtail(player, 1, ui_draw=True, ui_set_text=True)
         if ui_draw:
-            global_vars_shcg.draw_field_ui(cp)
+            global_vars_shcg.draw_field_ui(player)
 
 
     # ====================================

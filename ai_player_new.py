@@ -258,9 +258,15 @@ class GameSimulator:
         state.enhance_used_this_turn[player] += 1
 
         if follower.request_card_selection_on_enhance:
+            print(f"Enhancing {follower.name} with target {extra_target}")
+            # only this is getting printed
+            # Enhancing 飢餓の使徒 with target ガブリエル (4/1)
+            # no other than 飢餓の使徒 is getting printed
             follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_target)
         else:
-            follower.on_enhance_effect(state, False, False, None)
+            print(f"Enhancing {follower.name} with no target")
+            # not getting printed
+            follower.on_enhance_effect(state, False, False, None, None)
 
         return True
 

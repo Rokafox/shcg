@@ -363,3 +363,19 @@ class フェアリーアサルト(Spell):
             selected_card_for_effect.take_damage(6, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
         else:
             game_state.player_take_damage(game_state.opponent, 6, draw_ui, set_text)
+
+
+class 飢餓の輝き(Spell):
+    def __init__(self):
+        super().__init__(name="飢餓の輝き", cost=2)
+        self.effect_description = "場のフォロワー1体を選ぶ。それに4ダメージ。それは攻撃力+2する。"
+        self.request_card_selection_on_play = "field_both"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Card | None):
+        if selected_card_for_effect is not None and isinstance(selected_card_for_effect, Follower):
+            selected_card_for_effect.take_damage(4, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+            if selected_card_for_effect.hp > 0:
+                selected_card_for_effect.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
+                                                             imposter=self, attack_change=2, hp_change=0)
+

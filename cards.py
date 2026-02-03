@@ -279,8 +279,8 @@ class ハンサ(Follower):
 class 唯我の絶傑マゼルベイン(Follower):
     """
     target value: 4 * 4 = 16 points
-    5/5 stats: 10 points, end of turn effect: 10 points
-    total value: 20 points
+    5/5 stats: 10 points, end of turn effect: countless take downs since release, usually far above 6 points
+    total value: at least 20 points
     """
     def __init__(self):
         super().__init__(name="唯我の絶傑・マゼルベイン", cost=4, attack=5, hp=5, can_enhance=True)
@@ -324,7 +324,7 @@ class 機構翼の少女ローザ(Follower):
 class 飢餓の使徒(Follower):
     """
     target value: 2 * 4 = 8 points
-    value: 2 + 2 + 1(rush) + 3 = 8 points
+    value: 2 + 2 + 1(rush) + at least 3 = 8 points
     """
     def __init__(self):
         super().__init__(name="飢餓の使徒", cost=2, attack=2, hp=2, can_enhance=True)
@@ -356,9 +356,9 @@ class 飢餓の使徒(Follower):
 class 飢餓の絶傑ギルネリーゼ(Follower):
     """
     target value: 3 * 4 = 12 points
-    value: drain ability: 2 points, versatile +4/-4 effect: 4 points, generates card effect: 4 points
+    value: drain ability: 2 points, versatile +4/-4 effect: at least 4 points, generates card effect: 4 points
     attack hp 2/2: 4 points
-    total value: 14 points
+    total value: 14+ points
     """
     def __init__(self):
         super().__init__(name="飢餓の絶傑・ギルネリーゼ", cost=3, attack=2, hp=2, can_enhance=False)
@@ -474,7 +474,7 @@ class フェアリーアサルト(Spell):
 class 飢餓の輝き(Spell):
     """
     target value: 2 * 4 = 8 points
-    actual value 6 points
+    actual value 6+ points
     """
     def __init__(self):
         super().__init__(name="飢餓の輝き", cost=2)

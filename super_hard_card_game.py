@@ -22,6 +22,9 @@ clock = pygame.time.Clock()
 # Game State
 # ====================================
 
+DEFAULT_HP_F = 20
+DEFAULT_HP_S = 24
+
 class SHCGGameState:
     def __init__(self, current_player):
         self.current_player = current_player  # 1 or 2
@@ -30,7 +33,8 @@ class SHCGGameState:
         self.decks: dict[int, list[cards.Card]] = {1: [], 2: []}
         self.hands: dict[int, list[cards.Card]] = {1: [], 2: []}
         self.fields: dict[int, list[cards.Card]] = {1: [], 2: []}
-        self.hp = {1: 24, 2: 20}
+        self.max_hp = {1: DEFAULT_HP_S, 2: DEFAULT_HP_F}
+        self.hp = {1: DEFAULT_HP_S, 2: DEFAULT_HP_F}
         self.foxtail = {1: 9, 2: 9}
         self.enhance_used_this_turn = {1: 0, 2: 0}
         self.max_enhance_allowed_per_turn = {1: 1, 2: 1}
@@ -54,7 +58,7 @@ class SHCGGameState:
         drawn_card = self.decks[player].pop()
         self.hands[player].append(drawn_card)
         if ui_set_text:
-            text_box.append_html_text(f"Player {player} drew a card: {drawn_card}. \n")
+            text_box.append_html_text(f"プレイヤー{player}がカードを1枚引いたぞ！カード:{drawn_card}。\n")
         if ui_draw:
             self.draw_hand_ui(player)
             # draw_deck_ui is unnecessary as it is handled by pygame event
@@ -71,12 +75,12 @@ class SHCGGameState:
         self.use_foxtail(player, card.cost, ui_draw, ui_set_text)
         self.hands[player].remove(card)
         if ui_set_text:
-            text_box.append_html_text(f"Player {player} played {card}.\n")
+            text_box.append_html_text(f"プレイヤー{player}が{card}をプレイしたぞ！\n")
         if card.request_card_selection_on_play:
             if is_ai_player:
                 target = additional_target
                 if ui_set_text:
-                    text_box.append_html_text(f"AI Player {player} selected target {target} for playing {card}.\n")
+                    text_box.append_html_text(f"AIプレイヤー{player}が{card}をプレイするためにターゲット{target}を選択したのじゃ。\n")
             else:
                 target = None
                 if card.request_card_selection_on_play == "field":
@@ -100,7 +104,7 @@ class SHCGGameState:
                                 target = c
                                 break
                 if ui_set_text:
-                    text_box.append_html_text(f"Player {player} selected target {target} for playing {card}.\n")
+                    text_box.append_html_text(f"プレイヤー{player}が{card}をプレイするためにターゲット{target}を選択したのじゃ。\n")
             card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
                                  the_actual_textbox=text_box,
                                  selected_card_for_effect=target)
@@ -129,25 +133,34 @@ class SHCGGameState:
         if isinstance(target, cards.Follower):
             assert target in self.fields[self.opponent], "Target follower is not on opponent's field."
             if ui_set_text:
-                text_box.append_html_text(f"{attacker} is about to attack {target}.\n")
+                # text_box.append_html_text(f"{attacker} is about to attack {target}.\n")
+                text_box.append_html_text(f"{attacker}は{target}を攻撃するぞ！\n")
+            target_hp_before = target.hp
             target.hp -= attacker.attack
+            target_hp_changed = target_hp_before - target.hp
+            # drain ability
+            if attacker.ability_drain and target_hp_changed > 0:
+                self.player_heal(player, target_hp_changed, ui_draw, ui_set_text)
             attacker.hp -= target.attack
             if target.hp <= 0:
                 self.fields[self.opponent].remove(target)
                 if ui_set_text:
-                    text_box.append_html_text(f"After battle, player {self.opponent}'s defender {target} was taken down by {attacker}.\n")
+                    text_box.append_html_text(f"戦いの後、プレイヤー{self.opponent}の{target}は{attacker}によって倒されてしまったのじゃ。\n")
             if attacker.hp <= 0:
                 self.fields[self.current_player].remove(attacker)
                 if ui_set_text:
-                    text_box.append_html_text(f"After battle, player {player}'s attacker {attacker} was taken down.\n")
+                    text_box.append_html_text(f"戦いの後、プレイヤー{player}の{attacker}は倒されてしまったのじゃ。\n")
             attacker.after_attack_effect()
             if ui_draw:
                 self.draw_field_ui(1)
                 self.draw_field_ui(2)
         elif target == "leader":
             if ui_set_text:
-                text_box.append_html_text(f"{attacker} is attacking Player {self.opponent}.\n")
+                text_box.append_html_text(f"{attacker}の直接攻撃がプレイヤー{self.opponent}に向けられたのじゃ！\n")
             self.player_take_damage(self.opponent, attacker.attack, ui_draw, ui_set_text)
+            # drain ability
+            if attacker.ability_drain and attacker.attack > 0:
+                self.player_heal(player, attacker.attack, ui_draw, ui_set_text)
             attacker.after_attack_effect()
             self.draw_field_ui(player)
         else:
@@ -158,23 +171,36 @@ class SHCGGameState:
         assert amount >= 0
         self.hp[player] -= amount
         if ui_set_text:
-            text_box.append_html_text(f"Player {player} took {amount} damage, remaining HP: {self.hp[player]}.\n")
+            text_box.append_html_text(f"プレイヤー{player}が{amount}のダメージを受けたのじゃ。残りHP:{self.hp[player]}。\n")
         if amount > 0 and ui_draw:
             self.draw_player_hp_ui()
         if self.hp[player] <= 0:
             winner = 3 - player
             if ui_set_text:
-                text_box.append_html_text(f"Player {winner} wins!\n")
+                text_box.append_html_text(f"プレイヤー{winner}の勝利じゃ！\n")
             self.concluded = True
             return True
         return False
+
+    def player_heal(self, player: int, amount: int, ui_draw, ui_set_text) -> None:
+        """
+        Heal leader, but not exceeding max HP.
+        """
+        assert amount >= 0
+        prev_hp = self.hp[player]
+        self.hp[player] = min(self.hp[player] + amount, self.max_hp[player])
+        if ui_set_text:
+            text_box.append_html_text(f"プレイヤー{player}が{self.hp[player] - prev_hp}のHPを回復したのじゃ。現在のHP:{self.hp[player]}。\n")
+        if amount > 0 and ui_draw:
+            self.draw_player_hp_ui()
 
 
     def end_turn(self, ui_draw, ui_set_text):
         for c in self.fields[self.current_player].copy():
             c.end_of_turn_on_field_effect(self, ui_draw, ui_set_text, text_box)
         if self.concluded:
-            text_box.append_html_text("The game has concluded. Start a new game instead.\n")
+            # text_box.append_html_text("The game has concluded. Start a new game instead.\n")
+            text_box.append_html_text("ゲームは終了したのじゃ。新しいゲームを始めようではないか。\n")
             return
         self.current_player = self.opponent
         self.foxtail[self.current_player] = 9
@@ -186,7 +212,7 @@ class SHCGGameState:
         if self.decks[1] == [] and self.decks[2] == []:
             self.concluded = True
             if ui_set_text:
-                text_box.append_html_text("Draw.\n")
+                text_box.append_html_text("引き分けじゃ。\n")
             return
         if ui_draw:
             self.draw_tail_ui(self.current_player)
@@ -194,8 +220,8 @@ class SHCGGameState:
             self.draw_field_ui(2)
         if ui_set_text:
             text_box.append_html_text(text_box_introduction_text)
-            text_box.append_html_text(f"Player {self.current_player}'s turn.\n")
-            text_box.append_html_text(f"Turn {self.turn}.\n")
+            text_box.append_html_text(f"プレイヤー{self.current_player}のターンじゃ。\n")
+            text_box.append_html_text(f"ターン{self.turn}。\n")
 
 
     def use_foxtail(self, player, amount, ui_draw, ui_set_text):
@@ -246,12 +272,12 @@ class SHCGGameState:
         if card_to_enhance not in self.fields[player]:
             return
         if ui_set_text:
-            text_box.append_html_text(f"{card_to_enhance} enhanced by player {player}. \n")
+            text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化するぞ！\n")
         if card_to_enhance.request_card_selection_on_enhance:
             if is_ai_player:
                 target = additional_target
                 if ui_set_text:
-                    text_box.append_html_text(f"Target {target} selected when enhancing {card_to_enhance}.\n")
+                    text_box.append_html_text(f"AIプレイヤー{player}が{card_to_enhance}を強化するためにターゲット{target}を選択したのじゃ。\n")
             else:
                 target = None
                 if card_to_enhance.request_card_selection_on_enhance == "field":
@@ -275,7 +301,7 @@ class SHCGGameState:
                                 target = c
                                 break
                 if ui_set_text:
-                    text_box.append_html_text(f"Target {target} selected when enhancing {card_to_enhance}.\n")
+                    text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化するためにターゲット{target}を選択したのじゃ。\n")
             card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
                                               the_actual_textbox=text_box,
                                               selected_card_for_effect=target)
@@ -621,21 +647,36 @@ def draw_card(card: cards.Card, show_attack_status_indicator: bool = False) -> p
         hp_render = font_bold.render(hp_text, True, (50, 255, 50))
         card_surface.blit(hp_render, (92 - hp_width, 120))
     
-    if show_attack_status_indicator:  # show can attack status for followers
-        if card.type == 'follower':
-            if card.attack_ability == 0 or card.can_attack_this_turn == False:
-                # cannot attack, gray
-                indicator_color = (150, 150, 150)
-            elif card.attack_ability == 1:
-                # can attack follower, yellow
-                indicator_color = (255, 255, 50)
-            elif card.attack_ability == 2:
-                # can attack player, green
-                indicator_color = (50, 255, 50)
-            else:
-                raise ValueError(f"Unknown attack ability: {card.attack_ability}")
-            # outline the card with the indicator color
-            pygame.draw.rect(card_surface, indicator_color, pygame.Rect(0, 0, 100, 145), 2)
+        if show_attack_status_indicator:  # show can attack status for followers
+                if card.attack_ability == 0 or card.can_attack_this_turn == False:
+                    # cannot attack, gray
+                    indicator_color = (150, 150, 150)
+                elif card.attack_ability == 1:
+                    # can attack follower, yellow
+                    indicator_color = (255, 255, 50)
+                elif card.attack_ability == 2:
+                    # can attack player, green
+                    indicator_color = (50, 255, 50)
+                else:
+                    raise ValueError(f"Unknown attack ability: {card.attack_ability}")
+                # outline the card with the indicator color
+                pygame.draw.rect(card_surface, indicator_color, pygame.Rect(0, 0, 100, 145), 2)
+    elif card.type == 'spell':
+        # draw "S" at bottom left, blue color
+        spell_text = "S"
+        for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+            spell_outline = font_bold.render(spell_text, True, (0, 0, 0))
+            card_surface.blit(spell_outline, (8 + dx, 120 + dy))
+        spell_render = font_bold.render(spell_text, True, (108, 210, 253))
+        card_surface.blit(spell_render, (8, 120))
+    elif card.type == 'amulet':
+        # draw "A" at bottom left, purple color
+        amulet_text = "A"
+        for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+            amulet_outline = font_bold.render(amulet_text, True, (0, 0, 0))
+            card_surface.blit(amulet_outline, (8 + dx, 120 + dy))
+        amulet_render = font_bold.render(amulet_text, True, (231, 130, 242))
+        card_surface.blit(amulet_render, (8, 120))
     
     # 強化可能マーカーを右上に表示
     if hasattr(card, 'can_enhance') and card.can_enhance:
@@ -819,7 +860,7 @@ def start_new_game():
     example_deck_2: list[cards.Card] = []
     card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
                   cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
-                  cards.機構翼の少女ローザ, cards.飢餓の使徒, cards.飢餓の輝き]
+                  cards.機構翼の少女ローザ, cards.飢餓の使徒, cards.飢餓の輝き, cards.飢餓の絶傑ギルネリーゼ]
     example_deck_1 = [random.choice(card_types)() for _ in range(40)]
     example_deck_2 = [random.choice(card_types)() for _ in range(40)]
 
@@ -841,8 +882,10 @@ def start_new_game():
     # draw field
     global_vars_shcg.draw_field_ui(1)
     global_vars_shcg.draw_field_ui(2)
-    text_box.append_html_text(f"Player {global_vars_shcg.current_player}'s turn. \n")
-    text_box.append_html_text(f"Turn {global_vars_shcg.turn}. \n")
+    # text_box.append_html_text(f"Player {global_vars_shcg.current_player}'s turn. \n")
+    # text_box.append_html_text(f"Turn {global_vars_shcg.turn}. \n")
+    text_box.append_html_text(f"ニューゲームを開始したぞ！プレイヤー2のターンなのじゃ。\n")
+    text_box.append_html_text(f"ターン{global_vars_shcg.turn}\n")
     global_vars_minimax_ai_manager.ai_clear_pending_actions()
 
     
@@ -962,19 +1005,19 @@ if __name__ == "__main__":
                                         # if target_card .ability_protect is false but there exists other followers
                                         # on opponent field with ability_protect true, cannot attack this target
                                         if protect_exists and not target_card.ability_protect:
-                                            text_box.append_html_text(f"Cannot attack {target_card} because other followers have 【守護】. \n")
+                                            text_box.append_html_text(f"【守護】フォロワーがいるから攻撃できないぞ！ \n")
                                         else:
                                             global_vars_shcg.follower_attack(cp, the_selected_card, target_card, ui_draw=True, ui_set_text=True)
                         if global_vars_leader_slots[opponent][0].rect.collidepoint(event.pos) and the_selected_card.attack_ability >= 2:
                             if protect_exists:
-                                text_box.append_html_text(f"Cannot attack because one of their followers have 【守護】. \n")
+                                text_box.append_html_text(f"【守護】フォロワーがいるから攻撃できないぞ！ \n")
                             else:
                                 global_vars_shcg.follower_attack(cp, the_selected_card, "leader", ui_draw=True, ui_set_text=True)
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
                     elif ui_drag_and_drop_usage == "use_foxtail_player":
                         if global_vars_shcg.enhance_used_this_turn[cp] >= global_vars_shcg.max_enhance_allowed_per_turn[cp]:
-                            text_box.append_html_text(f"All enhance actions of player {cp} used for this turn. \n")
+                            text_box.append_html_text(f"このターンにはもう強化を使えないのじゃ。 \n")
                         else:
                             for index, slot in enumerate(global_vars_field_slots[cp]):
                                 if slot.rect.collidepoint(event.pos):

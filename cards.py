@@ -5,11 +5,15 @@ if TYPE_CHECKING:
     from super_hard_card_game import SHCGGameState
 
 
+# NOTE: every time modifying a card class and its subclass, remember to also modify ai_player_new.py's copy_card() function accordingly.
+# Also, modify ai_player_new.py's _hash_game_state() function to include any new attributes that affect game state.
+
 class Card:
     def __init__(self, name, cost, card_type):
         self.name = name
         self.cost = cost
-        self.type = card_type
+        self.original_cost = cost
+        self.type = card_type # 'follower', 'spell', 'amulet'
         self.unique_id: int = random.randint(1, 1_000_000_000)
         self.description = ""
         self.effect_description = ""
@@ -62,12 +66,15 @@ class Follower(Card):
         self.how_many_attacks_done_of_turn: int = 0  # Number of attacks done this turn
         self.can_attack_this_turn: bool = False
         self.ability_protect: bool = False  # Opponent's followers cannot target leader while this follower is on field
+        self.ability_drain: bool = False  # Heals leader when it attacks and deals damage.
     
     def tooltip_str(self):
         s = f"{self.name}\n"
-        s += f"Attack: {self.attack}  HP: {self.hp}/{self.max_hp}\n"
+        s += f"攻撃:{self.attack}HP:{self.hp}/{self.max_hp}\n"
         if self.ability_protect:
             s += "【守護】\n"
+        if self.ability_drain:
+            s += "【ドレイン】\n"
         if self.effect_description:
             s += f"{self.effect_description}\n"
         if self.is_enhanced and self.description_e:
@@ -131,13 +138,12 @@ class Follower(Card):
                 break
         assert player in [1, 2], "Follower not found on any player's field."
         if self.hp <= 0:
-            # Follower is destroyed
             game_state.fields[player].remove(self)
             if set_text:
-                the_actual_textbox.append_html_text(f"{self} on field of player {player} took {damage_amount} damage and was destroyed by {attacker}.\n")
+                the_actual_textbox.append_html_text(f"{self}がプレイヤー{player}のフィールドで{damage_amount}ダメージを受けて、{attacker}によって破壊されたのじゃ。\n")
         else:
             if set_text:
-                the_actual_textbox.append_html_text(f"{self} of player {player} took {damage_amount} damage from {attacker}.\n")
+                the_actual_textbox.append_html_text(f"{self}がプレイヤー{player}のフィールドで{attacker}から{damage_amount}ダメージを受けたのじゃ。\n")
         if draw_ui:
             game_state.draw_field_ui(player)
 
@@ -160,18 +166,18 @@ class Follower(Card):
         if self.hp <= 0:
             game_state.fields[player].remove(self)
             if set_text:
-                the_actual_textbox.append_html_text(f"{self} on field of player {player} was banished due to stat change by {imposter}.\n")
+                the_actual_textbox.append_html_text(f"{self}がプレイヤー{player}のフィールドで、{imposter}によるステータス変更で追放されたのじゃ。\n")
         else:
             if set_text:
-                the_actual_textbox.append_html_text(f"{self} had its stats changed by {imposter}:")
-                # print +n/-n properly
+                the_actual_textbox.append_html_text(f"{self}のステータスが{imposter}によって変更されたのじゃ：")
+                # +n/-nを正しく表示するのじゃ
                 attack_str = f"+{attack_change}" if attack_change >= 0 else f"-{attack_change}"
                 hp_str = f"+{hp_change}" if hp_change >= 0 else f"-{hp_change}"
-                the_actual_textbox.append_html_text(f" {attack_str}/{hp_str}.\n")
+                the_actual_textbox.append_html_text(f"{attack_str}/{hp_str}なのじゃ。\n")
 
 
     def __repr__(self):
-        return f"{self.name} ({self.attack}/{self.hp})"
+        return f"{self.name}({self.attack}/{self.hp})"
 
 
 class Spell(Card):
@@ -237,7 +243,7 @@ class ハンサ(Follower):
             top_card = game_state.decks[game_state.current_player][-1]
             self.attack += top_card.cost
             if set_text:
-                the_actual_textbox.append_html_text(f"{self} gained +{top_card.cost} attack.\n")
+                the_actual_textbox.append_html_text(f"{self}はデッキの一番上のカードのコスト{top_card.cost}分、攻撃力が上がったのじゃ。\n")
 
 
 
@@ -271,7 +277,7 @@ class 機構翼の少女ローザ(Follower):
             drawn_card = game_state.decks[game_state.current_player].pop()
             game_state.hands[game_state.current_player].append(drawn_card)
             if set_text:
-                the_actual_textbox.append_html_text(f"Player {game_state.current_player} drew 1 card {drawn_card} due to 機構翼の少女・ローザ's effect. \n")
+                the_actual_textbox.append_html_text(f"機構翼の少女・ローザの効果で、プレイヤー{game_state.current_player}は{drawn_card}を引いたのじゃ。\n")
             if draw_ui:
                 game_state.draw_hand_ui(game_state.current_player)
                 game_state.draw_deck_ui(game_state.current_player)
@@ -305,6 +311,40 @@ class 飢餓の使徒(Follower):
                                        imposter=self, attack_change=3, hp_change=0)
 
 
+class 飢餓の絶傑ギルネリーゼ(Follower):
+    def __init__(self):
+        super().__init__(name="飢餓の絶傑・ギルネリーゼ", cost=3, attack=3, hp=2, can_enhance=False)
+        self.effect_description = "場に出す時、場の他のフォロワー1体を選ぶ。それに4ダメージ。それは攻撃力+4する。" \
+        "自分のフォロワーの場合、『飢餓の使徒』1枚；相手のフォロワーの場合、『飢餓の輝き』1枚を手札に加える。"
+        self.request_card_selection_on_play = "field_both"
+        self.ability_drain = True
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Card | None):
+        target = selected_card_for_effect
+        if target is not None and isinstance(target, Follower) and target != self:
+
+            if target in game_state.fields[game_state.current_player]:
+                new_card = 飢餓の使徒()
+            elif target in game_state.fields[game_state.opponent]:
+                new_card = 飢餓の輝き()
+            else:
+                raise ValueError("Target follower not found on either player's field.")
+            
+            target.take_damage(4, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+            if target.hp > 0:
+                target.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
+                                       imposter=self, attack_change=4, hp_change=0)
+            # add card to hand
+            if len(game_state.hands[game_state.current_player]) < 9:
+                game_state.hands[game_state.current_player].append(new_card)
+                if set_text:
+                    the_actual_textbox.append_html_text(f"プレイヤー{game_state.current_player}は手札に{new_card}を加えたのじゃ。\n")
+                if draw_ui:
+                    game_state.draw_hand_ui(game_state.current_player)
+
+
+
 
 # ==============================
 # Spells
@@ -328,7 +368,7 @@ class 天なる大河(Spell):
                 drawn_card = game_state.decks[player].pop()
                 game_state.hands[player].append(drawn_card)
         if set_text:
-            the_actual_textbox.append_html_text(f"天なる大河 returned {num_cards} cards to bottom of deck, and drew {num_cards + 1} cards.\n")
+            the_actual_textbox.append_html_text(f"天なる大河の効果で、プレイヤー{player}は手札の全てのカードをデッキの下に置き、{num_cards + 1}枚のカードを引いたのじゃ。\n")
 
 
 class ミヒライテ(Spell):

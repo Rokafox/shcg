@@ -66,6 +66,7 @@ class GameStateSnapshot:
         self.hands: dict[int, list[cards.Card]] = {1: [], 2: []}
         self.fields: dict[int, list[cards.Card]] = {1: [], 2: []}
         self.hp: dict[int, int] = {1: DEFAULT_HP_S, 2: DEFAULT_HP_F}
+        self.max_hp: dict[int, int] = {1: DEFAULT_HP_S, 2: DEFAULT_HP_F}
         self.foxtail: dict[int, int] = {1: MAX_FOXTAIL, 2: MAX_FOXTAIL}
         self.enhance_used_this_turn: dict[int, int] = {1: 0, 2: 0}
         self.max_enhance_allowed_per_turn: dict[int, int] = {1: DEFAULT_MAX_ENHANCE_PER_TURN, 2: DEFAULT_MAX_ENHANCE_PER_TURN}
@@ -135,6 +136,11 @@ class GameStateSnapshot:
             return True
         return False
 
+    def player_heal(self, player: int, amount: int, *args, **_kwargs):
+        """Heal a player, but not beyond max HP."""
+        assert amount >= 0
+        self.hp[player] = min(self.hp[player] + amount, self.max_hp[player])
+
 
 
 def _copy_card(card: cards.Card) -> cards.Card:
@@ -144,6 +150,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card = card.__class__.__new__(card.__class__)
         new_card.name = card.name
         new_card.cost = card.cost
+        new_card.original_cost = card.original_cost
         new_card.type = card.type
         new_card.unique_id = card.unique_id
         new_card.description = card.description
@@ -164,12 +171,14 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.how_many_attacks_done_of_turn = card.how_many_attacks_done_of_turn
         new_card.can_attack_this_turn = card.can_attack_this_turn
         new_card.ability_protect = card.ability_protect
+        new_card.ability_drain = card.ability_drain
         return new_card
     else:
-        # For spells and amulets, create a simple copy
+        # For spells and amulets
         new_card = card.__class__.__new__(card.__class__)
         new_card.name = card.name
         new_card.cost = card.cost
+        new_card.original_cost = card.original_cost
         new_card.type = card.type
         new_card.unique_id = card.unique_id
         new_card.description = getattr(card, 'description', '')
@@ -228,7 +237,12 @@ class GameSimulator:
                 return False
 
             # Combat
+            target_hp_before = target.hp
             target.hp -= attacker.attack
+            target_hp_changed = target_hp_before - target.hp
+            # drain ability
+            if attacker.ability_drain and target_hp_changed > 0:
+                state.player_heal(player, target_hp_changed)
             attacker.hp -= target.attack
 
             # Remove dead followers
@@ -243,6 +257,9 @@ class GameSimulator:
             if attacker.attack_ability < 2:
                 return False
             state.player_take_damage(opponent, attacker.attack, ui_draw=False, ui_set_text=False)
+            # drain ability
+            if attacker.ability_drain and attacker.attack > 0:
+                state.player_heal(player, attacker.attack)
             attacker.after_attack_effect()
 
         return True
@@ -442,10 +459,11 @@ class Evaluator:
     # Weight constants for evaluation
     HP_WEIGHT = 2.0
     FIELD_POWER_WEIGHT = 1.0
-    HAND_SIZE_WEIGHT = 1.0 # Every card in hand is worth 1 pt
+    HAND_SIZE_WEIGHT = 2.0 # Could be 4.0, but should prefer board presence more
+    DECK_SIZE_WEIGHT = 0.1
 
     @staticmethod
-    def evaluate(state: GameStateSnapshot, player: int) -> float:
+    def evaluate(state: GameStateSnapshot, player: int, basic_lethal_check: bool) -> float:
         """
         Evaluate the game state from player's perspective.
         Positive = player is winning, Negative = opponent is winning.
@@ -463,43 +481,65 @@ class Evaluator:
             else:
                 return 0.0  # Draw
 
-        # 相手がこのターンに直接攻撃で勝てる場合は悪手じゃ
-        protect_exists = any([c.ability_protect for c in state.fields[player]])
-        if not protect_exists:
-            total_threat = 0
-            max_semi_threat = 0
-            semi_threat_found = False
+        if basic_lethal_check:
+            # 相手がこのターンに直接攻撃で勝てる場合は悪手じゃ
+            protect_exists = any([c.ability_protect for c in state.fields[player]])
+            if not protect_exists:
+                total_threat = 0
+                max_semi_threat = 0
+                semi_threat_found = False
 
-            for f in state.fields[opponent]:
-                if f.type == 'follower' and f.can_attack_this_turn:
-                    if f.attack_ability >= 2:
-                        # 直接攻撃できる脅威
-                        total_threat += f.attack
-                    elif f.attack_ability == 1 and f.can_enhance and f.attack > max_semi_threat:
-                        # 強化可能な潜在的脅威（最大のものだけ追跡）
-                        semi_threat_found = True
-                        max_semi_threat = f.attack
+                for f in state.fields[opponent]:
+                    if f.type == 'follower' and f.can_attack_this_turn:
+                        if f.attack_ability >= 2:
+                            # 直接攻撃できる脅威
+                            total_threat += f.attack
+                        elif f.attack_ability == 1 and f.can_enhance and f.attack > max_semi_threat:
+                            # 強化可能な潜在的脅威（最大のものだけ追跡）
+                            semi_threat_found = True
+                            max_semi_threat = f.attack
 
-            # 強化後の脅威を加算（+2は強化ボーナス）
-            if max_semi_threat > 0 and semi_threat_found:
-                total_threat += max_semi_threat + 2
+                # 強化後の脅威を加算（+2は強化ボーナス）
+                if max_semi_threat > 0 and semi_threat_found:
+                    total_threat += max_semi_threat + 2
 
-            if total_threat >= state.hp[player]:
-                return float('-inf')
+                if total_threat >= state.hp[player]:
+                    return float('-inf')
 
-        score = 0.0
+        score = 100.0 # Base score
 
         own_hp_value = state.hp[player]
         opp_hp_value = state.hp[opponent]
         score += (own_hp_value - opp_hp_value) * Evaluator.HP_WEIGHT
 
         # Field power (total attack + hp of followers)
-        own_field_power = sum(f.attack + f.hp for f in state.fields[player] if f.type == 'follower')
-        opp_field_power = sum(f.attack + f.hp for f in state.fields[opponent] if f.type == 'follower')
+        own_field_power = 0
+        for f in state.fields[player]:
+            if f.type == 'follower':
+                own_field_power += f.attack + f.hp
+                # 守護 (.ability_protect) 者のHPの100%を追加ボーナスとして加算
+                if f.ability_protect:
+                    own_field_power += f.hp
+                # drain 者の攻撃力の100%を追加ボーナスとして加算
+                if f.ability_drain:
+                    own_field_power += f.attack
+        opp_field_power = 0
+        for f in state.fields[opponent]:
+            if f.type == 'follower':
+                opp_field_power += f.attack + f.hp
+                if f.ability_protect:
+                    opp_field_power += f.hp
+                if f.ability_drain:
+                    opp_field_power += f.attack
         score += (own_field_power - opp_field_power) * Evaluator.FIELD_POWER_WEIGHT
 
+        # follower ability_protect bonus
+
         # Hand size
-        score += len(state.hands[player])
+        score += (len(state.hands[player]) - len(state.hands[opponent])) * Evaluator.HAND_SIZE_WEIGHT
+
+        # Deck size
+        score += (len(state.decks[player]) - len(state.decks[opponent])) * Evaluator.DECK_SIZE_WEIGHT
 
         return score
 
@@ -521,6 +561,7 @@ class MinimaxAI:
         self.player_number = player_number
         self.max_depth = max_depth
         self.nodes_evaluated = 0
+        self.nodes_evaluated_additional = 0
         self.best_actions: List[Tuple[str, Any]] = []
 
     def get_best_turn_actions(self, game_state: 'SHCGGameState') -> List[Tuple[str, Any]]:
@@ -535,6 +576,7 @@ class MinimaxAI:
         - ('end_turn',)
         """
         self.nodes_evaluated = 0
+        self.nodes_evaluated_additional = 0
         state = GameStateSnapshot.from_game_state(game_state)
 
         # Find all possible turn action sequences and evaluate them
@@ -559,13 +601,51 @@ class MinimaxAI:
 
             # End the turn
             GameSimulator.end_turn(test_state)
-            score = Evaluator.evaluate(test_state, self.player_number)
+            score = Evaluator.evaluate(test_state, self.player_number, True) # Basic evaluation
+
+            # Advanced evaluation: simulate opponent's response with _generate_random_turn_sequences
+            # with a limited number of attempts (10) for performance.
+            # If opponent scores inf for any seq, its a loss for us and set score to -inf.
+            # This part can be skipped if the player is already winning (score == inf)
+            # or losing (score == -inf) as checked in True basic_lethal_check or draw (score == 0.0)
+            if not score == float('inf') and not score == float('-inf') and not score == 0.0:
+                opponent_sequences = self._generate_random_turn_sequences(test_state, test_state.current_player, attempts=10)
+                for opp_actions in opponent_sequences:
+                    opp_test_state = test_state.copy()
+                    valid_opp = True
+                    for opp_action in opp_actions:
+                        if not self._apply_action(opp_test_state, test_state.current_player, opp_action):
+                            valid_opp = False
+                            break
+
+                    if not valid_opp:
+                        continue
+
+                    # End opponent's turn
+                    GameSimulator.end_turn(opp_test_state)
+                    opp_score = Evaluator.evaluate(opp_test_state, self.player_number, False)
+                    self.nodes_evaluated_additional += 1
+
+                    if opp_score == float('inf'):
+                        # Opponent can win, so this is a loss for us
+                        score = float('-inf')
+                        break
+                    else:
+                        pass
+            else:
+                pass
+                # print("Advanced evaluation skipped due to definitive score.")
+
 
             self.nodes_evaluated += 1
 
             if score > best_score:
                 best_score = score
                 best_actions = actions
+
+            # No need for more if infinite score
+            if best_score == float('inf'):
+                break
 
         # Add end_turn action
         best_actions.append(('end_turn',))
@@ -642,16 +722,57 @@ class MinimaxAI:
             str(state.hp[1]), str(state.hp[2]),
             str(state.foxtail[1]), str(state.foxtail[2]),
             str(state.enhance_used_this_turn[1]), str(state.enhance_used_this_turn[2]),
-            str(len(state.hands[1])), str(len(state.hands[2])),
         ]
 
         # Hash field states
         for player in [1, 2]:
-            field_str = ",".join(f"{f.name}:{f.attack}:{f.hp}:{f.can_attack_this_turn}:{f.attack_ability}"
-                                 for f in state.fields[player] if f.type == 'follower')
-            parts.append(field_str)
+            # follower cards
+            field_str_follower = []
+            for f in state.fields[player]:
+                if f.type == 'follower':
+                    field_str_follower.append(
+                        f"{f.name}:{f.attack}:{f.max_hp}:{f.hp}:{f.can_attack_this_turn}:"
+                        f"{f.attack_ability}:{f.can_enhance}:{f.is_enhanced}:"
+                        f"{f.how_many_attacks_max_of_turn}:{f.how_many_attacks_done_of_turn}:"
+                        f"{f.ability_protect}:{f.ability_drain}"
+                    )
+            field_str_follower = ",".join(field_str_follower)
+            # amulet cards
+            field_str_amulet = ",".join(f"{f.name}" for f in state.fields[player] if f.type == 'amulet')
+            parts.append(f"F{player}:" + field_str_follower)
+            parts.append(f"A{player}:" + field_str_amulet)
 
+        # hand states, name and cost
+        for player in [1, 2]:
+            hand_str = ",".join(f"{c.name}:{c.cost}" for c in state.hands[player])
+            parts.append(f"H{player}:" + hand_str)
         return "|".join(parts)
+
+    def _generate_random_turn_sequences(self, state: GameStateSnapshot, player: int, attempts: int,
+                                  max_actions: int = MAX_ACTIONS_PER_TURN) -> List[List[Tuple]]:
+        """
+        Generate random reasonable action sequences for a turn.
+        Rules enforced: The same as _generate_turn_sequences.
+        """
+        import random
+        sequences = []
+        while len(sequences) < attempts:
+            current_state = state.copy()
+            current_actions = []
+
+            while len(current_actions) < max_actions:
+                next_actions = self._get_all_actions(current_state, player)
+
+                if not next_actions or current_state.foxtail[player] == 0:
+                    break
+
+                action = random.choice(next_actions)
+                if self._apply_action(current_state, player, action):
+                    current_actions.append(action)
+
+            if current_actions:
+                sequences.append(current_actions)
+        return sequences
 
     def _get_all_actions(self, state: GameStateSnapshot, player: int) -> List[Tuple]:
         """Get all possible actions from current state."""
@@ -683,13 +804,13 @@ class MinimaxAI:
             card, target = action[1], action[2]
             actual_card = _find_card_by_id(state.hands[player], card.unique_id)
             if actual_card is None:
-                raise CardNotFoundError("Card to play not found in hand")
+                raise CardNotFoundError(f"Card to play not found in hand: {card}") 
 
             actual_target = None
             if target is not None:
                 actual_target = _find_card_in_zones(state, target.unique_id, player)
                 if actual_target is None:
-                    raise CardNotFoundError("Target for card play not found")
+                    raise CardNotFoundError(f"Target for card play not found: {target}")
 
             return GameSimulator.play_card(state, player, actual_card, actual_target)
 
@@ -701,14 +822,14 @@ class MinimaxAI:
                 None
             )
             if actual_attacker is None:
-                raise CardNotFoundError("Attacker not found on field")
+                raise CardNotFoundError(f"Attacker not found on field: {attacker}")
 
             if target == "leader":
                 actual_target = "leader"
             else:
                 actual_target = _find_card_by_id(state.fields[3 - player], target.unique_id)
                 if actual_target is None:
-                    raise CardNotFoundError("Attack target not found on field")
+                    raise CardNotFoundError(f"Attack target not found on field: {target}")
 
             return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)
 
@@ -720,13 +841,13 @@ class MinimaxAI:
                 None
             )
             if actual_follower is None:
-                raise CardNotFoundError("Follower to enhance not found on field")
+                raise CardNotFoundError(f"Follower to enhance not found on field: {follower}")
 
             actual_target = None
             if extra_target is not None:
                 actual_target = _find_card_in_zones(state, extra_target.unique_id, player)
                 if actual_target is None:
-                    raise CardNotFoundError("Target for enhance not found")
+                    raise CardNotFoundError(f"Extra target for card enhance not found: {extra_target}")
 
             return GameSimulator.enhance_follower(state, player, actual_follower, actual_target)
 
@@ -767,6 +888,7 @@ class MinimaxAIPlayer:
             self.action_index = 0
             if text_box and ui_set_text:
                 text_box.append_html_text(f"AI Player {player} calculated {len(self.pending_actions)} actions (evaluated {self.minimax_ai.nodes_evaluated} positions).\n")
+                text_box.append_html_text(f"For simulating opponent action, additional {self.minimax_ai.nodes_evaluated_additional} positions were evaluated.\n")
 
         if self.action_index >= len(self.pending_actions):
             self.pending_actions = []

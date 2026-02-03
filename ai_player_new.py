@@ -830,7 +830,7 @@ class MinimaxAI:
             else:
                 actual_card = _find_card_by_id(state.hands[player], card.unique_id)
             if actual_card is None:
-                raise CardNotFoundError(f"Card to play not found in hand: {card}") 
+                raise CardNotFoundError(f"Card to play not found in hand: {card} with void_id {card.void_id} and unique_id {card.unique_id}") 
 
             actual_target = None
             if target is not None:

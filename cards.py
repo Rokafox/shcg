@@ -398,6 +398,65 @@ class 飢餓の絶傑ギルネリーゼ(Follower):
                     game_state.draw_hand_ui(game_state.current_player)
 
 
+class 不殺の絶傑エズディア(Follower):
+    """
+    target value: 4 * 4 = 16 points
+    value: NOTE: write about this later
+    """
+    def __init__(self):
+        super().__init__(name="不殺の絶傑・エズディア", cost=4, attack=6, hp=6, can_enhance=True)
+        self.effect_description = "場に出す時、すべてのフォロワーとリーダーの中で、体力が最も低いものにすべて6ダメージ。" \
+        "進化する時同じ効果を持つ。これ若しくは自分のリーダーが最も低い場合、自分のリーダーだけに6ダメージを与える。"
+
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                    selected_card_for_effect: Card | None):
+        # Compute minimum HP across followers and leaders
+        min_hp_f1 = min((f.hp for f in game_state.fields[1] if isinstance(f, Follower)), default=None)
+        min_hp_f2 = min((f.hp for f in game_state.fields[2] if isinstance(f, Follower)), default=None)
+        min_candidates = [game_state.hp[1], game_state.hp[2]]
+        if min_hp_f1 is not None:
+            min_candidates.append(min_hp_f1)
+        if min_hp_f2 is not None:
+            min_candidates.append(min_hp_f2)
+        overall_min_hp = min(min_candidates)
+
+        # Collect followers at the minimum HP (deterministic order)
+        followers_min = [
+            f for f in (*game_state.fields[1], *game_state.fields[2])
+            if isinstance(f, Follower) and f.hp == overall_min_hp
+        ]
+
+        # If self is among the lowest or our leader is the lowest, restrict to own leader only
+        own_leader_is_lowest = (
+            (game_state.current_player == 1 and game_state.hp[1] == overall_min_hp) or
+            (game_state.current_player == 2 and game_state.hp[2] == overall_min_hp)
+        )
+        restrict_to_own_leader = (self in followers_min) or own_leader_is_lowest
+
+        # Decide leader targets
+        if restrict_to_own_leader:
+            leader_targets = [game_state.current_player]
+            followers_min = []  # Effect text says to hit only own leader in these cases
+        else:
+            leader_targets = [p for p in (1, 2) if game_state.hp[p] == overall_min_hp]
+
+        if set_text:
+            the_actual_textbox.append_html_text("最も体力の低い者へ、等しく裁きを下すのじゃ…！\n")
+
+        # Apply damage
+        for f in followers_min:
+            f.take_damage(6, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+        for p in leader_targets:
+            game_state.player_take_damage(p, 6, draw_ui, set_text)
+
+
+    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect: Card | None):
+        self.on_enhance_effect_default()
+        # same effect as on play
+        self.on_play_effect(game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect)
+
 
 
 # ==============================

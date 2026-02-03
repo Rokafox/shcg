@@ -751,8 +751,11 @@ class MinimaxAI:
         """Create a hash of the game state for deduplication."""
         parts = [
             str(state.hp[1]), str(state.hp[2]),
+            str(state.max_hp[1]), str(state.max_hp[2]),
             str(state.foxtail[1]), str(state.foxtail[2]),
             str(state.enhance_used_this_turn[1]), str(state.enhance_used_this_turn[2]),
+            str(state.max_enhance_allowed_per_turn[1]), str(state.max_enhance_allowed_per_turn[2]),
+            str(state.amount_card_generated_from_void[1]), str(state.amount_card_generated_from_void[2]),
         ]
 
         # Hash field states

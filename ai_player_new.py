@@ -73,6 +73,7 @@ class GameStateSnapshot:
     Does not include any UI elements.
     """
     def __init__(self):
+        # WARNING: Make sure to also modify from_game_state and copy methods when adding new attributes
         self.current_player: int = 2
         self.turn: int = 1
         self.concluded: bool = False
@@ -99,6 +100,7 @@ class GameStateSnapshot:
         snap.turn = game_state.turn
         snap.concluded = game_state.concluded
         snap.hp = {1: game_state.hp[1], 2: game_state.hp[2]}
+        snap.max_hp = {1: game_state.max_hp[1], 2: game_state.max_hp[2]}
         snap.foxtail = {1: game_state.foxtail[1], 2: game_state.foxtail[2]}
         snap.enhance_used_this_turn = {
             1: game_state.enhance_used_this_turn[1],
@@ -129,6 +131,7 @@ class GameStateSnapshot:
         new_snap.concluded = self.concluded
         new_snap.winner = self.winner
         new_snap.hp = {1: self.hp[1], 2: self.hp[2]}
+        new_snap.max_hp = {1: self.max_hp[1], 2: self.max_hp[2]}
         new_snap.foxtail = {1: self.foxtail[1], 2: self.foxtail[2]}
         new_snap.enhance_used_this_turn = {
             1: self.enhance_used_this_turn[1],

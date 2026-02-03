@@ -32,7 +32,7 @@ class CardNotFoundError(AIError):
     pass
 
 
-def _find_card_by_id(card_list: List[cards.Card], unique_id: str) -> Optional[cards.Card]:
+def _find_card_by_id(card_list: List[cards.Card], unique_id) -> Optional[cards.Card]:
     """Find a card in a list by its unique_id."""
     for card in card_list:
         if card.unique_id == unique_id:
@@ -40,9 +40,8 @@ def _find_card_by_id(card_list: List[cards.Card], unique_id: str) -> Optional[ca
     return None
 
 
-def _find_card_in_zones(state, unique_id: str, player: int) -> Optional[cards.Card]:
+def _find_card_in_zones(state, unique_id, player: int) -> Optional[cards.Card]:
     """Find a card by unique_id across all zones (fields and hands) for both players.
-
     Works with both GameStateSnapshot and SHCGGameState since they share the same structure.
     """
     all_cards = (
@@ -50,6 +49,22 @@ def _find_card_in_zones(state, unique_id: str, player: int) -> Optional[cards.Ca
         state.hands[player] + state.hands[3 - player]
     )
     return _find_card_by_id(all_cards, unique_id)
+
+
+def _find_card_by_void_id(card_list: List[cards.Card], void_id) -> Optional[cards.Card]:
+    for card in card_list:
+        if card.void_id == void_id:
+            return card
+    return None
+
+
+def _find_card_in_zones_by_void_id(state, void_id, player: int) -> Optional[cards.Card]:
+    all_cards = (
+        state.fields[player] + state.fields[3 - player] +
+        state.hands[player] + state.hands[3 - player]
+    )
+    return _find_card_by_void_id(all_cards, void_id)
+
 
 
 class GameStateSnapshot:
@@ -70,6 +85,7 @@ class GameStateSnapshot:
         self.foxtail: dict[int, int] = {1: MAX_FOXTAIL, 2: MAX_FOXTAIL}
         self.enhance_used_this_turn: dict[int, int] = {1: 0, 2: 0}
         self.max_enhance_allowed_per_turn: dict[int, int] = {1: DEFAULT_MAX_ENHANCE_PER_TURN, 2: DEFAULT_MAX_ENHANCE_PER_TURN}
+        self.amount_card_generated_from_void: dict[int, int] = {1: 0, 2: 0} 
 
     @property
     def opponent(self) -> int:
@@ -153,6 +169,8 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.original_cost = card.original_cost
         new_card.type = card.type
         new_card.unique_id = card.unique_id
+        new_card.is_generated = card.is_generated
+        new_card.void_id = card.void_id
         new_card.description = card.description
         new_card.effect_description = getattr(card, 'effect_description', '')
         new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')
@@ -181,6 +199,8 @@ def _copy_card(card: cards.Card) -> cards.Card:
         new_card.original_cost = card.original_cost
         new_card.type = card.type
         new_card.unique_id = card.unique_id
+        new_card.is_generated = card.is_generated
+        new_card.void_id = card.void_id
         new_card.description = getattr(card, 'description', '')
         new_card.effect_description = getattr(card, 'effect_description', '')
         new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')
@@ -328,10 +348,11 @@ class MoveGenerator:
     """
 
     @staticmethod
-    def get_playable_cards(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Card, Optional[cards.Card]]]:
+    def get_playable_cards(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Card, cards.Follower | None]]:
         """
         Get all playable cards with their targets.
         Returns list of (card, target) tuples. Target is None for non-targeting cards.
+        WARNING: Can only target followers on the field for now.
         """
         playable = []
         hand = state.hands[player]
@@ -373,7 +394,7 @@ class MoveGenerator:
         return playable
 
     @staticmethod
-    def get_possible_attacks(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Follower, Any]]:
+    def get_possible_attacks(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Follower, cards.Follower | str]]:
         """
         Get all possible attacks.
         Returns list of (attacker, target) tuples. Target is Follower or "leader".
@@ -408,7 +429,7 @@ class MoveGenerator:
         return attacks
 
     @staticmethod
-    def get_enhanceable_followers(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Card, Optional[cards.Card]]]:
+    def get_enhanceable_followers(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Follower, cards.Follower | None]]:
         """Get all followers that can be enhanced."""
         if state.enhance_used_this_turn[player] >= state.max_enhance_allowed_per_turn[player]:
             return []
@@ -597,7 +618,7 @@ class MinimaxAI:
                     break
 
             if not valid:
-                continue
+                raise AIError("Invalid action sequence generated.")
 
             # End the turn
             GameSimulator.end_turn(test_state)
@@ -619,7 +640,7 @@ class MinimaxAI:
                             break
 
                     if not valid_opp:
-                        continue
+                        raise AIError("Invalid opponent action sequence generated.")
 
                     # End opponent's turn
                     GameSimulator.end_turn(opp_test_state)
@@ -635,7 +656,6 @@ class MinimaxAI:
             else:
                 pass
                 # print("Advanced evaluation skipped due to definitive score.")
-
 
             self.nodes_evaluated += 1
 
@@ -775,7 +795,10 @@ class MinimaxAI:
         return sequences
 
     def _get_all_actions(self, state: GameStateSnapshot, player: int) -> List[Tuple]:
-        """Get all possible actions from current state."""
+        """
+        Get all possible actions from current state.
+        Other than draw, action[1] is the card/follower template (with unique_id).
+        """
         actions = []
 
         # Play cards
@@ -802,13 +825,19 @@ class MinimaxAI:
 
         if action_type == 'play':
             card, target = action[1], action[2]
-            actual_card = _find_card_by_id(state.hands[player], card.unique_id)
+            if card.is_generated:
+                actual_card = _find_card_by_void_id(state.hands[player], card.void_id)
+            else:
+                actual_card = _find_card_by_id(state.hands[player], card.unique_id)
             if actual_card is None:
                 raise CardNotFoundError(f"Card to play not found in hand: {card}") 
 
             actual_target = None
             if target is not None:
-                actual_target = _find_card_in_zones(state, target.unique_id, player)
+                if target.is_generated:
+                    actual_target = _find_card_in_zones_by_void_id(state, target.void_id, player)
+                else:
+                    actual_target = _find_card_in_zones(state, target.unique_id, player)
                 if actual_target is None:
                     raise CardNotFoundError(f"Target for card play not found: {target}")
 
@@ -816,11 +845,18 @@ class MinimaxAI:
 
         elif action_type == 'attack':
             attacker, target = action[1], action[2]
-            actual_attacker = next(
-                (f for f in state.fields[player]
-                 if f.unique_id == attacker.unique_id and f.can_attack_this_turn),
-                None
-            )
+            if attacker.is_generated:
+                actual_attacker = next(
+                    (f for f in state.fields[player]
+                     if f.void_id == attacker.void_id and f.can_attack_this_turn),
+                    None
+                )
+            else:
+                actual_attacker = next(
+                    (f for f in state.fields[player]
+                    if f.unique_id == attacker.unique_id and f.can_attack_this_turn),
+                    None
+                )
             if actual_attacker is None:
                 raise CardNotFoundError(f"Attacker not found on field: {attacker}")
 
@@ -835,17 +871,27 @@ class MinimaxAI:
 
         elif action_type == 'enhance':
             follower, extra_target = action[1], action[2]
-            actual_follower = next(
-                (f for f in state.fields[player]
-                 if f.unique_id == follower.unique_id and f.can_enhance),
-                None
-            )
+            if follower.is_generated:
+                actual_follower = next(
+                    (f for f in state.fields[player]
+                     if f.void_id == follower.void_id and f.can_enhance),
+                    None
+                )
+            else:
+                actual_follower = next(
+                    (f for f in state.fields[player]
+                    if f.unique_id == follower.unique_id and f.can_enhance),
+                    None
+                )
             if actual_follower is None:
                 raise CardNotFoundError(f"Follower to enhance not found on field: {follower}")
 
             actual_target = None
             if extra_target is not None:
-                actual_target = _find_card_in_zones(state, extra_target.unique_id, player)
+                if extra_target.is_generated:
+                    actual_target = _find_card_in_zones_by_void_id(state, extra_target.void_id, player)
+                else:
+                    actual_target = _find_card_in_zones(state, extra_target.unique_id, player)
                 if actual_target is None:
                     raise CardNotFoundError(f"Extra target for card enhance not found: {extra_target}")
 
@@ -908,13 +954,19 @@ class MinimaxAIPlayer:
         elif action_type == 'play':
             card_template, target_template = action[1], action[2]
 
-            actual_card = _find_card_by_id(game_state.hands[player], card_template.unique_id)
+            if card_template.is_generated:
+                actual_card = _find_card_by_void_id(game_state.hands[player], card_template.void_id)
+            else:
+                actual_card = _find_card_by_id(game_state.hands[player], card_template.unique_id)
             if actual_card is None:
                 raise CardNotFoundError("Card to play not found in hand")
 
             actual_target = None
             if target_template is not None:
-                actual_target = _find_card_in_zones(game_state, target_template.unique_id, player)
+                if target_template.is_generated:
+                    actual_target = _find_card_in_zones_by_void_id(game_state, target_template.void_id, player)
+                else:
+                    actual_target = _find_card_in_zones(game_state, target_template.unique_id, player)
                 if actual_target is None:
                     raise CardNotFoundError("Target for card play not found")
 
@@ -924,22 +976,36 @@ class MinimaxAIPlayer:
         elif action_type == 'attack':
             attacker_template, target_template = action[1], action[2]
 
-            actual_attacker = next(
-                (f for f in game_state.fields[player]
-                 if f.type == 'follower' and f.unique_id == attacker_template.unique_id),
-                None
-            )
+            if attacker_template.is_generated:
+                actual_attacker = next(
+                    (f for f in game_state.fields[player]
+                     if f.void_id == attacker_template.void_id),
+                    None
+                )
+            else:
+                actual_attacker = next(
+                    (f for f in game_state.fields[player]
+                    if f.type == 'follower' and f.unique_id == attacker_template.unique_id),
+                    None
+                )
             if actual_attacker is None:
                 raise CardNotFoundError("Attacker not found on field")
 
             if target_template == "leader":
                 actual_target = "leader"
             else:
-                actual_target = next(
-                    (f for f in game_state.fields[3 - player]
-                     if f.type == 'follower' and f.unique_id == target_template.unique_id),
-                    None
-                )
+                if target_template.is_generated:
+                    actual_target = next(
+                        (f for f in game_state.fields[3 - player]
+                         if f.void_id == target_template.void_id),
+                        None
+                    )
+                else:
+                    actual_target = next(
+                        (f for f in game_state.fields[3 - player]
+                        if f.type == 'follower' and f.unique_id == target_template.unique_id),
+                        None
+                    )
                 if actual_target is None:
                     raise CardNotFoundError("Attack target not found on field")
 

@@ -38,6 +38,8 @@ class SHCGGameState:
         self.foxtail = {1: 9, 2: 9}
         self.enhance_used_this_turn = {1: 0, 2: 0}
         self.max_enhance_allowed_per_turn = {1: 1, 2: 1}
+        # Every time a card is generated, the player who generated it gets 1 count
+        self.amount_card_generated_from_void: dict[int, int] = {1: 0, 2: 0} 
         # ui
         self.top_of_the_deck_ui_marker: dict[int, pygame_gui.elements.UIImage | None] = {1: None, 2: None}
     
@@ -58,7 +60,7 @@ class SHCGGameState:
         drawn_card = self.decks[player].pop()
         self.hands[player].append(drawn_card)
         if ui_set_text:
-            text_box.append_html_text(f"プレイヤー{player}がカードを1枚引いたぞ！カード:{drawn_card}。\n")
+            text_box.append_html_text(f"プレイヤー{player}がカード{drawn_card}引いたのじゃ。\n")
         if ui_draw:
             self.draw_hand_ui(player)
             # draw_deck_ui is unnecessary as it is handled by pygame event
@@ -80,7 +82,7 @@ class SHCGGameState:
             if is_ai_player:
                 target = additional_target
                 if ui_set_text:
-                    text_box.append_html_text(f"AIプレイヤー{player}が{card}をプレイするためにターゲット{target}を選択したのじゃ。\n")
+                    text_box.append_html_text(f"AIプレイヤー{player}が{card}をプレイする時に{target}を選択したのじゃ。\n")
             else:
                 target = None
                 if card.request_card_selection_on_play == "field":
@@ -104,7 +106,7 @@ class SHCGGameState:
                                 target = c
                                 break
                 if ui_set_text:
-                    text_box.append_html_text(f"プレイヤー{player}が{card}をプレイするためにターゲット{target}を選択したのじゃ。\n")
+                    text_box.append_html_text(f"プレイヤー{player}が{card}をプレイする時に{target}を選択したのじゃ。\n")
             card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
                                  the_actual_textbox=text_box,
                                  selected_card_for_effect=target)
@@ -145,18 +147,18 @@ class SHCGGameState:
             if target.hp <= 0:
                 self.fields[self.opponent].remove(target)
                 if ui_set_text:
-                    text_box.append_html_text(f"戦いの後、プレイヤー{self.opponent}の{target}は{attacker}によって倒されてしまったのじゃ。\n")
+                    text_box.append_html_text(f"{target}は{attacker}に攻撃され、倒されてしまったのじゃ。\n")
             if attacker.hp <= 0:
                 self.fields[self.current_player].remove(attacker)
                 if ui_set_text:
-                    text_box.append_html_text(f"戦いの後、プレイヤー{player}の{attacker}は倒されてしまったのじゃ。\n")
+                    text_box.append_html_text(f"攻撃者である{attacker}は倒されてしまったのじゃ。\n")
             attacker.after_attack_effect()
             if ui_draw:
                 self.draw_field_ui(1)
                 self.draw_field_ui(2)
         elif target == "leader":
             if ui_set_text:
-                text_box.append_html_text(f"{attacker}の直接攻撃がプレイヤー{self.opponent}に向けられたのじゃ！\n")
+                text_box.append_html_text(f"{attacker}の直接攻撃！\n")
             self.player_take_damage(self.opponent, attacker.attack, ui_draw, ui_set_text)
             # drain ability
             if attacker.ability_drain and attacker.attack > 0:
@@ -277,7 +279,7 @@ class SHCGGameState:
             if is_ai_player:
                 target = additional_target
                 if ui_set_text:
-                    text_box.append_html_text(f"AIプレイヤー{player}が{card_to_enhance}を強化するためにターゲット{target}を選択したのじゃ。\n")
+                    text_box.append_html_text(f"AIプレイヤー{player}が{card_to_enhance}を強化する時に{target}を選択したのじゃ。\n")
             else:
                 target = None
                 if card_to_enhance.request_card_selection_on_enhance == "field":
@@ -301,7 +303,7 @@ class SHCGGameState:
                                 target = c
                                 break
                 if ui_set_text:
-                    text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化するためにターゲット{target}を選択したのじゃ。\n")
+                    text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化する時に{target}を選択したのじゃ。\n")
             card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
                                               the_actual_textbox=text_box,
                                               selected_card_for_effect=target)

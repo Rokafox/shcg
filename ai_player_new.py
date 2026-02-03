@@ -108,6 +108,10 @@ class GameStateSnapshot:
             1: game_state.max_enhance_allowed_per_turn[1],
             2: game_state.max_enhance_allowed_per_turn[2]
         }
+        snap.amount_card_generated_from_void = {
+            1: game_state.amount_card_generated_from_void[1],
+            2: game_state.amount_card_generated_from_void[2]
+        }
 
         # Deep copy cards
         for player in [1, 2]:
@@ -133,6 +137,10 @@ class GameStateSnapshot:
         new_snap.max_enhance_allowed_per_turn = {
             1: self.max_enhance_allowed_per_turn[1],
             2: self.max_enhance_allowed_per_turn[2]
+        }
+        new_snap.amount_card_generated_from_void = {
+            1: self.amount_card_generated_from_void[1],
+            2: self.amount_card_generated_from_void[2]
         }
 
         for player in [1, 2]:

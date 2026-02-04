@@ -879,7 +879,7 @@ def start_new_game():
     card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
                   cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
                   cards.機構翼の少女ローザ, cards.飢餓の使徒, cards.飢餓の輝き, cards.飢餓の絶傑ギルネリーゼ,
-                  cards.不殺の絶傑エズディア]
+                  cards.不殺の絶傑エズディア, cards.真実の絶傑ライオ]
     example_deck_1 = [random.choice(card_types)() for _ in range(40)]
     example_deck_2 = [random.choice(card_types)() for _ in range(40)]
 

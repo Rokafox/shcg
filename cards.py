@@ -423,7 +423,8 @@ class 飢餓の絶傑ギルネリーゼ(Follower):
 class 不殺の絶傑エズディア(Follower):
     """
     target value: 4 * 4 = 16 points
-    value: NOTE: write about this later
+    value: 6/6 stats: 12 points, field effect: conditional 6 damage: 6 points
+    total value: 18 points
     """
     def __init__(self):
         super().__init__(name="不殺の絶傑・エズディア", cost=4, attack=6, hp=6, can_enhance=True)
@@ -478,6 +479,39 @@ class 不殺の絶傑エズディア(Follower):
         self.on_enhance_effect_default()
         # same effect as on play
         self.on_play_effect(game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect)
+
+
+class 真実の絶傑ライオ(Follower):
+    """
+    target value: 4 * 4 = 16 points
+    value: 6/6 stats: 12 points, average discard 2 cards -4, destroy 2, 10 points
+    total value: 18 points
+    """
+    def __init__(self):
+        super().__init__(name="真実の絶傑・ライオ", cost=4, attack=6, hp=6, can_enhance=True)
+        self.effect_description = "場に出す時、手札のスペルカードをすべて捨てる。相手の場のフォロワーを左から順番にX枚を9ダメージ。" \
+        "Xは捨てたスペルカードの枚数である。手札にスペルカードがない時、自分のリーダーに9ダメージ。"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Card | None):
+        player = game_state.current_player
+        spell_cards_to_discard = [c for c in game_state.hands[player] if isinstance(c, Spell)]
+         # Discard all spell cards from hand
+        num_discarded = len(spell_cards_to_discard)
+        for c in spell_cards_to_discard:
+            game_state.hands[player].remove(c)
+        if num_discarded > 0:
+            if set_text:
+                the_actual_textbox.append_html_text(f"真実の絶傑・ライオの効果で、プレイヤー{player}は手札のスペルカードを{num_discarded}枚捨てたのじゃ。\n")
+            # Deal 9 damage to opponent's followers from left to right
+            opponent = game_state.opponent
+            for i in range(min(num_discarded, len(game_state.fields[opponent]))):
+                target_follower = game_state.fields[opponent][i]
+                if isinstance(target_follower, Follower):
+                    target_follower.take_damage(9, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+        else:
+            # No spell cards to discard, deal 9 damage to own leader
+            game_state.player_take_damage(player, 9, draw_ui, set_text)
 
 
 

@@ -641,7 +641,7 @@ class MinimaxAI:
             # This part can be skipped if the player is already winning (score == inf)
             # or losing (score == -inf) as checked in True basic_lethal_check or draw (score == 0.0)
             if not score == float('inf') and not score == float('-inf') and not score == 0.0:
-                opponent_sequences = self._generate_random_turn_sequences(test_state, test_state.current_player, attempts=10)
+                opponent_sequences = self._generate_random_turn_sequences(test_state, test_state.current_player, min_continuous_visited_state_req=2)
                 for opp_actions in opponent_sequences:
                     opp_test_state = test_state.copy()
                     valid_opp = True
@@ -684,68 +684,68 @@ class MinimaxAI:
 
         return best_actions
 
-    def _generate_turn_sequences(self, state: GameStateSnapshot, player: int,
-                                  max_actions: int = MAX_ACTIONS_PER_TURN) -> List[List[Tuple]]:
-        """
-        Generate all reasonable action sequences for a turn.
-        Uses BFS to find sequences where foxtail is exhausted.
+    # def _generate_turn_sequences(self, state: GameStateSnapshot, player: int,
+    #                               max_actions: int = MAX_ACTIONS_PER_TURN) -> List[List[Tuple]]:
+    #     """
+    #     Generate all reasonable action sequences for a turn.
+    #     Uses BFS to find sequences where foxtail is exhausted.
 
-        Rules enforced:
-        - Action length is unlimited (up to max_actions for safety)
-        - Ending turn early is NOT allowed
-        - Foxtail must be used as much as possible until none remains
-        - Only terminal sequences are returned (foxtail=0 or no more actions possible)
-        """
-        sequences = []  # No empty sequence - ending early is not allowed
+    #     Rules enforced:
+    #     - Action length is unlimited (up to max_actions for safety)
+    #     - Ending turn early is NOT allowed
+    #     - Foxtail must be used as much as possible until none remains
+    #     - Only terminal sequences are returned (foxtail=0 or no more actions possible)
+    #     """
+    #     sequences = []  # No empty sequence - ending early is not allowed
 
-        # Use BFS to generate action sequences
-        queue = [(state.copy(), [])]
-        visited_states = set()
+    #     # Use BFS to generate action sequences
+    #     queue = [(state.copy(), [])]
+    #     visited_states = set()
 
-        while queue and len(sequences) < MAX_ACTION_SEQUENCES:  # Limit total sequences for performance
-            current_state, current_actions = queue.pop(0)
+    #     while queue and len(sequences) < MAX_ACTION_SEQUENCES:  # Limit total sequences for performance
+    #         current_state, current_actions = queue.pop(0)
 
-            if len(current_actions) >= max_actions:
-                # Safety limit reached - add this as a terminal sequence
-                if current_actions:  # Only add non-empty sequences
-                    sequences.append(current_actions)
-                continue
+    #         if len(current_actions) >= max_actions:
+    #             # Safety limit reached - add this as a terminal sequence
+    #             if current_actions:  # Only add non-empty sequences
+    #                 sequences.append(current_actions)
+    #             continue
 
-            # Generate state hash for deduplication
-            state_hash = self._state_hash(current_state)
-            if state_hash in visited_states:
-                continue
-            visited_states.add(state_hash)
+    #         # Generate state hash for deduplication
+    #         state_hash = self._state_hash(current_state)
+    #         if state_hash in visited_states:
+    #             continue
+    #         visited_states.add(state_hash)
 
-            # Try all possible next actions
-            next_actions = self._get_all_actions(current_state, player)
+    #         # Try all possible next actions
+    #         next_actions = self._get_all_actions(current_state, player)
 
-            # If no more actions possible OR foxtail is 0, this is a terminal sequence
-            if not next_actions or current_state.foxtail[player] == 0:
-                if current_actions:  # Only add non-empty sequences
-                    sequences.append(current_actions)
-                continue
+    #         # If no more actions possible OR foxtail is 0, this is a terminal sequence
+    #         if not next_actions or current_state.foxtail[player] == 0:
+    #             if current_actions:  # Only add non-empty sequences
+    #                 sequences.append(current_actions)
+    #             continue
 
-            for action in next_actions:
-                new_state = current_state.copy()
-                if self._apply_action(new_state, player, action):
-                    new_sequence = current_actions + [action]
+    #         for action in next_actions:
+    #             new_state = current_state.copy()
+    #             if self._apply_action(new_state, player, action):
+    #                 new_sequence = current_actions + [action]
 
-                    if new_state.concluded:
-                        # Game ended - this is a terminal sequence
-                        sequences.append(new_sequence)
-                    elif new_state.foxtail[player] == 0:
-                        # Foxtail exhausted - this is a terminal sequence
-                        sequences.append(new_sequence)
-                    else:
-                        # Continue exploring
-                        queue.append((new_state, new_sequence))
+    #                 if new_state.concluded:
+    #                     # Game ended - this is a terminal sequence
+    #                     sequences.append(new_sequence)
+    #                 elif new_state.foxtail[player] == 0:
+    #                     # Foxtail exhausted - this is a terminal sequence
+    #                     sequences.append(new_sequence)
+    #                 else:
+    #                     # Continue exploring
+    #                     queue.append((new_state, new_sequence))
 
-        # If no sequences found (edge case), allow pass but this shouldn't happen
-        if not sequences:
-            sequences = [[]]
+    #     # If no sequences found (edge case), allow pass but this shouldn't happen
+    #     if not sequences:
+    #         sequences = [[]]
 
-        return sequences
+    #     return sequences
 
     def _state_hash(self, state: GameStateSnapshot) -> str:
         """Create a hash of the game state for deduplication."""
@@ -780,33 +780,65 @@ class MinimaxAI:
         for player in [1, 2]:
             hand_str = ",".join(f"{c.name}:{c.cost}" for c in state.hands[player])
             parts.append(f"H{player}:" + hand_str)
+
+        # deck states, name and cost
+        for player in [1, 2]:
+            deck_str = ",".join(f"{c.name}:{c.cost}" for c in state.decks[player])
+            parts.append(f"D{player}:" + deck_str)
+
         return "|".join(parts)
 
-    def _generate_random_turn_sequences(self, state: GameStateSnapshot, player: int, attempts: int,
-                                  max_actions: int = MAX_ACTIONS_PER_TURN) -> List[List[Tuple]]:
+    def _generate_random_turn_sequences(self, state: GameStateSnapshot, player: int,
+                                        min_continuous_visited_state_req: int,
+                                        max_actions: int = MAX_ACTIONS_PER_TURN,
+                                        ) -> List[List[Tuple]]:
         """
         Generate random reasonable action sequences for a turn.
         Rules enforced: The same as _generate_turn_sequences.
+        min_continuous_visited_state_req: Stop If the end result same state is visited this many times continuously.
+        This value should be high enough to allow many more thorough explorations.
+        Only terminal sequences are returned (foxtail=0 or no more actions possible)
         """
         import random
-        sequences = []
-        while len(sequences) < attempts:
-            current_state = state.copy()
-            current_actions = []
+        bundle_of_all_action_sequences = []
+        visited_states = set()
+        continuous_visited_state_count = 0
+        current_state = state.copy() # the original environment
+        single_action_seq = []
 
-            while len(current_actions) < max_actions:
-                next_actions = self._get_all_actions(current_state, player)
+        while continuous_visited_state_count < min_continuous_visited_state_req: # requirement
+            # do: generate single action sequences until requirement is met
+            next_possible_actions: list[tuple] = self._get_all_actions(current_state, player)
 
-                if not next_actions or current_state.foxtail[player] == 0:
-                    break
+            if not next_possible_actions or current_state.foxtail[player] == 0: # if terminal state
+                # hash, compare, if in visited_states, increase continuous_visited_state_count
+                # else reset continuous_visited_state_count
+                state_hash = self._state_hash(current_state)
+                if state_hash in visited_states:
+                    continuous_visited_state_count += 1
+                else:
+                    visited_states.add(state_hash)
+                    continuous_visited_state_count = 0
+                # stop. This single action sequence is concluded.
+                if single_action_seq:
+                    bundle_of_all_action_sequences.append(single_action_seq)
+                else:
+                    # no action is possible, meaning it is already terminal state
+                    pass
+                # either way, reset for finding next single action sequence
+                current_state = state.copy()
+                single_action_seq = []
+                continue
+            else: # should continue
+                pass 
 
-                action = random.choice(next_actions)
-                if self._apply_action(current_state, player, action):
-                    current_actions.append(action)
+            action = random.choice(next_possible_actions)
+            if self._apply_action(current_state, player, action): # apply action
+                single_action_seq.append(action)
+            else: # action not valid? Make no sense
+                raise AIError("Invalid action sequence generated.")
 
-            if current_actions:
-                sequences.append(current_actions)
-        return sequences
+        return bundle_of_all_action_sequences
 
     def _get_all_actions(self, state: GameStateSnapshot, player: int) -> List[Tuple]:
         """

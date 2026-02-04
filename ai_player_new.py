@@ -172,50 +172,31 @@ class GameStateSnapshot:
 
 def _copy_card(card: cards.Card) -> cards.Card:
     """Create a deep copy of a card."""
+    # Create new instance of the same class without running __init__
+    new_card = card.__class__.__new__(card.__class__)
+
+    # Common attributes copied for all card types
+    common_attrs = [
+        'name', 'cost', 'original_cost', 'type', 'unique_id', 'is_generated',
+        'void_id', 'description', 'effect_description', 'request_card_selection_on_play'
+    ]
+    for attr in common_attrs:
+        if hasattr(card, attr):
+            setattr(new_card, attr, getattr(card, attr))
+
+    # Follower-specific attributes
     if isinstance(card, cards.Follower):
-        # Create new instance of the same class
-        new_card = card.__class__.__new__(card.__class__)
-        new_card.name = card.name
-        new_card.cost = card.cost
-        new_card.original_cost = card.original_cost
-        new_card.type = card.type
-        new_card.unique_id = card.unique_id
-        new_card.is_generated = card.is_generated
-        new_card.void_id = card.void_id
-        new_card.description = card.description
-        new_card.effect_description = getattr(card, 'effect_description', '')
-        new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')
-        # Follower specific
-        new_card.description_e = getattr(card, 'description_e', '')
-        new_card.attack = card.attack
-        new_card.hp = card.hp
-        new_card.max_hp = card.max_hp
-        new_card.can_enhance = card.can_enhance
-        new_card.is_enhanced = card.is_enhanced
-        new_card.summoned_this_turn = card.summoned_this_turn
-        new_card.enhanced_this_turn = card.enhanced_this_turn
-        new_card.request_card_selection_on_enhance = getattr(card, 'request_card_selection_on_enhance', '')
-        new_card.attack_ability = card.attack_ability
-        new_card.how_many_attacks_max_of_turn = card.how_many_attacks_max_of_turn
-        new_card.how_many_attacks_done_of_turn = card.how_many_attacks_done_of_turn
-        new_card.can_attack_this_turn = card.can_attack_this_turn
-        new_card.ability_protect = card.ability_protect
-        new_card.ability_drain = card.ability_drain
-        return new_card
-    else:
-        # For spells and amulets
-        new_card = card.__class__.__new__(card.__class__)
-        new_card.name = card.name
-        new_card.cost = card.cost
-        new_card.original_cost = card.original_cost
-        new_card.type = card.type
-        new_card.unique_id = card.unique_id
-        new_card.is_generated = card.is_generated
-        new_card.void_id = card.void_id
-        new_card.description = getattr(card, 'description', '')
-        new_card.effect_description = getattr(card, 'effect_description', '')
-        new_card.request_card_selection_on_play = getattr(card, 'request_card_selection_on_play', '')
-        return new_card
+        follower_attrs = [
+            'description_e', 'attack', 'hp', 'max_hp', 'can_enhance', 'is_enhanced',
+            'summoned_this_turn', 'enhanced_this_turn', 'request_card_selection_on_enhance',
+            'attack_ability', 'how_many_attacks_max_of_turn', 'how_many_attacks_done_of_turn',
+            'can_attack_this_turn', 'ability_protect', 'ability_drain'
+        ]
+        for attr in follower_attrs:
+            if hasattr(card, attr):
+                setattr(new_card, attr, getattr(card, attr))
+
+    return new_card
 
 
 class GameSimulator:
@@ -615,9 +596,8 @@ class MinimaxAI:
         best_score = float('-inf')
         best_actions = []
 
-        # Generate and evaluate all possible action sequences
-        # No max_actions limit - foxtail must be used as much as possible
-        all_sequences = self._generate_turn_sequences(state, self.player_number)
+        # Generate and evaluate possible action sequences
+        all_sequences = self._generate_random_turn_sequences(state, self.player_number, min_continuous_visited_state_req=4)
 
         for actions in all_sequences:
             # Apply actions to a copy of the state
@@ -655,6 +635,7 @@ class MinimaxAI:
 
                     # End opponent's turn
                     GameSimulator.end_turn(opp_test_state)
+                    # No basic check. Only matters if opponent can score infinity here
                     opp_score = Evaluator.evaluate(opp_test_state, self.player_number, False)
                     self.nodes_evaluated_additional += 1
 
@@ -794,10 +775,10 @@ class MinimaxAI:
                                         ) -> List[List[Tuple]]:
         """
         Generate random reasonable action sequences for a turn.
-        Rules enforced: The same as _generate_turn_sequences.
         min_continuous_visited_state_req: Stop If the end result same state is visited this many times continuously.
         This value should be high enough to allow many more thorough explorations.
-        Only terminal sequences are returned (foxtail=0 or no more actions possible)
+        Only terminal sequences are accepted (foxtail=0 or no more actions possible)
+        Verified by Rokafox on 2026/02/04
         """
         import random
         bundle_of_all_action_sequences = []

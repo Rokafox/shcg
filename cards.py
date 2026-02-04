@@ -25,9 +25,12 @@ class Card:
         self.description = ""
         self.effect_description = ""
         self.request_card_selection_on_play: str = "" # e.g., "field"
-        # field: player field
-        # field_opponent: opponent field
-        # field_both: both fields
+        # field: player field follower
+        # field_opponent: opponent field follower
+        # field_both: both fields follower
+        # field_c: player field any card
+        # field_opponent_c: opponent field any card
+        # field_both_c: both fields any card
 
     def tooltip_str(self):
         s = f"{self.name}\n"
@@ -72,12 +75,18 @@ class Follower(Card):
         self.how_many_attacks_max_of_turn: int = 1  # Number of attacks per turn
         self.how_many_attacks_done_of_turn: int = 0  # Number of attacks done this turn
         self.can_attack_this_turn: bool = False
+        self.ability_rush: bool = False
+        self.ability_super_rush: bool = False
         self.ability_protect: bool = False  # Opponent's followers cannot target leader while this follower is on field
         self.ability_drain: bool = False  # Heals leader when it attacks and deals damage.
     
     def tooltip_str(self):
         s = f"{self.name}\n"
         s += f"攻撃:{self.attack}HP:{self.hp}/{self.max_hp}\n"
+        if self.ability_rush:
+            s += "【突進】\n"
+        if self.ability_super_rush:
+            s += "【疾走】\n"
         if self.ability_protect:
             s += "【守護】\n"
         if self.ability_drain:
@@ -104,6 +113,19 @@ class Follower(Card):
         if self.attack_ability > 0:
             self.attack_ability -= 1
     
+    def on_summon_effect(self):
+        # called after on play effect and immediately after assigned to field
+        # but before drawing field ui
+        if self.ability_rush:
+            self.attack_ability = 1
+            if self.how_many_attacks_done_of_turn < self.how_many_attacks_max_of_turn:
+                self.can_attack_this_turn = True
+        if self.ability_super_rush:
+            self.attack_ability = 2
+            if self.how_many_attacks_done_of_turn < self.how_many_attacks_max_of_turn:
+                self.can_attack_this_turn = True
+
+
     def start_of_turn_on_field_effect(self, player):
         self.enhanced_this_turn = False
         self.how_many_attacks_done_of_turn = 0
@@ -329,7 +351,7 @@ class 飢餓の使徒(Follower):
     def __init__(self):
         super().__init__(name="飢餓の使徒", cost=2, attack=2, hp=2, can_enhance=True)
         self.description_e = "必死になって、追い立てられて、身を捩るほどに苦悩して。無垢なままでは終わってしまうわよ。"
-        self.effect_description = "場に出す時、自分の場の他のフォロワー1体を選ぶ。それは突進を持つ。" \
+        self.effect_description = "場に出す時、自分の場の他のフォロワー1体を選ぶ。それの攻撃段階1進む、このターンで攻撃できる。" \
         "進化時、場のフォロワー1体を選ぶ。それに3ダメージ。それは攻撃力+3する。これを選ぶ時、この効果は無効になる。"
         self.request_card_selection_on_enhance = "field_both"
         self.request_card_selection_on_play = "field"

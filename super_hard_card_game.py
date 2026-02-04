@@ -90,11 +90,15 @@ class SHCGGameState:
                         if f"{i + 1} {str(c)}" == scsd_player_field.selected_option[0]:
                             target = c
                             break
+                    if not isinstance(target, cards.Follower):
+                        target = None
                 elif card.request_card_selection_on_play == "field_opponent":
                     for i, c in enumerate(self.fields[3 - player]):
                         if f"{i + 1} {str(c)}" == scsd_opponent_field.selected_option[0]:
                             target = c
                             break
+                    if not isinstance(target, cards.Follower):
+                        target = None
                 elif card.request_card_selection_on_play == "field_both":
                     for i, c in enumerate(self.fields[player]):
                         if f"CP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
@@ -105,6 +109,8 @@ class SHCGGameState:
                             if f"OP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
                                 target = c
                                 break
+                    if not isinstance(target, cards.Follower):
+                        target = None
                 if ui_set_text:
                     text_box.append_html_text(f"プレイヤー{player}が{card}をプレイする時に{target}を選択したのじゃ。\n")
             card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
@@ -114,11 +120,12 @@ class SHCGGameState:
             card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
                                  the_actual_textbox=text_box,
                                  selected_card_for_effect=None)
-        if card.type == 'follower':
+        if isinstance(card, cards.Follower):
             self.fields[player].append(card)
-        elif card.type == 'spell':
+            card.on_summon_effect()
+        elif isinstance(card, cards.Spell):
             pass
-        elif card.type == 'amulet':
+        elif isinstance(card, cards.Amulet):
             self.fields[player].append(card)
         if ui_draw:
             self.draw_hand_ui(player)
@@ -287,11 +294,15 @@ class SHCGGameState:
                         if f"{i + 1} {str(c)}" == scsd_player_field.selected_option[0]:
                             target = c
                             break
+                    if not isinstance(target, cards.Follower):
+                        target = None
                 elif card_to_enhance.request_card_selection_on_enhance == "field_opponent":
                     for i, c in enumerate(self.fields[3 - player]):
                         if f"{i + 1} {str(c)}" == scsd_opponent_field.selected_option[0]:
                             target = c
                             break
+                    if not isinstance(target, cards.Follower):
+                        target = None
                 elif card_to_enhance.request_card_selection_on_enhance == "field_both":
                     for i, c in enumerate(self.fields[player]):
                         if f"CP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
@@ -302,6 +313,8 @@ class SHCGGameState:
                             if f"OP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
                                 target = c
                                 break
+                    if not isinstance(target, cards.Follower):
+                        target = None
                 if ui_set_text:
                     text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化する時に{target}を選択したのじゃ。\n")
             card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
@@ -528,32 +541,32 @@ end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 
                                     text='End Turn',
                                     manager=ui_manager,)
 
-scsd_player_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 355), (260, 35)),
-                                    "Select a card on current player field:",
+scsd_player_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 355), (30, 35)),
+                                    "F",
                                     ui_manager,)
 
 # single card selection dropdown
 scsd_player_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
                                                         starting_option="",
-                                                        relative_rect=pygame.Rect((1320, 395), (260, 35)),
+                                                        relative_rect=pygame.Rect((1355, 355), (225, 35)),
                                                         manager=ui_manager,)
 
-scsd_opponent_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 435), (260, 35)),
-                                    "Select a card on opponent field:",
+scsd_opponent_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 395), (30, 35)),
+                                    "OF",
                                     ui_manager,)
 
 scsd_opponent_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
                                                         starting_option="",
-                                                        relative_rect=pygame.Rect((1320, 475), (260, 35)),
+                                                        relative_rect=pygame.Rect((1355, 395), (225, 35)),
                                                         manager=ui_manager,)
 
-scsd_all_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 515), (260, 35)),
-                                    "Select a card on either field:",
+scsd_all_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 435), (30, 35)),
+                                    "EF",
                                     ui_manager,)
 
 scsd_all_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
                                                         starting_option="",
-                                                        relative_rect=pygame.Rect((1320, 545), (260, 35)),
+                                                        relative_rect=pygame.Rect((1355, 435), (225, 35)),
                                                         manager=ui_manager,)
 
 def update_scsd_options(current_player_field: list[cards.Card], opponent_player_field: list[cards.Card]):
@@ -565,7 +578,7 @@ def update_scsd_options(current_player_field: list[cards.Card], opponent_player_
         card_list: list[str] = [""]
     scsd_player_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
                                                                       starting_option=card_list[0],
-                                                                      relative_rect=pygame.Rect((1320, 395), (260, 35)),
+                                                                      relative_rect=pygame.Rect((1355, 355), (225, 35)),
                                                                       manager=ui_manager,)
     scsd_opponent_field.kill()
     if opponent_player_field:
@@ -574,7 +587,7 @@ def update_scsd_options(current_player_field: list[cards.Card], opponent_player_
         card_list: list[str] = [""]
     scsd_opponent_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
                                                                       starting_option=card_list[0],
-                                                                      relative_rect=pygame.Rect((1320, 475), (260, 35)),
+                                                                      relative_rect=pygame.Rect((1355, 395), (225, 35)),
                                                                       manager=ui_manager,)
     scsd_all_field.kill()
     if current_player_field or opponent_player_field:
@@ -587,7 +600,7 @@ def update_scsd_options(current_player_field: list[cards.Card], opponent_player_
         card_list: list[str] = [""]
     scsd_all_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
                                                                       starting_option=card_list[0],
-                                                                      relative_rect=pygame.Rect((1320, 545), (260, 35)),
+                                                                      relative_rect=pygame.Rect((1355, 435), (225, 35)),
                                                                       manager=ui_manager,)
 
 
@@ -736,6 +749,9 @@ def build_component_tooltips():
     All tooltips here. Delay should always be 0.1
     """
     settings_button.set_tooltip("Open settings window.", delay=0.1, wrap_width=300)
+    scsd_player_field_label.set_tooltip("Select a card from your field for card effects.", delay=0.1, wrap_width=300)
+    scsd_opponent_field_label.set_tooltip("Select a card from opponent's field for card effects.", delay=0.1, wrap_width=300)
+    scsd_all_field_label.set_tooltip("Select a card from either field for card effects.", delay=0.1, wrap_width=300)
 
 
 build_component_tooltips()

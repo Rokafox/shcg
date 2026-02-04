@@ -184,6 +184,8 @@ def _copy_card(card: cards.Card) -> cards.Card:
     for attr in common_attrs:
         if hasattr(card, attr):
             setattr(new_card, attr, getattr(card, attr))
+        else:
+            raise AIError(f"Card {card} missing expected attribute {attr} during copy.")
 
     # Follower-specific attributes
     if isinstance(card, cards.Follower):
@@ -191,11 +193,13 @@ def _copy_card(card: cards.Card) -> cards.Card:
             'description_e', 'attack', 'hp', 'max_hp', 'can_enhance', 'is_enhanced',
             'summoned_this_turn', 'enhanced_this_turn', 'request_card_selection_on_enhance',
             'attack_ability', 'how_many_attacks_max_of_turn', 'how_many_attacks_done_of_turn',
-            'can_attack_this_turn', 'ability_protect', 'ability_drain'
+            'can_attack_this_turn', 'ability_rush', 'ability_super_rush', 'ability_protect', 'ability_drain'
         ]
         for attr in follower_attrs:
             if hasattr(card, attr):
                 setattr(new_card, attr, getattr(card, attr))
+            else:
+                raise AIError(f"Follower {card} missing expected attribute {attr} during copy.")
 
     return new_card
 
@@ -225,11 +229,12 @@ class GameSimulator:
         else:
             card.on_play_effect(state, False, False, None, None)
 
-        if card.type == 'follower':
+        if isinstance(card, cards.Follower):
             state.fields[player].append(card)
-        elif card.type == 'amulet':
+            card.on_summon_effect()
+        elif isinstance(card, cards.Amulet):
             state.fields[player].append(card)
-        elif card.type == 'spell':
+        elif isinstance(card, cards.Spell):
             pass
 
         return True

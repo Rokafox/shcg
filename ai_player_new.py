@@ -74,6 +74,7 @@ class GameStateSnapshot:
     """
     def __init__(self):
         # WARNING: Make sure to also modify from_game_state and copy methods when adding new attributes
+        # Also _state_hash
         self.current_player: int = 2
         self.turn: int = 1
         self.concluded: bool = False
@@ -479,8 +480,8 @@ class Evaluator:
     def evaluate(state: GameStateSnapshot, player: int, basic_lethal_check: bool) -> float:
         """
         Evaluate the game state from player's perspective.
-        Positive = player is winning, Negative = opponent is winning.
         Returns infinity for wins, -infinity for losses.
+        Written and Verified by Rokafox on 2026/02/05
         """
         # NOTE: this method is called after the player's turn ends
         opponent = 3 - player
@@ -509,7 +510,7 @@ class Evaluator:
                             total_threat += f.attack
                         elif f.attack_ability == 1 and f.can_enhance and f.attack > max_semi_threat:
                             # 強化可能な潜在的脅威（最大のものだけ追跡）
-                            semi_threat_found = True
+                            semi_threat_found = True # necessary as the follower may have 0 attack
                             max_semi_threat = f.attack
 
                 # 強化後の脅威を加算（+2は強化ボーナス）
@@ -545,12 +546,8 @@ class Evaluator:
                 if f.ability_drain:
                     opp_field_power += f.attack
         score += (own_field_power - opp_field_power) * Evaluator.FIELD_POWER_WEIGHT
-
-        # follower ability_protect bonus
-
         # Hand size
         score += (len(state.hands[player]) - len(state.hands[opponent])) * Evaluator.HAND_SIZE_WEIGHT
-
         # Deck size
         score += (len(state.decks[player]) - len(state.decks[opponent])) * Evaluator.DECK_SIZE_WEIGHT
 
@@ -559,37 +556,23 @@ class Evaluator:
 
 class MinimaxAI:
     """
-    Chess-like AI using minimax with alpha-beta pruning.
-    Calculates optimal moves by looking ahead several turns.
+    Not minimax at all.
     """
-
-    def __init__(self, player_number: int, max_depth: int = 1):
-        """
-        Initialize the AI.
-
-        Args:
-            player_number: Which player this AI controls (1 or 2)
-            max_depth: How many turns to look ahead (1 = end of opponent's next turn)
-        """
+    def __init__(self, player_number: int):
         self.player_number = player_number
-        self.max_depth = max_depth
-        self.nodes_evaluated = 0
-        self.nodes_evaluated_additional = 0
+        self.endturnstate_evaluated = 0
+        self.endturnstate_evaluated_additional = 0
+        self.loss_endturnstate_avoided = 0
         self.best_actions: List[Tuple[str, Any]] = []
 
-    def get_best_turn_actions(self, game_state: 'SHCGGameState') -> List[Tuple[str, Any]]:
+    def get_best_turn_actions(self, game_state: 'SHCGGameState') -> List[Tuple]:
         """
         Calculate and return the best sequence of actions for this turn.
-
-        Returns a list of action tuples:
-        - ('play', card, target)
-        - ('attack', attacker, target)
-        - ('enhance', follower)
-        - ('draw',)
-        - ('end_turn',)
+        Written and Verified by Rokafox on 2026/02/05
         """
-        self.nodes_evaluated = 0
-        self.nodes_evaluated_additional = 0
+        self.endturnstate_evaluated = 0
+        self.endturnstate_evaluated_additional = 0
+        self.loss_endturnstate_avoided = 0
         state = GameStateSnapshot.from_game_state(game_state)
 
         # Find all possible turn action sequences and evaluate them
@@ -597,51 +580,40 @@ class MinimaxAI:
         best_actions = []
 
         # Generate and evaluate possible action sequences
-        all_sequences = self._generate_random_turn_sequences(state, self.player_number, min_continuous_visited_state_req=4)
+        all_sequences = self._generate_random_turn_sequences(state, self.player_number, min_continuous_visited_state_req=6)
 
         for actions in all_sequences:
             # Apply actions to a copy of the state
             test_state = state.copy()
-            valid = True
             for action in actions:
                 if not self._apply_action(test_state, self.player_number, action):
-                    valid = False
-                    break
+                    raise AIError("Invalid action sequence generated.")
 
-            if not valid:
-                raise AIError("Invalid action sequence generated.")
-
-            # End the turn
             GameSimulator.end_turn(test_state)
             score = Evaluator.evaluate(test_state, self.player_number, True) # Basic evaluation
 
-            # Advanced evaluation: simulate opponent's response with _generate_random_turn_sequences
-            # with a limited number of attempts (10) for performance.
+            # Advanced evaluation: simulate opponent's turn
             # If opponent scores inf for any seq, its a loss for us and set score to -inf.
             # This part can be skipped if the player is already winning (score == inf)
             # or losing (score == -inf) as checked in True basic_lethal_check or draw (score == 0.0)
             if not score == float('inf') and not score == float('-inf') and not score == 0.0:
-                opponent_sequences = self._generate_random_turn_sequences(test_state, test_state.current_player, min_continuous_visited_state_req=2)
-                for opp_actions in opponent_sequences:
+                opponent_sequences = self._generate_random_turn_sequences(test_state, 3 - self.player_number, min_continuous_visited_state_req=3)
+                for single_opp_seq in opponent_sequences:
                     opp_test_state = test_state.copy()
-                    valid_opp = True
-                    for opp_action in opp_actions:
+                    for opp_action in single_opp_seq:
                         if not self._apply_action(opp_test_state, test_state.current_player, opp_action):
-                            valid_opp = False
-                            break
-
-                    if not valid_opp:
-                        raise AIError("Invalid opponent action sequence generated.")
+                            raise AIError("Invalid opponent action sequence generated.")
 
                     # End opponent's turn
                     GameSimulator.end_turn(opp_test_state)
-                    # No basic check. Only matters if opponent can score infinity here
-                    opp_score = Evaluator.evaluate(opp_test_state, self.player_number, False)
-                    self.nodes_evaluated_additional += 1
+                    # No basic lethal check. Only matters if opponent can score infinity here
+                    opp_score = Evaluator.evaluate(opp_test_state, 3 - self.player_number, False)
+                    self.endturnstate_evaluated_additional += 1
 
                     if opp_score == float('inf'):
                         # Opponent can win, so this is a loss for us
                         score = float('-inf')
+                        self.loss_endturnstate_avoided += 1
                         break
                     else:
                         pass
@@ -649,7 +621,7 @@ class MinimaxAI:
                 pass
                 # print("Advanced evaluation skipped due to definitive score.")
 
-            self.nodes_evaluated += 1
+            self.endturnstate_evaluated += 1
 
             if score > best_score:
                 best_score = score
@@ -665,71 +637,12 @@ class MinimaxAI:
 
         return best_actions
 
-    # def _generate_turn_sequences(self, state: GameStateSnapshot, player: int,
-    #                               max_actions: int = MAX_ACTIONS_PER_TURN) -> List[List[Tuple]]:
-    #     """
-    #     Generate all reasonable action sequences for a turn.
-    #     Uses BFS to find sequences where foxtail is exhausted.
-
-    #     Rules enforced:
-    #     - Action length is unlimited (up to max_actions for safety)
-    #     - Ending turn early is NOT allowed
-    #     - Foxtail must be used as much as possible until none remains
-    #     - Only terminal sequences are returned (foxtail=0 or no more actions possible)
-    #     """
-    #     sequences = []  # No empty sequence - ending early is not allowed
-
-    #     # Use BFS to generate action sequences
-    #     queue = [(state.copy(), [])]
-    #     visited_states = set()
-
-    #     while queue and len(sequences) < MAX_ACTION_SEQUENCES:  # Limit total sequences for performance
-    #         current_state, current_actions = queue.pop(0)
-
-    #         if len(current_actions) >= max_actions:
-    #             # Safety limit reached - add this as a terminal sequence
-    #             if current_actions:  # Only add non-empty sequences
-    #                 sequences.append(current_actions)
-    #             continue
-
-    #         # Generate state hash for deduplication
-    #         state_hash = self._state_hash(current_state)
-    #         if state_hash in visited_states:
-    #             continue
-    #         visited_states.add(state_hash)
-
-    #         # Try all possible next actions
-    #         next_actions = self._get_all_actions(current_state, player)
-
-    #         # If no more actions possible OR foxtail is 0, this is a terminal sequence
-    #         if not next_actions or current_state.foxtail[player] == 0:
-    #             if current_actions:  # Only add non-empty sequences
-    #                 sequences.append(current_actions)
-    #             continue
-
-    #         for action in next_actions:
-    #             new_state = current_state.copy()
-    #             if self._apply_action(new_state, player, action):
-    #                 new_sequence = current_actions + [action]
-
-    #                 if new_state.concluded:
-    #                     # Game ended - this is a terminal sequence
-    #                     sequences.append(new_sequence)
-    #                 elif new_state.foxtail[player] == 0:
-    #                     # Foxtail exhausted - this is a terminal sequence
-    #                     sequences.append(new_sequence)
-    #                 else:
-    #                     # Continue exploring
-    #                     queue.append((new_state, new_sequence))
-
-    #     # If no sequences found (edge case), allow pass but this shouldn't happen
-    #     if not sequences:
-    #         sequences = [[]]
-
-    #     return sequences
 
     def _state_hash(self, state: GameStateSnapshot) -> str:
-        """Create a hash of the game state for deduplication."""
+        """
+        Create a hash of the game state for deduplication.
+        Written and Verified by Rokafox on 2026/02/04
+        """
         parts = [
             str(state.hp[1]), str(state.hp[2]),
             str(state.max_hp[1]), str(state.max_hp[2]),
@@ -771,14 +684,13 @@ class MinimaxAI:
 
     def _generate_random_turn_sequences(self, state: GameStateSnapshot, player: int,
                                         min_continuous_visited_state_req: int,
-                                        max_actions: int = MAX_ACTIONS_PER_TURN,
                                         ) -> List[List[Tuple]]:
         """
         Generate random reasonable action sequences for a turn.
         min_continuous_visited_state_req: Stop If the end result same state is visited this many times continuously.
         This value should be high enough to allow many more thorough explorations.
         Only terminal sequences are accepted (foxtail=0 or no more actions possible)
-        Verified by Rokafox on 2026/02/04
+        Written and Verified by Rokafox on 2026/02/04
         """
         import random
         bundle_of_all_action_sequences = []
@@ -938,7 +850,7 @@ class MinimaxAIPlayer:
 
     def __init__(self, player_number: int, depth: int = 1):
         self.player_number = player_number
-        self.minimax_ai = MinimaxAI(player_number, max_depth=depth)
+        self.minimax_ai = MinimaxAI(player_number)
         self.pending_actions: List[Tuple] = []
         self.action_index = 0
 
@@ -960,8 +872,9 @@ class MinimaxAIPlayer:
             self.pending_actions = self.minimax_ai.get_best_turn_actions(game_state)
             self.action_index = 0
             if text_box and ui_set_text:
-                text_box.append_html_text(f"AI Player {player} calculated {len(self.pending_actions)} actions (evaluated {self.minimax_ai.nodes_evaluated} positions).\n")
-                text_box.append_html_text(f"For simulating opponent action, additional {self.minimax_ai.nodes_evaluated_additional} positions were evaluated.\n")
+                text_box.append_html_text(f"AI Player {player} calculated {len(self.pending_actions)} actions and evaluated {self.minimax_ai.endturnstate_evaluated} states.\n")
+                text_box.append_html_text(f"Additional {self.minimax_ai.endturnstate_evaluated_additional} states were evaluated for simulating opponent turn.\n")
+                text_box.append_html_text(f"Avoided {self.minimax_ai.loss_endturnstate_avoided} losing end-turn states.\n")
 
         if self.action_index >= len(self.pending_actions):
             self.pending_actions = []

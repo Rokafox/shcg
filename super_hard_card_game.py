@@ -252,6 +252,10 @@ class SHCGGameState:
             self.draw_tail_ui(self.current_player)
             self.draw_field_ui(1)
             self.draw_field_ui(2)
+            self.draw_hand_ui(1)
+            self.draw_hand_ui(2)
+            self.draw_deck_ui(1)
+            self.draw_deck_ui(2)
         if ui_set_text:
             text_box.append_html_text(text_box_introduction_text)
             text_box.append_html_text(f"プレイヤー{self.current_player}のターンじゃ。\n")

@@ -92,6 +92,7 @@ class SHCGGameState:
                             break
                     if not isinstance(target, cards.Follower):
                         # randomly select one if invalid selection
+                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
                         target = random.choice(self.fields[player]) if self.fields[player] else None
                 elif card.request_card_selection_on_play == "field_opponent":
                     for i, c in enumerate(self.fields[3 - player]):
@@ -99,6 +100,7 @@ class SHCGGameState:
                             target = c
                             break
                     if not isinstance(target, cards.Follower):
+                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
                         target = random.choice(self.fields[3 - player]) if self.fields[3 - player] else None
                 elif card.request_card_selection_on_play == "field_both":
                     for i, c in enumerate(self.fields[player]):
@@ -111,7 +113,17 @@ class SHCGGameState:
                                 target = c
                                 break
                     if not isinstance(target, cards.Follower):
+                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
                         target = random.choice(self.fields[player] + self.fields[3 - player]) if (self.fields[player] + self.fields[3 - player]) else None
+                elif card.request_card_selection_on_play == "hand_spell":
+                    for i, c in enumerate(self.hands[player]):
+                        if f"{i + 1} {str(c)}" == scsd_hand.selected_option[0]:
+                            target = c
+                            break
+                    if not isinstance(target, cards.Spell):
+                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
+                        target = random.choice([c for c in self.hands[player] if c.type == 'spell']) if any(c.type == 'spell' for c in self.hands[player]) else None
+
                 if ui_set_text:
                     text_box.append_html_text(f"プレイヤー{player}が{card}をプレイする時に{target}を選択したのじゃ。\n")
         else:
@@ -123,6 +135,9 @@ class SHCGGameState:
                     text_box.append_html_text(f"AIプレイヤー{player}が{card}の効果選択として{effect_choice}を選択したのじゃ。\n")
             else:
                 effect_choice = effect_choice_dropdown.selected_option[0]
+                if effect_choice not in card.request_effect_choose_option:
+                    text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
+                    effect_choice = random.choice(card.request_effect_choose_option)
         else:
             effect_choice = None
 
@@ -305,6 +320,7 @@ class SHCGGameState:
                             target = c
                             break
                     if not isinstance(target, cards.Follower):
+                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
                         target = random.choice(self.fields[player]) if self.fields[player] else None
                 elif card_to_enhance.request_card_selection_on_enhance == "field_opponent":
                     for i, c in enumerate(self.fields[3 - player]):
@@ -312,6 +328,7 @@ class SHCGGameState:
                             target = c
                             break
                     if not isinstance(target, cards.Follower):
+                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
                         target = random.choice(self.fields[3 - player]) if self.fields[3 - player] else None
                 elif card_to_enhance.request_card_selection_on_enhance == "field_both":
                     for i, c in enumerate(self.fields[player]):
@@ -324,6 +341,7 @@ class SHCGGameState:
                                 target = c
                                 break
                     if not isinstance(target, cards.Follower):
+                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
                         target = random.choice(self.fields[player] + self.fields[3 - player]) if (self.fields[player] + self.fields[3 - player]) else None
                 if ui_set_text:
                     text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化する時に{target}を選択したのじゃ。\n")
@@ -711,6 +729,16 @@ def update_scsd_options_deck(current_player_deck: list[cards.Card], opponent_pla
 
 def update_effect_choice_dropdown(options: list[str]):
     global effect_choice_dropdown
+    # print(effect_choice_dropdown.options_list)
+    # print(options)
+    # [('デッキの下に置く', 'デッキの下に置く'), ('コーピーして手札に加える', 'コーピーして手札に加える')]
+    # ['デッキの下に置く', 'コーピーして手札に加える']
+    # if the options are the same as current, do nothing
+    current = [value for _, value in effect_choice_dropdown.options_list]
+    if options == current:
+        print("Effect choice dropdown options are the same, not updating.")
+        return
+
     effect_choice_dropdown.kill()
     if options:
         effect_choice_dropdown = pygame_gui.elements.UIDropDownMenu(options_list=options,
@@ -1014,7 +1042,7 @@ def start_new_game():
     all_card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
                   cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
                   cards.機構翼の少女ローザ, cards.飢餓の使徒, cards.飢餓の輝き, cards.飢餓の絶傑ギルネリーゼ,
-                  cards.不殺の絶傑エズディア, cards.真実の絶傑ライオ]
+                  cards.不殺の絶傑エズディア, cards.真実の絶傑ライオ, cards.真実の宣告]
 
     selected_card_types = random.sample(all_card_types, 15)
     for card_type in selected_card_types:

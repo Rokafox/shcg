@@ -379,6 +379,11 @@ class MoveGenerator:
                 targets = [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
                 if targets:
                     o1_possible_values = targets
+
+            elif card.request_card_selection_on_play == "hand_spell":
+                targets = [c for c in state.hands[player] if isinstance(c, cards.Spell)]
+                if targets:
+                    o1_possible_values = targets
             
             # Handle effect choice options
             if card.request_effect_choose_option:

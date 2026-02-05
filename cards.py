@@ -619,3 +619,44 @@ class 飢餓の輝き(Spell):
                 selected_card_for_effect.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
                                                              imposter=self, attack_change=2, hp_change=0)
 
+
+class 真実の宣告(Spell):
+    """
+    target value: 8
+    value: technical copy 8 points (equal to exactly 2 draw), return to deck only useful in specific situations 0 points
+    total value: 8 points
+    """
+    def __init__(self):
+        super().__init__(name="真実の宣告", cost=2)
+        self.effect_description = "手札の他のスペルカードを一つ選び、下記から1つの効果を選択し発動する。【1】それをデッキの下に置く。" \
+        "【2】それを1枚コーピーし、手札に加える。"
+        self.request_card_selection_on_play = "hand_spell"
+        self.request_effect_choose_option = ["デッキの下に置く", "コーピーして手札に加える"]
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Spell | None, effect_choice: str | None):
+        if selected_card_for_effect is not None and effect_choice is not None and selected_card_for_effect != self:
+            player = game_state.current_player
+            if effect_choice == "デッキの下に置く":
+                game_state.hands[player].remove(selected_card_for_effect)
+                game_state.decks[player].insert(0, selected_card_for_effect)  # Place at bottom of deck
+                if set_text:
+                    the_actual_textbox.append_html_text(f"真実の宣告の効果で、プレイヤー{player}は手札の{selected_card_for_effect}をデッキの下に置いたのじゃ。\n")
+            elif effect_choice == "コーピーして手札に加える":
+                if len(game_state.hands[player]) < 9:
+                    # Create a copy of the selected spell card
+                    new_card = eval(f"{selected_card_for_effect.__class__.__name__}()")
+                    game_state.amount_card_generated_from_void[game_state.current_player] += 1
+                    new_card.is_generated = True
+                    a = game_state.amount_card_generated_from_void[1]
+                    c = game_state.amount_card_generated_from_void[2]
+                    new_card.void_id = uuid.uuid8(a, 0, c)
+
+                    game_state.hands[player].append(new_card)
+                    if set_text:
+                        the_actual_textbox.append_html_text(f"真実の宣告の効果で、プレイヤー{player}は手札の{selected_card_for_effect}をコーピーして手札に加えたのじゃ。\n")
+            else:
+                raise ValueError("Invalid effect choice for 真実の宣告.")
+        else:
+            if set_text:
+                the_actual_textbox.append_html_text("真実の宣告の効果は発動しなかったのじゃ。\n")

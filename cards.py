@@ -31,6 +31,8 @@ class Card:
         # field_c: player field any card
         # field_opponent_c: opponent field any card
         # field_both_c: both fields any card
+        self.request_effect_choose_option: list[str] = [] # e.g., ["Option 1", "Option 2"]
+
 
     def tooltip_str(self):
         s = f"{self.name}\n"
@@ -41,7 +43,7 @@ class Card:
         return s
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Card | None):
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
         """
         NOTE: No need for drawing field ui as it is handled in game_state.play_card()
         """
@@ -271,7 +273,7 @@ class ガブリエル(Follower):
         self.request_card_selection_on_play = "field"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Follower | None):
+                        selected_card_for_effect: Follower | None, effect_choice: str | None):
         if selected_card_for_effect is not None:
             selected_card_for_effect.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
                                                          imposter=self, attack_change=4, hp_change=3)
@@ -289,12 +291,12 @@ class ハンサ(Follower):
         self.effect_description = "場に出す時、これは攻撃力+Xする。Xは「自分のデッキの上1枚カードのコスト」である。"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Card | None):
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
         if game_state.decks[game_state.current_player]:
             top_card = game_state.decks[game_state.current_player][-1]
             self.attack += top_card.cost
             if set_text:
-                the_actual_textbox.append_html_text(f"{self}はデッキの一番上のカードのコスト{top_card.cost}分、攻撃力が上がったのじゃ。\n")
+                the_actual_textbox.append_html_text(f"{self}の攻撃力が{top_card.cost}上がったのじゃ。\n")
 
 
 
@@ -357,7 +359,7 @@ class 飢餓の使徒(Follower):
         self.request_card_selection_on_play = "field"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Follower | None):
+                        selected_card_for_effect: Follower | None, effect_choice: str | None):
         if selected_card_for_effect is not None:
             if selected_card_for_effect.attack_ability < 1:
                 selected_card_for_effect.advance_attack_ability()
@@ -391,7 +393,7 @@ class 飢餓の絶傑ギルネリーゼ(Follower):
         self.ability_drain = True
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Card | None):
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
         target = selected_card_for_effect
         if target is not None and isinstance(target, Follower) and target != self:
 
@@ -435,7 +437,7 @@ class 不殺の絶傑エズディア(Follower):
 
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                    selected_card_for_effect: Card | None):
+                    selected_card_for_effect: Card | None, effect_choice: str | None):
         # Compute minimum HP across followers and leaders
         min_hp_f1 = min((f.hp for f in game_state.fields[1] if isinstance(f, Follower)), default=None)
         min_hp_f2 = min((f.hp for f in game_state.fields[2] if isinstance(f, Follower)), default=None)
@@ -480,7 +482,7 @@ class 不殺の絶傑エズディア(Follower):
                           selected_card_for_effect: Card | None):
         self.on_enhance_effect_default()
         # same effect as on play
-        self.on_play_effect(game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect)
+        self.on_play_effect(game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect, effect_choice=None)
 
 
 class 真実の絶傑ライオ(Follower):
@@ -496,7 +498,7 @@ class 真実の絶傑ライオ(Follower):
         "Xは捨てたスペルカードの枚数である。手札にスペルカードがない若しくはターゲットがない時、自分のリーダーに9ダメージ。"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Card | None):
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
         player = game_state.current_player
         spell_cards_to_discard = [c for c in game_state.hands[player] if isinstance(c, Spell)]
         # Discard all spell cards from hand
@@ -543,7 +545,7 @@ class 天なる大河(Spell):
         self.effect_description = "手札の全てのカードをデッキの下に置く。同じ枚数+1枚のカードをデッキから引く。"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Card | None):
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
         player = game_state.current_player
         num_cards = len(game_state.hands[player])
         while game_state.hands[player]:
@@ -569,7 +571,7 @@ class ミヒライテ(Spell):
         self.request_card_selection_on_play = "field"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Follower | None):
+                        selected_card_for_effect: Follower | None, effect_choice: str | None):
         if selected_card_for_effect is not None:
             if selected_card_for_effect.name == "唯我の絶傑・マゼルベイン":
                 selected_card_for_effect.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
@@ -592,7 +594,7 @@ class フェアリーアサルト(Spell):
         self.request_card_selection_on_play = "field_both"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Card | None):
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
         if selected_card_for_effect is not None and isinstance(selected_card_for_effect, Follower):
             selected_card_for_effect.take_damage(6, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
         else:
@@ -610,7 +612,7 @@ class 飢餓の輝き(Spell):
         self.request_card_selection_on_play = "field_both"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: Card | None):
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
         if selected_card_for_effect is not None and isinstance(selected_card_for_effect, Follower):
             selected_card_for_effect.take_damage(4, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
             if selected_card_for_effect.hp > 0:

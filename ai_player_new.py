@@ -3,6 +3,7 @@ Chess-like AI Player for Super Hard Card Game.
 Uses minimax with alpha-beta pruning to calculate optimal moves.
 Since all information is open (hands, decks, fields), this is a perfect information game.
 """
+import itertools
 import cards
 from typing import TYPE_CHECKING, List, Tuple, Any, Optional
 if TYPE_CHECKING:
@@ -179,7 +180,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
     # Common attributes copied for all card types
     common_attrs = [
         'name', 'cost', 'original_cost', 'type', 'unique_id', 'is_generated',
-        'void_id', 'description', 'effect_description', 'request_card_selection_on_play'
+        'void_id', 'description', 'effect_description', 'request_card_selection_on_play', 'request_effect_choose_option',
     ]
     for attr in common_attrs:
         if hasattr(card, attr):
@@ -211,7 +212,7 @@ class GameSimulator:
 
     @staticmethod
     def play_card(state: GameStateSnapshot, player: int, card: cards.Card,
-                  target: Optional[cards.Card] = None) -> bool:
+                  target: Optional[cards.Card] = None, effect_choice: str | None = None) -> bool:
         """Play a card from hand. Returns True if successful."""
         if len(state.fields[player]) >= MAX_FIELD_SIZE and card.type != 'spell':
             return False
@@ -223,11 +224,7 @@ class GameSimulator:
         state.foxtail[player] -= card.cost
         state.hands[player].remove(card)
 
-        # Apply on-play effects
-        if card.request_card_selection_on_play:
-            card.on_play_effect(state, False, False, None, selected_card_for_effect=target)
-        else:
-            card.on_play_effect(state, False, False, None, None)
+        card.on_play_effect(state, False, False, None, target, effect_choice)
 
         if isinstance(card, cards.Follower):
             state.fields[player].append(card)
@@ -346,10 +343,9 @@ class MoveGenerator:
     """
 
     @staticmethod
-    def get_playable_cards(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Card, cards.Follower | None]]:
+    def get_playable_cards(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Card, cards.Follower | None, str | None]]:
         """
-        Get all playable cards with their targets.
-        Returns list of (card, target) tuples. Target is None for non-targeting cards.
+        Get all playable cards with their targets and effect choice, if any.
         WARNING: Can only target followers on the field for now.
         """
         playable = []
@@ -362,32 +358,35 @@ class MoveGenerator:
                 continue
             if card.type != 'spell' and field_count >= MAX_FIELD_SIZE:
                 continue
+            # object in tuple
+            o0 = card
+            o1_possible_values = [None]
+            o2_possible_values = [None]
 
             # Handle targeting cards
+            # if select, no option to not select as part of game mechanics
             if card.request_card_selection_on_play == "field":
-                # If target available, add all possible targets, else add None
-                targets = [f for f in state.fields[player] if f.type == 'follower']
+                targets = [f for f in state.fields[player] if isinstance(f, cards.Follower)]
                 if targets:
-                    for target in targets:
-                        playable.append((card, target))
-                else:
-                    playable.append((card, None))
+                    o1_possible_values = targets
+
             elif card.request_card_selection_on_play == "field_opponent":
-                targets = [f for f in state.fields[3 - player] if f.type == 'follower']
+                targets = [f for f in state.fields[3 - player] if isinstance(f, cards.Follower)]
                 if targets:
-                    for target in targets:
-                        playable.append((card, target))
-                else:
-                    playable.append((card, None))
+                    o1_possible_values = targets
+
             elif card.request_card_selection_on_play == "field_both":
-                targets = [f for f in state.fields[player] + state.fields[3 - player] if f.type == 'follower']
+                targets = [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
                 if targets:
-                    for target in targets:
-                        playable.append((card, target))
-                else:
-                    playable.append((card, None))
-            else:
-                playable.append((card, None))
+                    o1_possible_values = targets
+            
+            # Handle effect choice options
+            if card.request_effect_choose_option:
+                o2_possible_values = card.request_effect_choose_option
+
+            # Combine possible targets and effect choices
+            for target, effect_choice in itertools.product(o1_possible_values, o2_possible_values):
+                playable.append((o0, target, effect_choice))
 
         return playable
 
@@ -731,8 +730,8 @@ class MinimaxAI:
         actions = []
 
         # Play cards
-        for card, target in MoveGenerator.get_playable_cards(state, player):
-            actions.append(('play', card, target))
+        for card, target, effect_choice in MoveGenerator.get_playable_cards(state, player):
+            actions.append(('play', card, target, effect_choice))
 
         # Attacks
         for attacker, target in MoveGenerator.get_possible_attacks(state, player):
@@ -753,7 +752,7 @@ class MinimaxAI:
         action_type = action[0]
 
         if action_type == 'play':
-            card, target = action[1], action[2]
+            card, target, effect_choice = action[1], action[2], action[3]
             if card.is_generated:
                 actual_card = _find_card_by_void_id(state.hands[player], card.void_id)
             else:
@@ -770,7 +769,7 @@ class MinimaxAI:
                 if actual_target is None:
                     raise CardNotFoundError(f"Target for card play not found: {target}")
 
-            return GameSimulator.play_card(state, player, actual_card, actual_target)
+            return GameSimulator.play_card(state, player, actual_card, actual_target, effect_choice)
 
         elif action_type == 'attack':
             attacker, target = action[1], action[2]
@@ -882,7 +881,7 @@ class MinimaxAIPlayer:
             return []
 
         elif action_type == 'play':
-            card_template, target_template = action[1], action[2]
+            card_template, target_template, effect_choice = action[1], action[2], action[3]
 
             if card_template.is_generated:
                 actual_card = _find_card_by_void_id(game_state.hands[player], card_template.void_id)
@@ -900,7 +899,8 @@ class MinimaxAIPlayer:
                 if actual_target is None:
                     raise CardNotFoundError("Target for card play not found")
 
-            game_state.play_card(player, actual_card, ui_draw, ui_set_text, additional_target=actual_target, is_ai_player=True)
+            game_state.play_card(player, actual_card, ui_draw, ui_set_text, additional_target=actual_target, is_ai_player=True,
+                                 effect_choice=effect_choice)
             return [('play', actual_card)]
 
         elif action_type == 'attack':

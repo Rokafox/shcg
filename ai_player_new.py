@@ -482,10 +482,11 @@ class Evaluator:
     DECK_SIZE_WEIGHT = 0.1
 
     @staticmethod
-    def evaluate(state: GameStateSnapshot, player: int, basic_lethal_check: bool) -> float:
+    def evaluate(state: GameStateSnapshot, player: int, only_care_about_winorlose: bool) -> float:
         """
         Evaluate the game state from player's perspective.
         Returns infinity for wins, -infinity for losses.
+        2026/02/05 Removed basic_lethal_check parameter, add only_care_about_winorlose.
         Written and Verified by Rokafox on 2026/02/05
         """
         # NOTE: this method is called after the player's turn ends
@@ -498,32 +499,13 @@ class Evaluator:
             elif state.winner == opponent:
                 return float('-inf')
             else:
-                return 0.0  # Draw
-
-        if basic_lethal_check:
-            # 相手がこのターンに直接攻撃で勝てる場合は悪手じゃ
-            protect_exists = any([c.ability_protect for c in state.fields[player]])
-            if not protect_exists:
-                total_threat = 0
-                max_semi_threat = 0
-                semi_threat_found = False
-
-                for f in state.fields[opponent]:
-                    if f.type == 'follower' and f.can_attack_this_turn:
-                        if f.attack_ability >= 2:
-                            # 直接攻撃できる脅威
-                            total_threat += f.attack
-                        elif f.attack_ability == 1 and f.can_enhance and f.attack > max_semi_threat:
-                            # 強化可能な潜在的脅威（最大のものだけ追跡）
-                            semi_threat_found = True # necessary as the follower may have 0 attack
-                            max_semi_threat = f.attack
-
-                # 強化後の脅威を加算（+2は強化ボーナス）
-                if max_semi_threat > 0 and semi_threat_found:
-                    total_threat += max_semi_threat + 2
-
-                if total_threat >= state.hp[player]:
-                    return float('-inf')
+                return 0.0  # 
+            
+        # Useful when simulating the last turn, for either of the players
+        # for example at depth 1, care about score on your turn, but not on opponent turn (last turn)
+        # for performance reasons, depth > 1 is not considered.
+        if only_care_about_winorlose:
+            return 0.0
 
         score = 100.0 # Base score
 
@@ -534,7 +516,7 @@ class Evaluator:
         # Field power (total attack + hp of followers)
         own_field_power = 0
         for f in state.fields[player]:
-            if f.type == 'follower':
+            if isinstance(f, cards.Follower):
                 own_field_power += f.attack + f.hp
                 # 守護 (.ability_protect) 者のHPの100%を追加ボーナスとして加算
                 if f.ability_protect:
@@ -544,7 +526,7 @@ class Evaluator:
                     own_field_power += f.attack
         opp_field_power = 0
         for f in state.fields[opponent]:
-            if f.type == 'follower':
+            if isinstance(f, cards.Follower):
                 opp_field_power += f.attack + f.hp
                 if f.ability_protect:
                     opp_field_power += f.hp
@@ -595,7 +577,7 @@ class MinimaxAI:
                     raise AIError("Invalid action sequence generated.")
 
             GameSimulator.end_turn(test_state)
-            score = Evaluator.evaluate(test_state, self.player_number, True) # Basic evaluation
+            score = Evaluator.evaluate(test_state, self.player_number, only_care_about_winorlose=False) # Basic evaluation
 
             # Advanced evaluation: simulate opponent's turn
             # If opponent scores inf for any seq, its a loss for us and set score to -inf.
@@ -612,7 +594,7 @@ class MinimaxAI:
                     # End opponent's turn
                     GameSimulator.end_turn(opp_test_state)
                     # No basic lethal check. Only matters if opponent can score infinity here
-                    opp_score = Evaluator.evaluate(opp_test_state, 3 - self.player_number, False)
+                    opp_score = Evaluator.evaluate(opp_test_state, 3 - self.player_number, only_care_about_winorlose=True)
                     self.endturnstate_evaluated_additional += 1
 
                     if opp_score == float('inf'):
@@ -667,11 +649,13 @@ class MinimaxAI:
                         f"{f.name}:{f.attack}:{f.max_hp}:{f.hp}:{f.can_attack_this_turn}:"
                         f"{f.attack_ability}:{f.can_enhance}:{f.is_enhanced}:"
                         f"{f.how_many_attacks_max_of_turn}:{f.how_many_attacks_done_of_turn}:"
+                        f"{f.ability_rush}:{f.ability_super_rush}:"
                         f"{f.ability_protect}:{f.ability_drain}"
                     )
             field_str_follower = ",".join(field_str_follower)
             # amulet cards
             field_str_amulet = ",".join(f"{f.name}" for f in state.fields[player] if f.type == 'amulet')
+            # combine
             parts.append(f"F{player}:" + field_str_follower)
             parts.append(f"A{player}:" + field_str_amulet)
 
@@ -717,12 +701,13 @@ class MinimaxAI:
                 else:
                     visited_states.add(state_hash)
                     continuous_visited_state_count = 0
-                # stop. This single action sequence is concluded.
-                if single_action_seq:
-                    bundle_of_all_action_sequences.append(single_action_seq)
-                else:
-                    # no action is possible, meaning it is already terminal state
-                    pass
+                    # 2026-02-05: No need to add the action sequence if exact same state is reached,
+                    # stop. This single action sequence is concluded.
+                    if single_action_seq:
+                        bundle_of_all_action_sequences.append(single_action_seq)
+                    else:
+                        # no action is possible, meaning it is already terminal state
+                        pass
                 # either way, reset for finding next single action sequence
                 current_state = state.copy()
                 single_action_seq = []
@@ -877,9 +862,9 @@ class MinimaxAIPlayer:
             self.pending_actions = self.minimax_ai.get_best_turn_actions(game_state)
             self.action_index = 0
             if text_box and ui_set_text:
-                text_box.append_html_text(f"AI Player {player} calculated {len(self.pending_actions)} actions and evaluated {self.minimax_ai.endturnstate_evaluated} states.\n")
-                text_box.append_html_text(f"Additional {self.minimax_ai.endturnstate_evaluated_additional} states were evaluated for simulating opponent turn.\n")
-                text_box.append_html_text(f"Avoided {self.minimax_ai.loss_endturnstate_avoided} losing end-turn states.\n")
+                text_box.append_html_text(f"AI Player {player} calculated {len(self.pending_actions)} actions and evaluated {self.minimax_ai.endturnstate_evaluated} unique end-turn states.\n")
+                text_box.append_html_text(f"Additional {self.minimax_ai.endturnstate_evaluated_additional} unique end-turn states were evaluated for simulating opponent turn.\n")
+                text_box.append_html_text(f"Avoided {self.minimax_ai.loss_endturnstate_avoided} losing unique end-turn states.\n")
 
         if self.action_index >= len(self.pending_actions):
             self.pending_actions = []

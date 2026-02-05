@@ -351,7 +351,7 @@ class 飢餓の使徒(Follower):
     def __init__(self):
         super().__init__(name="飢餓の使徒", cost=2, attack=2, hp=2, can_enhance=True)
         self.description_e = "必死になって、追い立てられて、身を捩るほどに苦悩して。無垢なままでは終わってしまうわよ。"
-        self.effect_description = "場に出す時、自分の場の他のフォロワー1体を選ぶ。それの攻撃段階1進む、このターンで攻撃できる。" \
+        self.effect_description = "場に出す時、自分の場の他のフォロワー1体を選ぶ。それは突進を持つ。" \
         "進化時、場のフォロワー1体を選ぶ。それに3ダメージ。それは攻撃力+3する。これを選ぶ時、この効果は無効になる。"
         self.request_card_selection_on_enhance = "field_both"
         self.request_card_selection_on_play = "field"
@@ -363,6 +363,7 @@ class 飢餓の使徒(Follower):
                 selected_card_for_effect.advance_attack_ability()
                 if selected_card_for_effect.how_many_attacks_done_of_turn < selected_card_for_effect.how_many_attacks_max_of_turn:
                     selected_card_for_effect.can_attack_this_turn = True
+            selected_card_for_effect.ability_rush = True
 
     def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                           selected_card_for_effect: Card | None):
@@ -424,6 +425,7 @@ class 不殺の絶傑エズディア(Follower):
     """
     target value: 4 * 4 = 16 points
     value: 6/6 stats: 12 points, field effect: conditional 6 damage: 6 points
+    slightly difficult to utilize
     total value: 18 points
     """
     def __init__(self):
@@ -484,34 +486,45 @@ class 不殺の絶傑エズディア(Follower):
 class 真実の絶傑ライオ(Follower):
     """
     target value: 4 * 4 = 16 points
-    value: 6/6 stats: 12 points, average discard 2 cards -4, destroy 2, 10 points
-    total value: 18 points
+    value: 7/7 stats: 14 points, average discard 2 cards -8, destroy 2, 10 points
+    Very difficult to use
+    total value: 16- points
     """
     def __init__(self):
-        super().__init__(name="真実の絶傑・ライオ", cost=4, attack=6, hp=6, can_enhance=True)
+        super().__init__(name="真実の絶傑・ライオ", cost=4, attack=7, hp=7, can_enhance=True)
         self.effect_description = "場に出す時、手札のスペルカードをすべて捨てる。相手の場のフォロワーを左から順番にX枚を9ダメージ。" \
-        "Xは捨てたスペルカードの枚数である。手札にスペルカードがない時、自分のリーダーに9ダメージ。"
+        "Xは捨てたスペルカードの枚数である。手札にスペルカードがない若しくはターゲットがない時、自分のリーダーに9ダメージ。"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                         selected_card_for_effect: Card | None):
         player = game_state.current_player
         spell_cards_to_discard = [c for c in game_state.hands[player] if isinstance(c, Spell)]
-         # Discard all spell cards from hand
-        num_discarded = len(spell_cards_to_discard)
+        # Discard all spell cards from hand
+        # NOTE: using remove now, if discard effect is needed, update this.
+        bullet = len(spell_cards_to_discard)
         for c in spell_cards_to_discard:
             game_state.hands[player].remove(c)
-        if num_discarded > 0:
+        if bullet > 0:
             if set_text:
-                the_actual_textbox.append_html_text(f"真実の絶傑・ライオの効果で、プレイヤー{player}は手札のスペルカードを{num_discarded}枚捨てたのじゃ。\n")
+                the_actual_textbox.append_html_text(f"真実の絶傑・ライオの効果で、プレイヤー{player}は手札のスペルカードを{bullet}枚捨てたのじゃ。\n")
             # Deal 9 damage to opponent's followers from left to right
-            opponent = game_state.opponent
-            for i in range(min(num_discarded, len(game_state.fields[opponent]))):
-                target_follower = game_state.fields[opponent][i]
-                if isinstance(target_follower, Follower):
-                    target_follower.take_damage(9, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+            if game_state.fields[game_state.opponent]:
+                for c in game_state.fields[game_state.opponent].copy():
+                    if bullet <= 0:
+                        break
+                    if isinstance(c, Follower):
+                        c.take_damage(9, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+                        bullet -= 1
         else:
             # No spell cards to discard, deal 9 damage to own leader
             game_state.player_take_damage(player, 9, draw_ui, set_text)
+        # if there are bullets remain, these will damage own leader
+        if bullet > 0:
+            while bullet > 0:
+                game_state.player_take_damage(player, 9, draw_ui, set_text)
+                bullet -= 1
+                if game_state.concluded:
+                    break
 
 
 

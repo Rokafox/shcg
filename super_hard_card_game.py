@@ -876,12 +876,21 @@ def start_new_game():
     # draw UI components
     example_deck_1: list[cards.Card] = []
     example_deck_2: list[cards.Card] = []
-    card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
+    all_card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
                   cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
                   cards.機構翼の少女ローザ, cards.飢餓の使徒, cards.飢餓の輝き, cards.飢餓の絶傑ギルネリーゼ,
                   cards.不殺の絶傑エズディア, cards.真実の絶傑ライオ]
-    example_deck_1 = [random.choice(card_types)() for _ in range(40)]
-    example_deck_2 = [random.choice(card_types)() for _ in range(40)]
+
+    selected_card_types = random.sample(all_card_types, 15)
+    for card_type in selected_card_types:
+        for _ in range(3):
+            example_deck_1.append(card_type())
+            random.shuffle(example_deck_1)
+    selected_card_types = random.sample(all_card_types, 15)
+    for card_type in selected_card_types:
+        for _ in range(3):
+            example_deck_2.append(card_type())
+            random.shuffle(example_deck_2)
 
     text_box.set_text(text_box_introduction_text)
     global global_vars_shcg

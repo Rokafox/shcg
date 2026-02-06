@@ -568,13 +568,37 @@ class 侮蔑の絶傑ガルミーユ(Follower):
 
 class 神弓の座天使リリエル(Follower):
     """
-    target value: 4 * 4 = 16 points
-    value: 4/5 stats: 9 points, effect average 6 points
-    total value: 15 points
     """
     def __init__(self):
         super().__init__(name="神弓の座天使・リリエル", cost=2, attack=2, hp=5, can_enhance=False)
         self.effect_description = "これがいる限り、自分のリーダーは能力によるダメージを受けない。"
+
+
+class 簒奪の絶傑オクトリス(Follower):
+    """
+    target value: 3 * 4 = 12 points
+    value: 2/2 stats: 4 points, effect steal card: 4 + 4 points
+    total value: 12 points
+    """
+    def __init__(self):
+        super().__init__(name="簒奪の絶傑・オクトリス", cost=3, attack=2, hp=2, can_enhance=True)
+        self.effect_description = "進化する時、相手の手札のカードを1枚選び、それを自分の手札に加える。"
+        self.request_card_selection_on_enhance = "hand_opponent"
+
+    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                            selected_card_for_effect: Card | None):
+        self.on_enhance_effect_default()
+        target = selected_card_for_effect
+        if target is not None and target in game_state.hands[game_state.opponent]:
+            game_state.hands[game_state.opponent].remove(target)
+            game_state.hands[game_state.current_player].append(target)
+            if set_text:
+                the_actual_textbox.append_html_text(f"簒奪の絶傑・オクトリスの効果で、プレイヤー{game_state.current_player}はプレイヤー{game_state.opponent}の手札から{target}を奪ったのじゃ。\n")
+            if draw_ui:
+                game_state.draw_hand_ui(game_state.current_player)
+                game_state.draw_hand_ui(game_state.opponent)
+
+
 
 
 # ==============================
@@ -765,6 +789,38 @@ class 唯我の一刀(Spell):
                 the_actual_textbox.append_html_text("唯我の一刀の効果は発動しなかったのじゃ。\n")
 
 
+class 簒奪の蛇剣(Spell):
+    """
+    Value: steal 1 card = 8 points
+    """
+    def __init__(self):
+        super().__init__(name="簒奪の蛇剣", cost=2)
+        self.effect_description = "相手の場のフォロワー1体を選び、それをXダメージ。Xは相手の手札の枚数である。" \
+        "その後、相手の場がフォロワーでないなら、相手のリーダーにXダメージ。"
+        self.request_card_selection_on_play = "field_opponent"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Follower | None, effect_choice: str | None):
+        player = game_state.current_player
+        opponent = game_state.opponent
+        x = len(game_state.hands[opponent])
+        target = selected_card_for_effect
+        if target is not None and isinstance(target, Follower):
+            target.take_damage(x, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+        else:
+            if set_text:
+                the_actual_textbox.append_html_text("簒奪の蛇剣の効果は発動しなかったのじゃ。\n")
+            return
+        # Check if opponent has any followers left
+        has_followers = any(isinstance(c, Follower) for c in game_state.fields[opponent])
+        if not has_followers:
+            if set_text:
+                the_actual_textbox.append_html_text(f"簒奪の蛇剣の効果で、プレイヤー{opponent}に{x}ダメージを与えるのじゃ。\n")
+            game_state.player_take_damage(opponent, x, draw_ui, set_text)
+
+
+
+
 # ==============================
 # All Cards List
 # ==============================
@@ -773,7 +829,7 @@ all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ,
                 天なる大河, 唯我の絶傑マゼルベイン, ミヒライテ, フェアリーアサルト,
                 機構翼の少女ローザ, 飢餓の使徒, 飢餓の輝き, 飢餓の絶傑ギルネリーゼ,
                 不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪, 唯我の一刀, 侮蔑の絶傑ガルミーユ,
-                神弓の座天使リリエル]
+                神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣]
 
 # sort with follower spell amulet order, then by cost ascending, then by name alphabetical
 _type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}

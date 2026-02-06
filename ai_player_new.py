@@ -470,6 +470,13 @@ class MoveGenerator:
                             enhanceable.append((follower, target))
                     else:
                         enhanceable.append((follower, None))
+                elif follower.request_card_selection_on_enhance == "hand_opponent":
+                    targets = [c for c in state.hands[3 - player]]
+                    if targets:
+                        for target in targets:
+                            enhanceable.append((follower, target))
+                    else:
+                        enhanceable.append((follower, None))
                 else:
                     enhanceable.append((follower, None))
         return enhanceable

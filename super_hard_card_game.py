@@ -990,7 +990,7 @@ def build_settings_window():
                                         local_translate("CUETS Player Turn:"),
                                         ui_manager,
                                         container=settings_window)
-    
+    cuets_player_turn_label.set_tooltip("Set the min number of continuous unique end turn states reaches before random exploration stops, for the current player.", delay=0.1, wrap_width=300)
     cuets_player_turn_dropdown = pygame_gui.elements.UIDropDownMenu(
                                         options_list=["2", "3", "4", "5", "6", "7", "8", "9", "10"],
                                         starting_option=str(global_vars_cuets_player_turn_set_option),
@@ -1003,6 +1003,7 @@ def build_settings_window():
                                         local_translate("CUETS Opponent Turn:"),
                                         ui_manager,
                                         container=settings_window)
+    cuets_opp_turn_label.set_tooltip("When exploring end turn states for the current player, do the same for the opponent turn to avoid loss. Set the min number of continuous unique end turn states reaches before random exploration stops.", delay=0.1, wrap_width=300)
     cuets_opp_turn_dropdown = pygame_gui.elements.UIDropDownMenu(
                                         options_list=["2", "3", "4", "5", "6", "7", "8", "9", "10"],
                                         starting_option=str(global_vars_cuets_opp_turn_set_option),

@@ -619,6 +619,9 @@ class 飢餓の輝き(Spell):
             if selected_card_for_effect.hp > 0:
                 selected_card_for_effect.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
                                                              imposter=self, attack_change=2, hp_change=0)
+        else:
+            if set_text:
+                the_actual_textbox.append_html_text("飢餓の輝きの効果は発動しなかったのじゃ。\n")
 
 
 class 真実の宣告(Spell):

@@ -765,6 +765,9 @@ new_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 39
                                     text='New Game',
                                     manager=ui_manager,)
 
+quit_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 450), (200, 50)),
+                                    text='Quit Game',
+                                    manager=ui_manager,)
 
 text_box = pygame_gui.elements.UITextEntryBox(pygame.Rect((895, 255), (410, 345)),"", ui_manager)
 text_box_introduction_text = "======================================\n"
@@ -1043,11 +1046,7 @@ def start_new_game():
     # draw UI components
     example_deck_1: list[cards.Card] = []
     example_deck_2: list[cards.Card] = []
-    all_card_types = [cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ, 
-                  cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
-                  cards.機構翼の少女ローザ, cards.飢餓の使徒, cards.飢餓の輝き, cards.飢餓の絶傑ギルネリーゼ,
-                  cards.不殺の絶傑エズディア, cards.真実の絶傑ライオ, cards.真実の宣告]
-
+    all_card_types = cards.all_card_types
     selected_card_types = random.sample(all_card_types, 15)
     for card_type in selected_card_types:
         for _ in range(3):
@@ -1087,6 +1086,121 @@ def start_new_game():
 start_new_game()
 
 
+def build_debug_window():
+    """
+    A dropdown and button
+    Add any card to current player's top of deck for testing
+    """
+    global debug_window, debug_card_selection_dropdown, debug_add_card_button
+    global debug_add_player_1_hp_button, debug_add_player_2_hp_button
+    global debug_add_foxtail_player_1_button
+    try:
+        debug_window.kill()
+    except Exception as e:
+        pass
+
+    debug_window = pygame_gui.elements.UIWindow(pygame.Rect((600, 250), (280, 400)),
+                                        ui_manager,
+                                        window_display_title="Debug Window",
+                                        object_id="#debug_window",
+                                        resizable=False)
+    
+    debug_card_selection_label = pygame_gui.elements.UILabel(pygame.Rect((10, 10), (50, 35)),
+                                        "Card:",
+                                        ui_manager,
+                                        container=debug_window)
+    all_card_names = [card_type().name for card_type in cards.all_card_types]
+    debug_card_selection_dropdown = pygame_gui.elements.UIDropDownMenu(all_card_names,
+                                                        all_card_names[0],
+                                                        pygame.Rect((70, 10), (200, 35)),
+                                                        ui_manager,
+                                                        container=debug_window,)
+    debug_add_card_button = pygame_gui.elements.UIButton(
+                                        relative_rect=pygame.Rect((10, 55), (260, 50)),
+                                        text="Add to Top of Deck",
+                                        manager=ui_manager,
+                                        container=debug_window,
+                                        object_id="#debug_add_card_button",
+                                        command=debug_add_card_to_top_of_deck)
+    
+    debug_add_player_1_hp_button = pygame_gui.elements.UIButton(
+                                        relative_rect=pygame.Rect((10, 115), (260, 50)),
+                                        text="Add 1 HP to Player 1",
+                                        manager=ui_manager,
+                                        container=debug_window,
+                                        object_id="#debug_add_player_1_hp_button",
+                                        command=debug_add_1_hp_to_player_1)
+
+    debug_add_player_2_hp_button = pygame_gui.elements.UIButton(
+                                        relative_rect=pygame.Rect((10, 175), (260, 50)),
+                                        text="Add 1 HP to Player 2",
+                                        manager=ui_manager,
+                                        container=debug_window,
+                                        object_id="#debug_add_player_2_hp_button",
+                                        command=debug_add_1_hp_to_player_2)
+    
+    debug_add_foxtail_player_1_button = pygame_gui.elements.UIButton(
+                                        relative_rect=pygame.Rect((10, 235), (260, 50)),
+                                        text="Add Foxtail to Current Player",
+                                        manager=ui_manager,
+                                        container=debug_window,
+                                        object_id="#debug_add_foxtail_player_1_button",
+                                        command=debug_add_foxtail_to_current_player)
+
+
+
+debug_window = None
+debug_card_selection_dropdown = None
+debug_add_card_button = None
+
+def debug_add_card_to_top_of_deck():
+    global global_vars_shcg
+    card_to_add: cards.Card | None = None
+    card_name = debug_card_selection_dropdown.selected_option[0]
+    for card_type in cards.all_card_types:
+        if card_type().name == card_name:
+            card_to_add = card_type()
+            break
+    if card_to_add:
+        cp = global_vars_shcg.current_player
+        global_vars_shcg.decks[cp].append(card_to_add)
+        global_vars_shcg.draw_deck_ui(cp)
+        text_box.append_html_text(f"DEBUG:カード「{card_name}」をプレイヤー{cp}のデッキの一番上に追加したのじゃ。\n")
+    else:
+        raise ValueError(f"Card not found: {card_name}")
+
+def debug_add_1_hp_to_player_1():
+    global global_vars_shcg
+    prev_hp = global_vars_shcg.hp[1]
+    global_vars_shcg.hp[1] = min(global_vars_shcg.hp[1] + 1, global_vars_shcg.max_hp[1])
+    delta = global_vars_shcg.hp[1] - prev_hp
+    global_vars_shcg.draw_player_hp_ui()
+    text_box.append_html_text(f"DEBUG:プレイヤー1の体力を{delta}回復したのじゃ。\n")
+
+def debug_add_1_hp_to_player_2():
+    global global_vars_shcg
+    prev_hp = global_vars_shcg.hp[2]
+    global_vars_shcg.hp[2] = min(global_vars_shcg.hp[2] + 1, global_vars_shcg.max_hp[2])
+    delta = global_vars_shcg.hp[2] - prev_hp
+    global_vars_shcg.draw_player_hp_ui()
+    text_box.append_html_text(f"DEBUG:プレイヤー2の体力を{delta}回復したのじゃ。\n")
+
+def debug_add_foxtail_to_current_player():
+    global global_vars_shcg
+    cp = global_vars_shcg.current_player
+    if global_vars_shcg.foxtail[cp] < 9:
+        global_vars_shcg.foxtail[cp] += 1
+        global_vars_shcg.draw_tail_ui(cp)
+        text_box.append_html_text(f"DEBUG:プレイヤーに狐尾を1つ追加したのじゃ。\n")
+    else:
+        text_box.append_html_text(f"DEBUG:プレイヤーの狐尾は最大数に達しているのじゃ。\n")
+
+
+# top right
+debug_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1500, 10), (90, 35)),
+                                    text='Debug',
+                                    manager=ui_manager,
+                                    command=build_debug_window)
 
 
 
@@ -1246,6 +1360,8 @@ if __name__ == "__main__":
                     build_settings_window()
                 if event.ui_element == new_game_button:
                     start_new_game()
+                if event.ui_element == quit_game_button:
+                    running = False
                 if event.ui_element == end_turn_button:
                     global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
                 # AI toggle buttons

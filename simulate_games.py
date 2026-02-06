@@ -15,11 +15,7 @@ from ai_player_new import (
 
 def create_random_deck() -> list[cards.Card]:
     """Create a random deck using the default card types."""
-    card_types = [
-        cards.ゴブリン, cards.ファイター, cards.ゴリアテ, cards.ガブリエル, cards.ハンサ,
-        cards.天なる大河, cards.唯我の絶傑マゼルベイン, cards.ミヒライテ, cards.フェアリーアサルト,
-        cards.機構翼の少女ローザ, cards.飢餓の使徒
-    ]
+    card_types = cards.all_card_types
     return [random.choice(card_types)() for _ in range(40)]
 
 

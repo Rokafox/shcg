@@ -952,17 +952,27 @@ class MinimaxAIPlayer:
         elif action_type == 'enhance':
             follower_template, target_template = action[1], action[2]
 
-            actual_follower = next(
-                (f for f in game_state.fields[player]
-                 if f.type == 'follower' and f.unique_id == follower_template.unique_id and f.can_enhance),
-                None
+            if follower_template.is_generated:
+                actual_follower = next(
+                    (f for f in game_state.fields[player]
+                    if f.type == 'follower' and f.void_id == follower_template.void_id and f.can_enhance),
+                    None
             )
+            else:
+                actual_follower = next(
+                    (f for f in game_state.fields[player]
+                    if f.type == 'follower' and f.unique_id == follower_template.unique_id and f.can_enhance),
+                    None
+                )
             if actual_follower is None:
-                raise CardNotFoundError("Follower to enhance not found on field")
+                raise CardNotFoundError(f"Follower to enhance not found on field: {actual_follower}")
 
             actual_target = None
             if target_template is not None:
-                actual_target = _find_card_in_zones(game_state, target_template.unique_id, player)
+                if target_template.is_generated:
+                    actual_target = _find_card_in_zones_by_void_id(game_state, target_template.void_id, player)
+                else:
+                    actual_target = _find_card_in_zones(game_state, target_template.unique_id, player)
                 if actual_target is None:
                     raise CardNotFoundError("Target for enhance not found")
 

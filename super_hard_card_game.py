@@ -937,7 +937,7 @@ def build_settings_window():
     # Get current AI manager based on toggle
     current_ai_manager = global_vars_minimax_ai_manager
 
-    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 200), (400, 250)),
+    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 200), (400, 500)),
                                         ui_manager,
                                         window_display_title=local_translate("Settings"),
                                         object_id="#settings_window",
@@ -984,25 +984,42 @@ def build_settings_window():
                                         container=settings_window,
                                         object_id="#ai_player2_toggle")
 
-    # AI Depth Selection (for Minimax)
-    # Removed as depth more than 1 is difficult to calculate in reasonable time
-    # ai_depth_label = pygame_gui.elements.UILabel(pygame.Rect((10, 190), (160, 35)),
-    #                                     local_translate("AI Depth:"),
-    #                                     ui_manager,
-    #                                     container=settings_window)
+    # CUETS Player Turn and CUETS Opponent Turn Depth Dropdown
+    global cuets_player_turn_dropdown, cuets_opp_turn_dropdown
+    cuets_player_turn_label = pygame_gui.elements.UILabel(pygame.Rect((10, 190), (180, 35)),
+                                        local_translate("CUETS Player Turn:"),
+                                        ui_manager,
+                                        container=settings_window)
+    
+    cuets_player_turn_dropdown = pygame_gui.elements.UIDropDownMenu(
+                                        options_list=["2", "3", "4", "5", "6", "7", "8", "9", "10"],
+                                        starting_option=str(global_vars_cuets_player_turn_set_option),
+                                        relative_rect=pygame.Rect((200, 190), (100, 35)),
+                                        manager=ui_manager,
+                                        container=settings_window,
+                                        object_id="#ai_depth_dropdown")
 
-    # ai_depth_dropdown = pygame_gui.elements.UIDropDownMenu(["1", "2", "3", "4"],
-    #                                                       str(global_vars_minimax_ai_manager.depth),
-    #                                                       pygame.Rect((200, 190), (100, 35)),
-    #                                                       ui_manager,
-    #                                                       container=settings_window,)
+    cuets_opp_turn_label = pygame_gui.elements.UILabel(pygame.Rect((10, 235), (180, 35)),
+                                        local_translate("CUETS Opponent Turn:"),
+                                        ui_manager,
+                                        container=settings_window)
+    cuets_opp_turn_dropdown = pygame_gui.elements.UIDropDownMenu(
+                                        options_list=["2", "3", "4", "5", "6", "7", "8", "9", "10"],
+                                        starting_option=str(global_vars_cuets_opp_turn_set_option),
+                                        relative_rect=pygame.Rect((200, 235), (100, 35)),
+                                        manager=ui_manager,
+                                        container=settings_window,
+                                        object_id="#ai_depth_dropdown_opp")
 
 
 settings_window = None
 theme_selection_menu = None
 ai_player1_toggle = None
 ai_player2_toggle = None
-# ai_depth_dropdown = None
+cuets_player_turn_dropdown = None
+cuets_opp_turn_dropdown = None
+global_vars_cuets_player_turn_set_option: int = 6
+global_vars_cuets_opp_turn_set_option: int = 3
 
 
 def change_theme(theme=None):
@@ -1037,8 +1054,8 @@ def change_theme(theme=None):
 
 
 global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
-global_vars_minimax_ai_manager: ai_player_new.MinimaxAIManager = ai_player_new.MinimaxAIManager(depth=1)
 global_vars_use_minimax_ai: bool = True  # Default to new minimax AI
+global_vars_minimax_ai_manager = ai_player_new.MinimaxAIManager(6, 3)
 
 def start_new_game():
     # fetch decks, deck and deck for cpu are selected by player
@@ -1381,13 +1398,14 @@ if __name__ == "__main__":
             if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
                 if event.ui_element == theme_selection_menu:
                     change_theme()
-                # if ai_depth_dropdown and event.ui_element == ai_depth_dropdown:
-                #     new_depth = int(ai_depth_dropdown.selected_option[0])
-                #     global_vars_minimax_ai_manager.depth = new_depth
-                #     # Recreate AI players with new depth
-                #     for p in [1, 2]:
-                #         if global_vars_minimax_ai_manager.ai_enabled[p]:
-                #             global_vars_minimax_ai_manager.ai_players[p] = ai_player_new.MinimaxAIPlayer(p, depth=new_depth)
+                if event.ui_element == cuets_player_turn_dropdown:
+                    global_vars_cuets_player_turn_set_option = int(cuets_player_turn_dropdown.selected_option[0])
+                    global_vars_minimax_ai_manager.set_new_cuets(global_vars_cuets_player_turn_set_option,
+                                                global_vars_cuets_opp_turn_set_option)
+                if event.ui_element == cuets_opp_turn_dropdown:
+                    global_vars_cuets_opp_turn_set_option = int(cuets_opp_turn_dropdown.selected_option[0])
+                    global_vars_minimax_ai_manager.set_new_cuets(global_vars_cuets_player_turn_set_option,
+                                                global_vars_cuets_opp_turn_set_option)
 
             ui_manager_lower.process_events(event)
             ui_manager.process_events(event)

@@ -549,12 +549,14 @@ class MinimaxAI:
     """
     Not minimax at all.
     """
-    def __init__(self, player_number: int):
+    def __init__(self, player_number: int, cuets_player_turn: int, cuets_opp_turn: int):
         self.player_number = player_number
         self.endturnstate_evaluated = 0
         self.endturnstate_evaluated_additional = 0
         self.loss_endturnstate_avoided = 0
         self.best_actions: List[Tuple[str, Any]] = []
+        self.continuous_unique_endturnstates_req_player_turn = cuets_player_turn # CUETS
+        self.continuous_unique_endturnstates_req_opp_turn = cuets_opp_turn
 
     def get_best_turn_actions(self, game_state: 'SHCGGameState') -> List[Tuple]:
         """
@@ -571,7 +573,7 @@ class MinimaxAI:
         best_actions = []
 
         # Generate and evaluate possible action sequences
-        all_sequences = self._generate_random_turn_sequences(state, self.player_number, min_continuous_visited_state_req=6)
+        all_sequences = self._generate_random_turn_sequences(state, self.player_number, self.continuous_unique_endturnstates_req_player_turn)
 
         for actions in all_sequences:
             # Apply actions to a copy of the state
@@ -588,7 +590,7 @@ class MinimaxAI:
             # This part can be skipped if the player is already winning (score == inf)
             # or losing (score == -inf) as checked in True basic_lethal_check or draw (score == 0.0)
             if not score == float('inf') and not score == float('-inf') and not score == 0.0:
-                opponent_sequences = self._generate_random_turn_sequences(test_state, 3 - self.player_number, min_continuous_visited_state_req=3)
+                opponent_sequences = self._generate_random_turn_sequences(test_state, 3 - self.player_number, self.continuous_unique_endturnstates_req_opp_turn)
                 for single_opp_seq in opponent_sequences:
                     opp_test_state = test_state.copy()
                     for opp_action in single_opp_seq:
@@ -842,9 +844,9 @@ class MinimaxAIPlayer:
     but uses minimax for decision making.
     """
 
-    def __init__(self, player_number: int, depth: int = 1):
+    def __init__(self, player_number: int, cuets_player_turn: int, cuets_opp_turn: int):
         self.player_number = player_number
-        self.minimax_ai = MinimaxAI(player_number)
+        self.minimax_ai = MinimaxAI(player_number, cuets_player_turn, cuets_opp_turn)
         self.pending_actions: List[Tuple] = []
         self.action_index = 0
 
@@ -978,12 +980,13 @@ class MinimaxAIPlayer:
 class MinimaxAIManager:
     """Manages Minimax AI players for the game."""
 
-    def __init__(self, depth: int = 2):
-        self.depth = depth
+    def __init__(self, cuets_player_turn: int, cuets_opp_turn: int):
         self.ai_players: dict[int, MinimaxAIPlayer | None] = {1: None, 2: None}
         self.ai_enabled: dict[int, bool] = {1: False, 2: False}
         self.ai_action_delay: int = DEFAULT_AI_ACTION_DELAY_MS
         self.last_ai_action_time: int = 0
+        self.cuets_player_turn = cuets_player_turn
+        self.cuets_opp_turn = cuets_opp_turn
 
     def ai_clear_pending_actions(self):
         """Clear pending actions for a specific AI player."""
@@ -991,11 +994,19 @@ class MinimaxAIManager:
             if ai_player is not None:
                 ai_player.clear_pending_actions()
 
+    def set_new_cuets(self, cuets_player_turn: int, cuets_opp_turn: int):
+        """Set new CUETS values for all AI players."""
+        for player, ai_player in self.ai_players.items():
+            if ai_player is not None:
+                ai_player.minimax_ai.continuous_unique_endturnstates_req_player_turn = cuets_player_turn
+                ai_player.minimax_ai.continuous_unique_endturnstates_req_opp_turn = cuets_opp_turn
+
+
     def enable_ai(self, player: int, enabled: bool = True):
         """Enable or disable AI for a player."""
         self.ai_enabled[player] = enabled
         if enabled and self.ai_players[player] is None:
-            self.ai_players[player] = MinimaxAIPlayer(player, depth=self.depth)
+            self.ai_players[player] = MinimaxAIPlayer(player, self.cuets_player_turn, self.cuets_opp_turn)
         elif not enabled:
             self.ai_players[player] = None
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import itertools
 import uuid
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -662,6 +663,37 @@ class 真実の宣告(Spell):
                 the_actual_textbox.append_html_text("真実の宣告の効果は発動しなかったのじゃ。\n")
 
 
+class 侮蔑の炎爪(Spell):
+    """
+    target value 8
+    value: useful only in specific situations, average 6 points for damaging 3 opp followers
+    total value: 6 points
+    """
+    def __init__(self):
+        super().__init__(name="侮蔑の炎爪", cost=2)
+        self.effect_description = "下記から1つの効果を選択し発動する。【1】場のすべてのフォロワーに1ダメージ。" \
+        "【2】場のすべてのフォロワーに2ダメージ。"
+        self.description = "捻り潰して千切り壊して、跡形も無く塵と灰！無様な有様ね世界共、私の下がお似合いよ！"
+        self.request_effect_choose_option = ["1ダメージ", "2ダメージ"]
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
+        if effect_choice is not None:
+            if effect_choice == "1ダメージ":
+                damage_amount = 1
+            elif effect_choice == "2ダメージ":
+                damage_amount = 2
+            else:
+                raise ValueError("Invalid effect choice for 侮蔑の炎爪.")
+            if set_text:
+                the_actual_textbox.append_html_text(f"侮蔑の炎爪の効果で、場のすべてのフォロワーに{damage_amount}ダメージを与えるのじゃ。\n")
+            for c in itertools.chain(game_state.fields[1].copy(), game_state.fields[2].copy()):
+                if isinstance(c, Follower):
+                    c.take_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+        else:
+            if set_text:
+                the_actual_textbox.append_html_text("侮蔑の炎爪の効果は発動しなかったのじゃ。\n")
+
 
 # ==============================
 # All Cards List
@@ -670,4 +702,13 @@ class 真実の宣告(Spell):
 all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ, ガブリエル, ハンサ, 
                 天なる大河, 唯我の絶傑マゼルベイン, ミヒライテ, フェアリーアサルト,
                 機構翼の少女ローザ, 飢餓の使徒, 飢餓の輝き, 飢餓の絶傑ギルネリーゼ,
-                不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告]
+                不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪]
+
+# sort with follower spell amulet order, then by cost ascending, then by name alphabetical
+_type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}
+
+def _card_sort_key(card_cls: type[Card]) -> tuple[int, int, str]:
+    card = card_cls()  # instantiate to inspect metadata
+    return (_type_priority[card.type], card.cost, card.name)
+
+all_card_types.sort(key=_card_sort_key)

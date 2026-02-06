@@ -176,8 +176,17 @@ class Follower(Card):
         else:
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受けたのじゃ。\n")
+            self.effect_after_taking_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox)
         if draw_ui:
             game_state.draw_field_ui(player)
+
+
+    def effect_after_taking_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
+        """
+        Placeholder for any follower effect that triggers after taking damage.
+        """
+        pass
+
 
     def stats_change_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                              imposter: Card | None, attack_change: int, hp_change: int):
@@ -243,6 +252,7 @@ class ゴブリン(Follower):
         self.description = "ゴブリンの世界にあるのはエモノだけ。欲しいものを持った獲物、奪い取って身に着けた得物。"
         self.description_e = "ゴブリンは純粋に、無垢に、エモノを追いかけ回す。彼らを見れば分かる通り、純粋も無垢も善の同義語ではない。"
 
+
 class ファイター(Follower):
     """
     target value: 2 * 4 = 8 points
@@ -251,6 +261,7 @@ class ファイター(Follower):
     def __init__(self):
         super().__init__(name="ファイター", cost=2, attack=4, hp=4, can_enhance=False)
         self.description = "争いだらけの世界の中で、頼れるのは自分だけ。この得た力だけは、決して裏切らない。"
+
 
 class ゴリアテ(Follower):
     """
@@ -261,6 +272,7 @@ class ゴリアテ(Follower):
         super().__init__(name="ゴリアテ", cost=3, attack=6, hp=6, can_enhance=True)
         self.description = "見上げた時にはもう遅い。巨人はお前を見下ろすこともなく踏み潰す。"
         self.description_e = "思い出が染みついた家も、思い出を振り返る人も、巨人にとっては踏みしめるべき道に過ぎない。"
+
 
 class ガブリエル(Follower):
     """
@@ -530,6 +542,40 @@ class 真実の絶傑ライオ(Follower):
                     break
 
 
+class 侮蔑の絶傑ガルミーユ(Follower):
+    """
+    target value: 4 * 4 = 16 points
+    value: 5/7 stats: 12 points, effect damage to leader: average 4 points
+    total value: 16 points
+    """
+    def __init__(self):
+        super().__init__(name="侮蔑の絶傑・ガルミーユ", cost=4, attack=5, hp=7, can_enhance=True)
+        self.effect_description = "自分のターン中、これが能力によるダメージを受けたとき、相手のリーダーに2ダメージ。" \
+        "進化後なら、4ダメージ。"
+    
+    def effect_after_taking_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
+        for p in [1, 2]:
+            if self in game_state.fields[p]:
+                player = p
+                break
+        assert player in [1, 2], "Follower not found on any player's field."
+        if player == game_state.current_player:
+            damage_to_opponent = 4 if self.is_enhanced else 2
+            if set_text:
+                the_actual_textbox.append_html_text(f"侮蔑の絶傑・ガルミーユの効果で、プレイヤー{game_state.opponent}に{damage_to_opponent}ダメージを与えるのじゃ。\n")
+            game_state.player_take_damage(game_state.opponent, damage_to_opponent, draw_ui, set_text)
+
+
+class 神弓の座天使リリエル(Follower):
+    """
+    target value: 4 * 4 = 16 points
+    value: 4/5 stats: 9 points, effect average 6 points
+    total value: 15 points
+    """
+    def __init__(self):
+        super().__init__(name="神弓の座天使・リリエル", cost=2, attack=2, hp=5, can_enhance=False)
+        self.effect_description = "これがいる限り、自分のリーダーは能力によるダメージを受けない。"
+
 
 # ==============================
 # Spells
@@ -582,6 +628,7 @@ class ミヒライテ(Spell):
                                                              imposter=self, attack_change=2, hp_change=1)
         else:
             game_state.player_take_damage(game_state.opponent, 1, draw_ui, set_text)
+
 
 class フェアリーアサルト(Spell):
     """
@@ -698,6 +745,26 @@ class 侮蔑の炎爪(Spell):
                 the_actual_textbox.append_html_text("侮蔑の炎爪の効果は発動しなかったのじゃ。\n")
 
 
+class 唯我の一刀(Spell):
+    """
+    Value: 5 damage * 3 = 15
+    """
+    def __init__(self):
+        super().__init__(name="唯我の一刀", cost=4)
+        self.effect_description = "自分のフェルトにフォロワー1体しかないとき、相手の場のフォロワーすべてに5ダメージ。"
+        self.description = "己の神は己のみ。孤高こそ強さの証。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect, effect_choice):
+        if len(game_state.fields[game_state.current_player]) == 1:
+            damage_amount = 5
+            for c in game_state.fields[game_state.opponent].copy():
+                if isinstance(c, Follower):
+                    c.take_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+        else:
+            if set_text:
+                the_actual_textbox.append_html_text("唯我の一刀の効果は発動しなかったのじゃ。\n")
+
+
 # ==============================
 # All Cards List
 # ==============================
@@ -705,7 +772,8 @@ class 侮蔑の炎爪(Spell):
 all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ, ガブリエル, ハンサ, 
                 天なる大河, 唯我の絶傑マゼルベイン, ミヒライテ, フェアリーアサルト,
                 機構翼の少女ローザ, 飢餓の使徒, 飢餓の輝き, 飢餓の絶傑ギルネリーゼ,
-                不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪]
+                不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪, 唯我の一刀, 侮蔑の絶傑ガルミーユ,
+                神弓の座天使リリエル]
 
 # sort with follower spell amulet order, then by cost ascending, then by name alphabetical
 _type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}

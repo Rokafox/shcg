@@ -191,7 +191,7 @@ class SHCGGameState:
         elif target == "leader":
             if ui_set_text:
                 text_box.append_html_text(f"{attacker}の直接攻撃！\n")
-            self.player_take_damage(self.opponent, attacker.attack, ui_draw, ui_set_text)
+            self.player_take_damage(self.opponent, attacker.attack, ui_draw, ui_set_text, is_follower_attack=True)
             # drain ability
             if attacker.ability_drain and attacker.attack > 0:
                 self.player_heal(player, attacker.attack, ui_draw, ui_set_text)
@@ -201,8 +201,15 @@ class SHCGGameState:
             raise Exception("Should not reach here.")
 
 
-    def player_take_damage(self, player: int, amount: int, ui_draw, ui_set_text) -> bool:
+    def player_take_damage(self, player: int, amount: int, ui_draw: bool, ui_set_text: bool, is_follower_attack: bool=False) -> bool:
         assert amount >= 0
+        # has 神弓の座天使・リリエル on field, no effect damage taken
+        if not is_follower_attack:
+            for c in self.fields[player]:
+                if isinstance(c, cards.神弓の座天使リリエル):
+                    if ui_set_text:
+                        text_box.append_html_text(f"プレイヤー{player}は神弓の座天使・リリエルの効果で能力によるダメージを受けなかったのじゃ。\n")
+                    return False
         self.hp[player] -= amount
         if ui_set_text:
             text_box.append_html_text(f"プレイヤー{player}が{amount}のダメージを受けたのじゃ。残りHP:{self.hp[player]}。\n")

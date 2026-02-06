@@ -266,10 +266,10 @@ def simulate_games(num_games: int, cuets_player_turn: int = 50, cuets_opp_turn: 
 def main():
     parser = argparse.ArgumentParser(description='Simulate AI vs AI games for Super Hard Card Game')
     parser.add_argument('num_games', type=int, help='Number of games to simulate')
-    parser.add_argument('--cuets-player', type=int, default=50,
-                        help='CUETS for player turn (default: 50)')
-    parser.add_argument('--cuets-opp', type=int, default=20,
-                        help='CUETS for opponent turn simulation (default: 20)')
+    parser.add_argument('--cuets-player', type=int, default=6,
+                        help='CUETS for player turn (default: 6)')
+    parser.add_argument('--cuets-opp', type=int, default=3,
+                        help='CUETS for opponent turn simulation (default: 3)')
     parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')
 
     args = parser.parse_args()

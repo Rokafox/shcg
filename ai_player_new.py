@@ -158,6 +158,14 @@ class GameStateSnapshot:
     def player_take_damage(self, player: int, amount: int, *args, **_kwargs) -> bool:
         """Apply damage to a player. Returns True if player is defeated."""
         assert amount >= 0
+        if 'is_follower_attack' in _kwargs:
+            is_follower_attack = _kwargs['is_follower_attack']
+        else:
+            is_follower_attack = False
+        if not is_follower_attack:
+            for c in self.fields[player]:
+                if isinstance(c, cards.神弓の座天使リリエル):
+                    return False
         self.hp[player] -= amount
         if self.hp[player] <= 0:
             self.winner = 3 - player
@@ -271,7 +279,7 @@ class GameSimulator:
         elif target == "leader":
             if attacker.attack_ability < 2:
                 return False
-            state.player_take_damage(opponent, attacker.attack, ui_draw=False, ui_set_text=False)
+            state.player_take_damage(opponent, attacker.attack, ui_draw=False, ui_set_text=False, is_follower_attack=True)
             # drain ability
             if attacker.ability_drain and attacker.attack > 0:
                 state.player_heal(player, attacker.attack)

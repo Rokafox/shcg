@@ -15,8 +15,14 @@ from ai_player_new import (
 
 def create_random_deck() -> list[cards.Card]:
     """Create a random deck using the default card types."""
+    example_deck = []
     card_types = cards.all_card_types
-    return [random.choice(card_types)() for _ in range(40)]
+    selected_card_types = random.sample(card_types, 15)
+    for card_type in selected_card_types:
+        for _ in range(3):
+            example_deck.append(card_type())
+            random.shuffle(example_deck)
+    return example_deck
 
 
 def create_game_state() -> GameStateSnapshot:

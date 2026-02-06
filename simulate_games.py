@@ -9,7 +9,14 @@ from ai_player_new import (
     GameStateSnapshot,
     GameSimulator,
     MinimaxAI,
+    Evaluator,
+    AIError,
+    CardNotFoundError,
     MAX_FOXTAIL,
+    _find_card_by_id,
+    _find_card_by_void_id,
+    _find_card_in_zones,
+    _find_card_in_zones_by_void_id,
 )
 
 
@@ -67,95 +74,143 @@ def simulate_single_game(ai1: MinimaxAI, ai2: MinimaxAI, max_turns: int = 200) -
 
 
 def get_ai_actions(ai: MinimaxAI, state: GameStateSnapshot) -> list[tuple]:
-    """Get the best actions from the AI for the current state."""
-    ai.nodes_evaluated = 0
+    """
+    Get the best actions from the AI for the current state.
+    Mirrors MinimaxAI.get_best_turn_actions() but works directly on GameStateSnapshot.
+    """
+    ai.endturnstate_evaluated = 0
+    ai.endturnstate_evaluated_additional = 0
+    ai.loss_endturnstate_avoided = 0
 
-    # Generate and evaluate all possible action sequences
     best_score = float('-inf')
     best_actions = []
 
-    all_sequences = ai._generate_turn_sequences(state, ai.player_number)
+    all_sequences = ai._generate_random_turn_sequences(
+        state, ai.player_number,
+        ai.continuous_unique_endturnstates_req_player_turn
+    )
 
     for actions in all_sequences:
         test_state = state.copy()
-        valid = True
         for action in actions:
             if not ai._apply_action(test_state, ai.player_number, action):
-                valid = False
-                break
-
-        if not valid:
-            continue
+                raise AIError("Invalid action sequence generated.")
 
         GameSimulator.end_turn(test_state)
-        score = ai._evaluate_state(test_state) if hasattr(ai, '_evaluate_state') else evaluate_state(test_state, ai.player_number)
+        score = Evaluator.evaluate(test_state, ai.player_number, only_care_about_winorlose=False)
 
-        ai.nodes_evaluated += 1
+        # Advanced evaluation: simulate opponent's turn
+        if not score == float('inf') and not score == float('-inf') and not score == 0.0:
+            opponent_sequences = ai._generate_random_turn_sequences(
+                test_state, 3 - ai.player_number,
+                ai.continuous_unique_endturnstates_req_opp_turn
+            )
+            for single_opp_seq in opponent_sequences:
+                opp_test_state = test_state.copy()
+                for opp_action in single_opp_seq:
+                    if not ai._apply_action(opp_test_state, test_state.current_player, opp_action):
+                        raise AIError("Invalid opponent action sequence generated.")
+
+                GameSimulator.end_turn(opp_test_state)
+                opp_score = Evaluator.evaluate(opp_test_state, 3 - ai.player_number, only_care_about_winorlose=True)
+                ai.endturnstate_evaluated_additional += 1
+
+                if opp_score == float('inf'):
+                    score = float('-inf')
+                    ai.loss_endturnstate_avoided += 1
+                    break
+
+        ai.endturnstate_evaluated += 1
 
         if score > best_score:
             best_score = score
             best_actions = actions
 
+        if best_score == float('inf'):
+            break
+
     best_actions.append(('end_turn',))
     return best_actions
 
 
-def evaluate_state(state: GameStateSnapshot, player: int) -> float:
-    """Evaluate the game state from player's perspective."""
-    from ai_player_new import Evaluator
-    return Evaluator.evaluate(state, player)
-
-
 def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
-    """Apply an action to the state."""
-    from ai_player_new import _find_card_by_id, _find_card_in_zones
-
+    """
+    Apply an action to the state. Mirrors MinimaxAI._apply_action().
+    Handles is_generated cards via void_id lookup.
+    """
     action_type = action[0]
 
     if action_type == 'play':
-        card, target = action[1], action[2]
-        actual_card = _find_card_by_id(state.hands[player], card.unique_id)
+        card, target, effect_choice = action[1], action[2], action[3]
+        if card.is_generated:
+            actual_card = _find_card_by_void_id(state.hands[player], card.void_id)
+        else:
+            actual_card = _find_card_by_id(state.hands[player], card.unique_id)
         if actual_card is None:
-            return False
+            raise CardNotFoundError(f"Card to play not found in hand: {card}")
 
         actual_target = None
         if target is not None:
-            actual_target = _find_card_in_zones(state, target.unique_id, player)
+            if target.is_generated:
+                actual_target = _find_card_in_zones_by_void_id(state, target.void_id, player)
+            else:
+                actual_target = _find_card_in_zones(state, target.unique_id, player)
+            if actual_target is None:
+                raise CardNotFoundError(f"Target for card play not found: {target}")
 
-        return GameSimulator.play_card(state, player, actual_card, actual_target)
+        return GameSimulator.play_card(state, player, actual_card, actual_target, effect_choice)
 
     elif action_type == 'attack':
         attacker, target = action[1], action[2]
-        actual_attacker = next(
-            (f for f in state.fields[player]
-             if f.unique_id == attacker.unique_id and f.can_attack_this_turn),
-            None
-        )
+        if attacker.is_generated:
+            actual_attacker = next(
+                (f for f in state.fields[player]
+                 if f.void_id == attacker.void_id and f.can_attack_this_turn),
+                None
+            )
+        else:
+            actual_attacker = next(
+                (f for f in state.fields[player]
+                 if f.unique_id == attacker.unique_id and f.can_attack_this_turn),
+                None
+            )
         if actual_attacker is None:
-            return False
+            raise CardNotFoundError(f"Attacker not found on field: {attacker}")
 
         if target == "leader":
             actual_target = "leader"
         else:
             actual_target = _find_card_by_id(state.fields[3 - player], target.unique_id)
             if actual_target is None:
-                return False
+                raise CardNotFoundError(f"Attack target not found on field: {target}")
 
         return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)
 
     elif action_type == 'enhance':
         follower, extra_target = action[1], action[2]
-        actual_follower = next(
-            (f for f in state.fields[player]
-             if f.unique_id == follower.unique_id and f.can_enhance),
-            None
-        )
+        if follower.is_generated:
+            actual_follower = next(
+                (f for f in state.fields[player]
+                 if f.void_id == follower.void_id and f.can_enhance),
+                None
+            )
+        else:
+            actual_follower = next(
+                (f for f in state.fields[player]
+                 if f.unique_id == follower.unique_id and f.can_enhance),
+                None
+            )
         if actual_follower is None:
-            return False
+            raise CardNotFoundError(f"Follower to enhance not found on field: {follower}")
 
         actual_target = None
         if extra_target is not None:
-            actual_target = _find_card_in_zones(state, extra_target.unique_id, player)
+            if extra_target.is_generated:
+                actual_target = _find_card_in_zones_by_void_id(state, extra_target.void_id, player)
+            else:
+                actual_target = _find_card_in_zones(state, extra_target.unique_id, player)
+            if actual_target is None:
+                raise CardNotFoundError(f"Extra target for enhance not found: {extra_target}")
 
         return GameSimulator.enhance_follower(state, player, actual_follower, actual_target)
 
@@ -165,21 +220,22 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
     return False
 
 
-def simulate_games(num_games: int, ai_depth: int = 1) -> dict:
+def simulate_games(num_games: int, cuets_player_turn: int = 50, cuets_opp_turn: int = 20) -> dict:
     """
     Simulate multiple games and return statistics.
 
     Args:
         num_games: Number of games to simulate
-        ai_depth: Depth for minimax AI (default 1)
+        cuets_player_turn: CUETS (Continuous Unique End Turn States) for player's turn
+        cuets_opp_turn: CUETS for opponent's turn simulation
 
     Returns:
         Dictionary with win counts and rates
     """
     import sys
 
-    ai1 = MinimaxAI(player_number=1, max_depth=ai_depth)
-    ai2 = MinimaxAI(player_number=2, max_depth=ai_depth)
+    ai1 = MinimaxAI(player_number=1, cuets_player_turn=cuets_player_turn, cuets_opp_turn=cuets_opp_turn)
+    ai2 = MinimaxAI(player_number=2, cuets_player_turn=cuets_player_turn, cuets_opp_turn=cuets_opp_turn)
 
     wins = {1: 0, 2: 0, None: 0}  # None = draw
 
@@ -210,7 +266,10 @@ def simulate_games(num_games: int, ai_depth: int = 1) -> dict:
 def main():
     parser = argparse.ArgumentParser(description='Simulate AI vs AI games for Super Hard Card Game')
     parser.add_argument('num_games', type=int, help='Number of games to simulate')
-    parser.add_argument('--depth', type=int, default=1, help='AI depth (default: 1)')
+    parser.add_argument('--cuets-player', type=int, default=50,
+                        help='CUETS for player turn (default: 50)')
+    parser.add_argument('--cuets-opp', type=int, default=20,
+                        help='CUETS for opponent turn simulation (default: 20)')
     parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')
 
     args = parser.parse_args()
@@ -219,10 +278,10 @@ def main():
         random.seed(args.seed)
         print(f"Random seed set to: {args.seed}")
 
-    print(f"Simulating {args.num_games} games with AI depth {args.depth}...")
+    print(f"Simulating {args.num_games} games with CUETS player={args.cuets_player}, opp={args.cuets_opp}...")
     print("=" * 50)
 
-    results = simulate_games(args.num_games, args.depth)
+    results = simulate_games(args.num_games, args.cuets_player, args.cuets_opp)
 
     print("=" * 50)
     print("Results:")

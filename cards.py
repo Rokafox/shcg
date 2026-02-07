@@ -158,9 +158,10 @@ class Follower(Card):
         self.on_enhance_effect_default()
 
     def take_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                    attacker: Card | None):
+                    attacker: Card | None, is_battle_damage: bool = False):
         """
-        Take damage. When hp <= 0, it is destroyed.
+        Take card effect damage unless is_battle_damage is True.
+        When hp <= 0, it is destroyed.
         """
         self.hp -= damage_amount
         # find out which player's field this follower is on
@@ -173,6 +174,9 @@ class Follower(Card):
             game_state.fields[player].remove(self)
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受け、破壊されたのじゃ。\n")
+            for a in game_state.fields[player].copy(): # the player who has his follower just destroyed
+                if isinstance(a, Amulet):
+                    a.effect_when_player_followers_destroyed(game_state, draw_ui, set_text, the_actual_textbox, self)
         else:
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受けたのじゃ。\n")
@@ -232,7 +236,47 @@ class Spell(Card):
 class Amulet(Card):
     def __init__(self, name, cost):
         super().__init__(name, cost, 'amulet')
+        self.counter_name: str = ""  # name of the counter, e.g., "soul"
+        self.counter: int = 0  # for amulets that have counters
+        self.counter_max: int = 0  # maximum counter value for the amulet
+        self.amulet_value_for_evaluate: int = self.cost * 4  # value used in AI evaluation of game state when on field
     
+    def decrease_counter(self, amount: int =1):
+        """
+        Return True if amulet is destroyed (counter reaches 0), else False.
+        """
+        self.counter = max(0, self.counter - amount)
+        if self.counter == 0:
+            # amulet is destroyed when counter reaches 0
+            # not handled here
+            return True
+        return False
+
+    def destroy_amulet(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
+        """
+        Destroy this amulet on the field of the specified player.
+        """
+        game_state.fields[player].remove(self)
+        if set_text:
+            the_actual_textbox.append_html_text(f"プレイヤー{player}のアミュレット{self}が破壊されたのじゃ。\n")
+        self.on_destroy_effect(game_state, draw_ui, set_text, the_actual_textbox, player)
+
+    def on_destroy_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
+        pass
+
+    def effect_when_player_followers_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, destroyed_follower: Follower):
+        pass
+
+    def tooltip_str(self):
+        s = f"{self.name}\n"
+        if self.counter_name:
+            s += f"{self.counter_name}: {self.counter}\n"
+        if self.effect_description:
+            s += f"{self.effect_description}\n"
+        if self.description:
+            s += f"{self.description}\n"
+        return s
+
     def __repr__(self):
         return f"{self.name}"
 
@@ -310,7 +354,6 @@ class ハンサ(Follower):
             self.attack += top_card.cost
             if set_text:
                 the_actual_textbox.append_html_text(f"{self}の攻撃力が{top_card.cost}上がったのじゃ。\n")
-
 
 
 class 唯我の絶傑マゼルベイン(Follower):
@@ -568,6 +611,8 @@ class 侮蔑の絶傑ガルミーユ(Follower):
 
 class 神弓の座天使リリエル(Follower):
     """
+    target value: 2 * 4 = 8 points
+    value: 2/5 stats: 7 points, effect prevent ability damage: conditional usage
     """
     def __init__(self):
         super().__init__(name="神弓の座天使・リリエル", cost=2, attack=2, hp=5, can_enhance=False)
@@ -598,6 +643,60 @@ class 簒奪の絶傑オクトリス(Follower):
                 game_state.draw_hand_ui(game_state.current_player)
                 game_state.draw_hand_ui(game_state.opponent)
 
+
+class オウルキャット(Follower):
+    """
+    target value: 1 * 4 = 4 points
+    value: 4 points
+    """
+    def __init__(self):
+        super().__init__(name="オウルキャット", cost=1, attack=2, hp=2, can_enhance=True)
+        self.effect_description = "進化する時、攻撃力或いはHP1以下のフォロワーを全部消滅させる。" \
+        "消滅の効果を発動するとき、自分の手札を全部消滅させる。"
+        self.description = "飽食の獣、尚も飢え、昼の路地裏に想いを馳せる。執拗な獣、尚も飢え、夜の隙間に望みを託した。"
+        self.description_e = "褒賞はすぐそこに。獲物、今まさにフクロの鼠。忍び寄る体躯、かっぴらく双眼。これまさにネコに鰹節。"
+
+    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                            selected_card_for_effect: Card | None):
+            self.on_enhance_effect_default()
+            player = game_state.current_player
+            # banish all followers with attack or hp 1 or less
+            activated_effect = False
+            for p in [1, 2]:
+                for c in game_state.fields[p].copy():
+                    if isinstance(c, Follower) and (c.attack <= 1 or c.hp <= 1):
+                        game_state.fields[p].remove(c)
+                        activated_effect = True
+                        if set_text:
+                            the_actual_textbox.append_html_text(f"オウルキャットの効果で、プレイヤー{p}の{c}が消滅したのじゃ。\n")
+                if draw_ui:
+                    game_state.draw_field_ui(p)
+            if game_state.hands[player] and activated_effect:
+                # banish all cards in hand
+                num_discarded = len(game_state.hands[player])
+                game_state.hands[player].clear()
+                if set_text:
+                    the_actual_textbox.append_html_text(f"オウルキャットの効果で、プレイヤー{player}は手札のカード{num_discarded}枚を消滅したのじゃ。\n")
+                if draw_ui:
+                    game_state.draw_hand_ui(player)
+
+
+class 円卓の騎士ガウェイン(Follower):
+    """
+    value: average 2 followers in hand. So its cost 3 6/5 = 12 11 points
+    """
+    def __init__(self):
+        super().__init__(name="円卓の騎士・ガウェイン", cost=5, attack=6, hp=5, can_enhance=False)
+        self.effect_description = "場に出す時、狐尾をX回復する。Xは自分の手札のフォロワーの数である。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect, effect_choice):
+        player = game_state.current_player
+        num_followers_in_hand = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
+        game_state.foxtail[player] += num_followers_in_hand
+        if set_text:
+            the_actual_textbox.append_html_text(f"円卓の騎士・ガウェインの効果で、プレイヤー{player}は狐尾を{num_followers_in_hand}回復したのじゃ。\n")
+        if draw_ui:
+            game_state.draw_tail_ui(player)
 
 
 
@@ -819,6 +918,39 @@ class 簒奪の蛇剣(Spell):
             game_state.player_take_damage(opponent, x, draw_ui, set_text)
 
 
+# ===============================
+# Amulets
+# ===============================
+
+class 天界への階段(Amulet):
+    """
+    target value 8 points
+    value: 6 heal 12 points but heal is heavily delayed. Also useless on full hp, different from damage.
+    """
+    def __init__(self):
+        super().__init__(name="天界への階段", cost=2)
+        self.effect_description = "魂カウンター5つを持つ。自分のフォロワーが場から破壊されたとき、これに魂カウンター1つを減らす。" \
+        "魂カウンターがなくなったとき、それを破壊し、自分のリーダーを6回復する。"
+        self.counter_name = "魂カウンター"
+        self.counter_max = 5
+        self.counter = self.counter_max
+
+    def effect_when_player_followers_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                                 destroyed_follower: Follower):
+        for p in [1, 2]:
+            if self in game_state.fields[p]:
+                player_owning_this = p
+                break
+        if self.decrease_counter(1):
+            self.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, player_owning_this)
+
+    def on_destroy_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                          player: int):
+        game_state.player_heal(player, 6, draw_ui, set_text)
+        if set_text:
+            the_actual_textbox.append_html_text(f"天界への階段の効果で、プレイヤー{player}は6回復したのじゃ。\n")
+        
+
 
 
 # ==============================
@@ -829,7 +961,7 @@ all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ,
                 天なる大河, 唯我の絶傑マゼルベイン, ミヒライテ, フェアリーアサルト,
                 機構翼の少女ローザ, 飢餓の使徒, 飢餓の輝き, 飢餓の絶傑ギルネリーゼ,
                 不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪, 唯我の一刀, 侮蔑の絶傑ガルミーユ,
-                神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣]
+                神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣, オウルキャット, 円卓の騎士ガウェイン, 天界への階段]
 
 # sort with follower spell amulet order, then by cost ascending, then by name alphabetical
 _type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}

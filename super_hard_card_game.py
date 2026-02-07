@@ -172,20 +172,13 @@ class SHCGGameState:
                 # text_box.append_html_text(f"{attacker} is about to attack {target}.\n")
                 text_box.append_html_text(f"{attacker}は{target}を攻撃するぞ！\n")
             target_hp_before = target.hp
-            target.hp -= attacker.attack
+            target.take_damage(attacker.attack, self, ui_draw, ui_set_text, text_box, attacker=attacker, is_battle_damage=True)
             target_hp_changed = target_hp_before - target.hp
             # drain ability
             if attacker.ability_drain and target_hp_changed > 0:
                 self.player_heal(player, target_hp_changed, ui_draw, ui_set_text)
-            attacker.hp -= target.attack
-            if target.hp <= 0:
-                self.fields[self.opponent].remove(target)
-                if ui_set_text:
-                    text_box.append_html_text(f"{target}は{attacker}に攻撃され、倒されてしまったのじゃ。\n")
-            if attacker.hp <= 0:
-                self.fields[self.current_player].remove(attacker)
-                if ui_set_text:
-                    text_box.append_html_text(f"攻撃者である{attacker}は倒されてしまったのじゃ。\n")
+            attacker.take_damage(target.attack, self, ui_draw, ui_set_text, text_box, attacker=attacker, is_battle_damage=True)
+            # Remove dead followers handled in take_damage method
             attacker.after_attack_effect()
             if ui_draw:
                 self.draw_field_ui(1)
@@ -864,6 +857,15 @@ def draw_card(card: cards.Card, show_attack_status_indicator: bool = False) -> p
             card_surface.blit(amulet_outline, (8 + dx, 120 + dy))
         amulet_render = font_bold.render(amulet_text, True, (231, 130, 242))
         card_surface.blit(amulet_render, (8, 120))
+        # draw counter, if any on bottom right
+        if hasattr(card, 'counter'):
+            counter_text = str(card.counter)
+            counter_width = font_bold.size(counter_text)[0]
+            for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+                counter_outline = font_bold.render(counter_text, True, (0, 0, 0))
+                card_surface.blit(counter_outline, (92 - counter_width + dx, 120 + dy))
+            counter_render = font_bold.render(counter_text, True, (231, 130, 242))
+            card_surface.blit(counter_render, (92 - counter_width, 120))
     
     # 強化可能マーカーを右上に表示
     if hasattr(card, 'can_enhance') and card.can_enhance:
@@ -1339,7 +1341,7 @@ if __name__ == "__main__":
 
                     elif ui_drag_and_drop_usage == "attack_with_follower_player":
                         opponent = global_vars_shcg.opponent
-                        protect_exists = any([c.ability_protect for c in global_vars_shcg.fields[opponent]])
+                        protect_exists = any([c.ability_protect for c in global_vars_shcg.fields[opponent] if isinstance(c, cards.Follower)])
                         for index, slot in enumerate(global_vars_field_slots[opponent]):
                             if slot.rect.collidepoint(event.pos):
                                 if the_selected_card:

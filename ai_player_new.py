@@ -210,6 +210,16 @@ def _copy_card(card: cards.Card) -> cards.Card:
             else:
                 raise AIError(f"Follower {card} missing expected attribute {attr} during copy.")
 
+    elif isinstance(card, cards.Amulet):
+        amulet_attrs = [
+            'counter_name', 'counter', 'counter_max', 'amulet_value_for_evaluate'
+        ]
+        for attr in amulet_attrs:
+            if hasattr(card, attr):
+                setattr(new_card, attr, getattr(card, attr))
+            else:
+                raise AIError(f"Amulet {card} missing expected attribute {attr} during copy.")
+
     return new_card
 
 
@@ -261,20 +271,17 @@ class GameSimulator:
 
             # Combat
             target_hp_before = target.hp
-            target.hp -= attacker.attack
+            # target.hp -= attacker.attack
+            target.take_damage(attacker.attack, state, False, False, None, attacker=attacker, is_battle_damage=True)
             target_hp_changed = target_hp_before - target.hp
             # drain ability
             if attacker.ability_drain and target_hp_changed > 0:
                 state.player_heal(player, target_hp_changed)
-            attacker.hp -= target.attack
+            # attacker.hp -= target.attack
+            attacker.take_damage(target.attack, state, False, False, None, attacker=attacker, is_battle_damage=True)
 
-            # Remove dead followers
-            if target.hp <= 0:
-                state.fields[opponent].remove(target)
-            if attacker.hp <= 0:
-                state.fields[player].remove(attacker)
-            else:
-                attacker.after_attack_effect()
+            # Remove dead followers handled in take_damage method
+            attacker.after_attack_effect()
 
         elif target == "leader":
             if attacker.attack_ability < 2:
@@ -414,7 +421,7 @@ class MoveGenerator:
 
         # check if opponent has any followers with ability_protect
         # if so, only those followers can be attacked
-        protect_exists = any([c.ability_protect for c in state.fields[opponent]])
+        protect_exists = any([c.ability_protect for c in state.fields[opponent] if isinstance(c, cards.Follower)])
         for follower in state.fields[player]:
             if follower.type != 'follower':
                 continue
@@ -543,6 +550,8 @@ class Evaluator:
                 # drain 者の攻撃力の100%を追加ボーナスとして加算
                 if f.ability_drain:
                     own_field_power += f.attack
+            elif isinstance(f, cards.Amulet):
+                own_field_power += f.amulet_value_for_evaluate
         opp_field_power = 0
         for f in state.fields[opponent]:
             if isinstance(f, cards.Follower):
@@ -551,6 +560,8 @@ class Evaluator:
                     opp_field_power += f.hp
                 if f.ability_drain:
                     opp_field_power += f.attack
+            elif isinstance(f, cards.Amulet):
+                opp_field_power += f.amulet_value_for_evaluate
         score += (own_field_power - opp_field_power) * Evaluator.FIELD_POWER_WEIGHT
         # Hand size
         score += (len(state.hands[player]) - len(state.hands[opponent])) * Evaluator.HAND_SIZE_WEIGHT

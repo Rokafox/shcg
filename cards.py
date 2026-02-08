@@ -243,7 +243,7 @@ class Amulet(Card):
     
     def decrease_counter(self, amount: int =1):
         """
-        Return True if amulet is destroyed (counter reaches 0), else False.
+        Return True if counter reaches 0, else False.
         """
         self.counter = max(0, self.counter - amount)
         if self.counter == 0:
@@ -930,7 +930,8 @@ class 天界への階段(Amulet):
     def __init__(self):
         super().__init__(name="天界への階段", cost=2)
         self.effect_description = "魂カウンター5つを持つ。自分のフォロワーが場から破壊されたとき、これに魂カウンター1つを減らす。" \
-        "魂カウンターがなくなったとき、それを破壊し、自分のリーダーを6回復する。"
+        "魂カウンターがなくなったとき、それを破壊し、自分のリーダーをX回復する。Xは5-カウンターの数である。" \
+        "カウンターの数0の場合、さらに1回復する。"
         self.counter_name = "魂カウンター"
         self.counter_max = 5
         self.counter = self.counter_max
@@ -946,7 +947,10 @@ class 天界への階段(Amulet):
 
     def on_destroy_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                           player: int):
-        game_state.player_heal(player, 6, draw_ui, set_text)
+        heal = 5 - self.counter
+        if self.counter == 0:
+            heal += 1
+        game_state.player_heal(player, heal, draw_ui, set_text)
         if set_text:
             the_actual_textbox.append_html_text(f"天界への階段の効果で、プレイヤー{player}は6回復したのじゃ。\n")
         

@@ -220,7 +220,7 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
     return False
 
 
-def simulate_games(num_games: int, cuets_player_turn: int = 50, cuets_opp_turn: int = 20) -> dict:
+def simulate_games(num_games: int, cuets_player_turn: int = 6, cuets_opp_turn: int = 3) -> dict:
     """
     Simulate multiple games and return statistics.
 
@@ -265,11 +265,12 @@ def simulate_games(num_games: int, cuets_player_turn: int = 50, cuets_opp_turn: 
 
 def main():
     parser = argparse.ArgumentParser(description='Simulate AI vs AI games for Super Hard Card Game')
-    parser.add_argument('num_games', type=int, help='Number of games to simulate')
+    parser.add_argument('num_games', type=int,
+                        help='Number of games to simulate')
     parser.add_argument('--cuets-player', type=int, default=6,
-                        help='CUETS for player turn (default: 6)')
+                        help='Always use 1 for quick tests for card effects.')
     parser.add_argument('--cuets-opp', type=int, default=3,
-                        help='CUETS for opponent turn simulation (default: 3)')
+                        help='Always use 1 for quick tests for card effects.')
     parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')
 
     args = parser.parse_args()

@@ -23,7 +23,7 @@ clock = pygame.time.Clock()
 # ====================================
 
 DEFAULT_HP_F = 20
-DEFAULT_HP_S = 24
+DEFAULT_HP_S = 26
 
 class SHCGGameState:
     def __init__(self, current_player):

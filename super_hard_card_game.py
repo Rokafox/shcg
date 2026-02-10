@@ -39,7 +39,9 @@ class SHCGGameState:
         self.enhance_used_this_turn = {1: 0, 2: 0}
         self.max_enhance_allowed_per_turn = {1: 1, 2: 1}
         # Every time a card is generated, the player who generated it gets 1 count
-        self.amount_card_generated_from_void: dict[int, int] = {1: 0, 2: 0} 
+        self.amount_card_generated_from_void: dict[int, int] = {1: 0, 2: 0}
+        # hidden card
+        self.hidden_cards: dict[int, list[cards.Card]] = {1: [], 2: []} 
         # ui
         self.top_of_the_deck_ui_marker: dict[int, pygame_gui.elements.UIImage | None] = {1: None, 2: None}
     
@@ -123,6 +125,16 @@ class SHCGGameState:
                     if not isinstance(target, cards.Spell) and any(c.type == 'spell' for c in self.hands[player]):
                         text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
                         target = random.choice([c for c in self.hands[player] if c.type == 'spell'])
+                elif card.request_card_selection_on_play == "hand_follower_aiteru":
+                    # 手札からコストX以下のフォロワー1体を選び、場に出す。それは場に出す効果を発動しない。Xは自分の手札のフォロワーの数である。
+                    for i, c in enumerate(self.hands[player]):
+                        if f"{i + 1} {str(c)}" == scsd_hand.selected_option[0]:
+                            target = c
+                            break
+                    valid_followers = [c for c in self.hands[player] if c.type == 'follower' and c.cost <= len([x for x in self.hands[player] if x.type == 'follower'])]
+                    if not isinstance(target, cards.Follower) or target not in valid_followers:
+                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
+                        target = random.choice(valid_followers)
                 else:
                     raise Exception(f"Unknown request_card_selection_on_play: {card.request_card_selection_on_play}")
 
@@ -151,7 +163,20 @@ class SHCGGameState:
             self.fields[player].append(card)
             card.on_summon_effect()
         elif isinstance(card, cards.Spell):
-            pass
+            # if has star pheonix, summon it.
+            if self.hidden_cards[player]:
+                for c in self.hidden_cards[player].copy():
+                    if isinstance(c, cards.スターフェニックス):
+                        if len(self.fields[player]) > 4:
+                            break
+                        # create a new instance of star pheonix with same unique_id and void_id
+                        new_star_pheonix = cards.スターフェニックス()
+                        new_star_pheonix.unique_id = c.unique_id
+                        new_star_pheonix.void_id = c.void_id
+                        self.fields[player].append(new_star_pheonix)
+                        self.hidden_cards[player].remove(c)
+                        if ui_set_text:
+                            text_box.append_html_text(f"プレイヤー{player}のスターフェニックスがで場に出たのじゃ！\n")
         elif isinstance(card, cards.Amulet):
             self.fields[player].append(card)
         if ui_draw:
@@ -1191,6 +1216,9 @@ debug_add_card_button = None
 
 def debug_add_card_to_top_of_deck():
     global global_vars_shcg
+    if global_vars_shcg.concluded:
+        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
+        return
     card_to_add: cards.Card | None = None
     card_name = debug_card_selection_dropdown.selected_option[0]
     for card_type in cards.all_card_types:
@@ -1207,6 +1235,9 @@ def debug_add_card_to_top_of_deck():
 
 def debug_add_1_hp_to_player_1():
     global global_vars_shcg
+    if global_vars_shcg.concluded:
+        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
+        return
     prev_hp = global_vars_shcg.hp[1]
     global_vars_shcg.hp[1] = min(global_vars_shcg.hp[1] + 1, global_vars_shcg.max_hp[1])
     delta = global_vars_shcg.hp[1] - prev_hp
@@ -1215,6 +1246,9 @@ def debug_add_1_hp_to_player_1():
 
 def debug_add_1_hp_to_player_2():
     global global_vars_shcg
+    if global_vars_shcg.concluded:
+        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
+        return
     prev_hp = global_vars_shcg.hp[2]
     global_vars_shcg.hp[2] = min(global_vars_shcg.hp[2] + 1, global_vars_shcg.max_hp[2])
     delta = global_vars_shcg.hp[2] - prev_hp
@@ -1223,6 +1257,9 @@ def debug_add_1_hp_to_player_2():
 
 def debug_add_foxtail_to_current_player():
     global global_vars_shcg
+    if global_vars_shcg.concluded:
+        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
+        return
     cp = global_vars_shcg.current_player
     if global_vars_shcg.foxtail[cp] < 9:
         global_vars_shcg.foxtail[cp] += 1

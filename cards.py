@@ -59,6 +59,8 @@ class Card:
     def end_of_turn_on_field_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
         pass
 
+    def effect_when_player_followers_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, destroyed_follower: Follower):
+        pass
 
 
 
@@ -172,17 +174,24 @@ class Follower(Card):
         assert player in [1, 2], "Follower not found on any player's field."
         if self.hp <= 0:
             game_state.fields[player].remove(self)
+            self.effect_on_destroyed(game_state, draw_ui, set_text, the_actual_textbox, player, destroyed_by=attacker, is_battle_destroyed=is_battle_damage)
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受け、破壊されたのじゃ。\n")
             for a in game_state.fields[player].copy(): # the player who has his follower just destroyed
-                if isinstance(a, Amulet):
-                    a.effect_when_player_followers_destroyed(game_state, draw_ui, set_text, the_actual_textbox, self)
+                a.effect_when_player_followers_destroyed(game_state, draw_ui, set_text, the_actual_textbox, self)
         else:
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受けたのじゃ。\n")
             self.effect_after_taking_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox)
         if draw_ui:
             game_state.draw_field_ui(player)
+
+
+    def effect_on_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int, 
+                            destroyed_by: Card | None, is_battle_destroyed: bool = False):
+        """
+        Placeholder for any follower effect that triggers on being destroyed.
+        """
 
 
     def effect_after_taking_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
@@ -262,9 +271,6 @@ class Amulet(Card):
         self.on_destroy_effect(game_state, draw_ui, set_text, the_actual_textbox, player)
 
     def on_destroy_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
-        pass
-
-    def effect_when_player_followers_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, destroyed_follower: Follower):
         pass
 
     def tooltip_str(self):
@@ -593,7 +599,7 @@ class 侮蔑の絶傑ガルミーユ(Follower):
     """
     def __init__(self):
         super().__init__(name="侮蔑の絶傑・ガルミーユ", cost=4, attack=5, hp=7, can_enhance=True)
-        self.effect_description = "自分のターン中、これが能力によるダメージを受けたとき、相手のリーダーに2ダメージ。" \
+        self.effect_description = "自分のターン中、これがダメージを受けたとき、相手のリーダーに2ダメージ。" \
         "進化後なら、4ダメージ。"
     
     def effect_after_taking_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
@@ -698,6 +704,38 @@ class 円卓の騎士ガウェイン(Follower):
         if draw_ui:
             game_state.draw_tail_ui(player)
 
+
+class スターフェニックス(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="スターフェニックス", cost=4, attack=2, hp=2, can_enhance=True)
+        self.effect_description = "場のこれが破壊された後、スペルカードをプレイする時、これを場に出し、すべての状態をリセットされる。"
+
+    def effect_on_destroyed(self, game_state, draw_ui, set_text, the_actual_textbox, player, destroyed_by, is_battle_destroyed = False):
+        game_state.hidden_cards[player].append(self)
+
+
+class 白翼の守護神アイテール(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="白翼の守護神・アイテール", cost=7, attack=4, hp=7, can_enhance=False)
+        self.ability_protect = True
+        self.effect_description = "場に出す時、手札からコストX以下のフォロワー1体を選び、場に出す。それは場に出す効果を発動しない。Xは自分の手札のフォロワーの数である。"
+        self.request_card_selection_on_play = "hand_follower_aiteru"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect, effect_choice):
+        target = selected_card_for_effect
+        player = game_state.current_player
+        if target is not None and target in game_state.hands[player]:
+            if len(game_state.fields[player]) < 5:
+                game_state.hands[player].remove(target)
+                game_state.fields[player].append(target)
+                target.on_summon_effect()
+            if set_text:
+                the_actual_textbox.append_html_text(f"白翼の守護神・アイテールの効果で、プレイヤー{player}は手札から{target}を場に出したのじゃ。\n")
 
 
 # ==============================
@@ -955,6 +993,32 @@ class 天界への階段(Amulet):
             the_actual_textbox.append_html_text(f"天界への階段の効果で、プレイヤー{player}は6回復したのじゃ。\n")
         
 
+class 祈りの燭台(Amulet):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="祈りの燭台", cost=5)
+        self.description = "施しである。燃える火も、照らす日も、己が非すら、神の施し。――思慮深き御使いの福音、第三章十一行"
+        self.effect_description = "エンドフェイズ開始時、カウンターは1減らし、自分のリーダーにX回復。" \
+        "Xは自分の手札のフォロワーの数である。カウンターがなくなったとき、それを破壊する。"
+        self.counter_name = "祈りの燭台カウンター"
+        self.counter_max = 5
+        self.counter = self.counter_max
+
+    def end_of_turn_on_field_effect(self, game_state, draw_ui, set_text, the_actual_textbox):
+        for p in [1, 2]:
+            if self in game_state.fields[p]:
+                player_owning_this = p
+                break
+        if self.decrease_counter(1):
+            self.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, player_owning_this)
+        else:
+            num_followers_in_hand = sum(1 for c in game_state.hands[player_owning_this] if isinstance(c, Follower))
+            game_state.player_heal(player_owning_this, num_followers_in_hand, draw_ui, set_text)
+            if set_text:
+                the_actual_textbox.append_html_text(f"祈りの燭台の効果で、プレイヤー{player_owning_this}は{num_followers_in_hand}回復したのじゃ。\n")
+
+
 
 
 # ==============================
@@ -965,7 +1029,8 @@ all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ,
                 天なる大河, 唯我の絶傑マゼルベイン, ミヒライテ, フェアリーアサルト,
                 機構翼の少女ローザ, 飢餓の使徒, 飢餓の輝き, 飢餓の絶傑ギルネリーゼ,
                 不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪, 唯我の一刀, 侮蔑の絶傑ガルミーユ,
-                神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣, オウルキャット, 円卓の騎士ガウェイン, 天界への階段]
+                神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣, オウルキャット, 円卓の騎士ガウェイン, 天界への階段,
+                スターフェニックス, 白翼の守護神アイテール, 祈りの燭台]
 
 # sort with follower spell amulet order, then by cost ascending, then by name alphabetical
 _type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}

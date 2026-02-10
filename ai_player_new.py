@@ -88,7 +88,8 @@ class GameStateSnapshot:
         self.foxtail: dict[int, int] = {1: MAX_FOXTAIL, 2: MAX_FOXTAIL}
         self.enhance_used_this_turn: dict[int, int] = {1: 0, 2: 0}
         self.max_enhance_allowed_per_turn: dict[int, int] = {1: DEFAULT_MAX_ENHANCE_PER_TURN, 2: DEFAULT_MAX_ENHANCE_PER_TURN}
-        self.amount_card_generated_from_void: dict[int, int] = {1: 0, 2: 0} 
+        self.amount_card_generated_from_void: dict[int, int] = {1: 0, 2: 0}
+        self.hidden_cards: dict[int, list[cards.Card]] = {1: [], 2: []} 
 
     @property
     def opponent(self) -> int:
@@ -122,6 +123,7 @@ class GameStateSnapshot:
             snap.decks[player] = [_copy_card(c) for c in game_state.decks[player]]
             snap.hands[player] = [_copy_card(c) for c in game_state.hands[player]]
             snap.fields[player] = [_copy_card(c) for c in game_state.fields[player]]
+            snap.hidden_cards[player] = [_copy_card(c) for c in game_state.hidden_cards[player]]
 
         return snap
 
@@ -152,6 +154,7 @@ class GameStateSnapshot:
             new_snap.decks[player] = [_copy_card(c) for c in self.decks[player]]
             new_snap.hands[player] = [_copy_card(c) for c in self.hands[player]]
             new_snap.fields[player] = [_copy_card(c) for c in self.fields[player]]
+            new_snap.hidden_cards[player] = [_copy_card(c) for c in self.hidden_cards[player]]
 
         return new_snap
 
@@ -250,7 +253,18 @@ class GameSimulator:
         elif isinstance(card, cards.Amulet):
             state.fields[player].append(card)
         elif isinstance(card, cards.Spell):
-            pass
+            # if has star pheonix, summon it.
+            if state.hidden_cards[player]:
+                for c in state.hidden_cards[player].copy():
+                    if isinstance(c, cards.スターフェニックス):
+                        if len(state.fields[player]) > 4:
+                            break
+                        # create a new instance of star pheonix with same unique_id and void_id
+                        new_star_pheonix = cards.スターフェニックス()
+                        new_star_pheonix.unique_id = c.unique_id
+                        new_star_pheonix.void_id = c.void_id
+                        state.fields[player].append(new_star_pheonix)
+                        state.hidden_cards[player].remove(c)
 
         return True
 
@@ -400,6 +414,11 @@ class MoveGenerator:
                 if targets:
                     o1_possible_values = targets
             
+            elif card.request_card_selection_on_play == "hand_follower_aiteru":
+                valid_followers = [c for c in state.hands[player] if c.type == 'follower' and c.cost <= len([x for x in state.hands[player] if x.type == 'follower'])]
+                if valid_followers:
+                    o1_possible_values = valid_followers
+
             # Handle effect choice options
             if card.request_effect_choose_option:
                 o2_possible_values = card.request_effect_choose_option
@@ -567,6 +586,11 @@ class Evaluator:
         score += (len(state.hands[player]) - len(state.hands[opponent])) * Evaluator.HAND_SIZE_WEIGHT
         # Deck size
         score += (len(state.decks[player]) - len(state.decks[opponent])) * Evaluator.DECK_SIZE_WEIGHT
+        # hidden cards
+        if state.hidden_cards[player]:
+            for c in state.hidden_cards[player]:
+                if isinstance(c, cards.スターフェニックス):
+                    score += 4.0  # 2/2
 
         return score
 
@@ -669,6 +693,7 @@ class MinimaxAI:
             str(state.enhance_used_this_turn[1]), str(state.enhance_used_this_turn[2]),
             str(state.max_enhance_allowed_per_turn[1]), str(state.max_enhance_allowed_per_turn[2]),
             str(state.amount_card_generated_from_void[1]), str(state.amount_card_generated_from_void[2]),
+            str(state.hidden_cards[1]), str(state.hidden_cards[2])
         ]
 
         # Hash field states
@@ -686,7 +711,7 @@ class MinimaxAI:
                     )
             field_str_follower = ",".join(field_str_follower)
             # amulet cards
-            field_str_amulet = ",".join(f"{f.name}" for f in state.fields[player] if f.type == 'amulet')
+            field_str_amulet = ",".join(f"{f.name}:{f.counter}" for f in state.fields[player] if f.type == 'amulet')
             # combine
             parts.append(f"F{player}:" + field_str_follower)
             parts.append(f"A{player}:" + field_str_amulet)

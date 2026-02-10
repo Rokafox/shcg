@@ -267,9 +267,9 @@ def main():
     parser = argparse.ArgumentParser(description='Simulate AI vs AI games for Super Hard Card Game')
     parser.add_argument('num_games', type=int,
                         help='Number of games to simulate')
-    parser.add_argument('--cuets-player', type=int, default=6,
+    parser.add_argument('--cuets-player', type=int, default=1,
                         help='Always use 1 for quick tests for card effects.')
-    parser.add_argument('--cuets-opp', type=int, default=3,
+    parser.add_argument('--cuets-opp', type=int, default=1,
                         help='Always use 1 for quick tests for card effects.')
     parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')
 

@@ -409,6 +409,11 @@ class MoveGenerator:
                 if targets:
                     o1_possible_values = targets
 
+            elif card.request_card_selection_on_play == "hand":
+                targets = state.hands[player]
+                if targets:
+                    o1_possible_values = targets
+
             elif card.request_card_selection_on_play == "hand_spell":
                 targets = [c for c in state.hands[player] if isinstance(c, cards.Spell)]
                 if targets:

@@ -77,6 +77,8 @@ class SHCGGameState:
         if self.foxtail[player] < card.cost:
             return
         self.use_foxtail(player, card.cost, ui_draw, ui_set_text)
+        # hand selection ui is not updated to removed state, so use hand_prev for enumerate
+        hand_prev = self.hands[player].copy()
         self.hands[player].remove(card)
         if ui_set_text:
             text_box.append_html_text(f"プレイヤー{player}が{card}をプレイしたぞ！\n")
@@ -117,8 +119,16 @@ class SHCGGameState:
                     if not isinstance(target, cards.Follower) and (self.fields[player] + self.fields[3 - player]):
                         text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
                         target = random.choice(self.fields[player] + self.fields[3 - player])
+                elif card.request_card_selection_on_play == "hand":
+                    for i, c in enumerate(hand_prev):
+                        if f"{i + 1} {str(c)}" == scsd_hand.selected_option[0]:
+                            target = c
+                            break
+                    if not isinstance(target, cards.Card) and self.hands[player]:
+                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
+                        target = random.choice(self.hands[player])
                 elif card.request_card_selection_on_play == "hand_spell":
-                    for i, c in enumerate(self.hands[player]):
+                    for i, c in enumerate(hand_prev):
                         if f"{i + 1} {str(c)}" == scsd_hand.selected_option[0]:
                             target = c
                             break
@@ -127,7 +137,7 @@ class SHCGGameState:
                         target = random.choice([c for c in self.hands[player] if c.type == 'spell'])
                 elif card.request_card_selection_on_play == "hand_follower_aiteru":
                     # 手札からコストX以下のフォロワー1体を選び、場に出す。それは場に出す効果を発動しない。Xは自分の手札のフォロワーの数である。
-                    for i, c in enumerate(self.hands[player]):
+                    for i, c in enumerate(hand_prev):
                         if f"{i + 1} {str(c)}" == scsd_hand.selected_option[0]:
                             target = c
                             break

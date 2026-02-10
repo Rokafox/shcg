@@ -767,6 +767,33 @@ class 天なる大河(Spell):
             the_actual_textbox.append_html_text(f"天なる大河の効果で、プレイヤー{player}は手札の全てのカードをデッキの下に置き、{num_cards + 1}枚のカードを引いたのじゃ。\n")
 
 
+class 神秘の指輪(Spell):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="神秘の指輪", cost=1)
+        self.description = "本懐を果たし、勇者は運命の死を迎えた。神秘の伝承は指輪に宿り、次なる勇者を待ち望む。"
+        self.effect_description = "自分の手札1枚を選ぶ、それをデッキの下に置く。2枚引く。"
+        self.request_card_selection_on_play = "hand"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
+        player = game_state.current_player
+        if selected_card_for_effect is not None and selected_card_for_effect in game_state.hands[player]:
+            game_state.hands[player].remove(selected_card_for_effect)
+            game_state.decks[player].insert(0, selected_card_for_effect)  # Place at bottom of deck
+            if set_text:
+                the_actual_textbox.append_html_text(f"神秘の指輪の効果で、プレイヤー{player}は手札の{selected_card_for_effect}をデッキの下に置いたのじゃ。\n")
+            # Draw 2 cards
+            for _ in range(2):
+                if game_state.decks[player] and len(game_state.hands[player]) < 9:
+                    drawn_card = game_state.decks[player].pop()
+                    game_state.hands[player].append(drawn_card)
+                    if set_text:
+                        the_actual_textbox.append_html_text(f"神秘の指輪の効果で、プレイヤー{player}は{drawn_card}を引いたのじゃ。\n")
+
+
+
 class ミヒライテ(Spell):
     """
     target value: 1 * 4 = 4 points
@@ -1030,7 +1057,7 @@ all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ,
                 機構翼の少女ローザ, 飢餓の使徒, 飢餓の輝き, 飢餓の絶傑ギルネリーゼ,
                 不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪, 唯我の一刀, 侮蔑の絶傑ガルミーユ,
                 神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣, オウルキャット, 円卓の騎士ガウェイン, 天界への階段,
-                スターフェニックス, 白翼の守護神アイテール, 祈りの燭台]
+                スターフェニックス, 白翼の守護神アイテール, 祈りの燭台, 神秘の指輪]
 
 # sort with follower spell amulet order, then by cost ascending, then by name alphabetical
 _type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}

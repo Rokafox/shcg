@@ -62,6 +62,12 @@ class Card:
     def effect_when_player_followers_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, destroyed_follower: Follower):
         pass
 
+    def remove_from_field(self, fields: list[Card], mode: str = "generic"):
+        """
+        Can be used to handle card having immunity to eg destroy
+        """
+        assert mode in ["generic", "destroy", "banish"], "Invalid mode for remove_from_field."
+        fields.remove(self)
 
 
 class Follower(Card):
@@ -173,7 +179,7 @@ class Follower(Card):
                 break
         assert player in [1, 2], "Follower not found on any player's field."
         if self.hp <= 0:
-            game_state.fields[player].remove(self)
+            self.remove_from_field(game_state.fields[player], mode="destroy")
             self.effect_on_destroyed(game_state, draw_ui, set_text, the_actual_textbox, player, destroyed_by=attacker, is_battle_destroyed=is_battle_damage)
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受け、破壊されたのじゃ。\n")
@@ -218,7 +224,7 @@ class Follower(Card):
         assert player in [1, 2], "Follower not found on any player's field."
         # clean up if hp goes below 0
         if self.hp <= 0:
-            game_state.fields[player].remove(self)
+            self.remove_from_field(game_state.fields[player], mode="banish")
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}のステータスが{imposter}によって変更され、追放されたのじゃ。\n")
         else:
@@ -228,6 +234,22 @@ class Follower(Card):
                 attack_str = f"+{attack_change}" if attack_change >= 0 else f"-{attack_change}"
                 hp_str = f"+{hp_change}" if hp_change >= 0 else f"-{hp_change}"
                 the_actual_textbox.append_html_text(f"{attack_str}/{hp_str}なのじゃ。\n")
+
+
+    def stats_change_effect_this_card(self, attack_change: int, hp_change: int, draw_ui, set_text, the_actual_textbox):
+        self.attack += attack_change
+        self.hp += hp_change
+        self.max_hp += hp_change
+        # clean up if hp goes below 0
+        if self.hp <= 0:
+            pass
+        if set_text:
+            the_actual_textbox.append_html_text(f"{self}のステータスが変更されたのじゃ：")
+            # +n/-nを正しく表示するのじゃ
+            attack_str = f"+{attack_change}" if attack_change >= 0 else f"-{attack_change}"
+            hp_str = f"+{hp_change}" if hp_change >= 0 else f"-{hp_change}"
+            the_actual_textbox.append_html_text(f"{attack_str}/{hp_str}なのじゃ。\n")
+
 
 
     def __repr__(self):
@@ -265,7 +287,7 @@ class Amulet(Card):
         """
         Destroy this amulet on the field of the specified player.
         """
-        game_state.fields[player].remove(self)
+        self.remove_from_field(game_state.fields[player], mode="destroy")
         if set_text:
             the_actual_textbox.append_html_text(f"プレイヤー{player}のアミュレット{self}が破壊されたのじゃ。\n")
         self.on_destroy_effect(game_state, draw_ui, set_text, the_actual_textbox, player)
@@ -671,7 +693,7 @@ class オウルキャット(Follower):
             for p in [1, 2]:
                 for c in game_state.fields[p].copy():
                     if isinstance(c, Follower) and (c.attack <= 1 or c.hp <= 1):
-                        game_state.fields[p].remove(c)
+                        c.remove_from_field(game_state.fields[p], mode="banish")
                         activated_effect = True
                         if set_text:
                             the_actual_textbox.append_html_text(f"オウルキャットの効果で、プレイヤー{p}の{c}が消滅したのじゃ。\n")
@@ -738,6 +760,154 @@ class 白翼の守護神アイテール(Follower):
                 the_actual_textbox.append_html_text(f"白翼の守護神・アイテールの効果で、プレイヤー{player}は手札から{target}を場に出したのじゃ。\n")
 
 
+class キラキラヒーラー(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="キラキラヒーラー", cost=2, attack=2, hp=2, can_enhance=True)
+        self.effect_description = "自分の手札にスペルカードがあるなら、リーダーに2回復。進化後同じ効果。"
+        self.description = "「ほっとけないよ、そんなケガ！だってやばくて、やばいもん！しっかり治すよ、そんなケガ！ふわふわヒールの出番だよ！」"
+        self.description_e = "「ほったらかしにしちゃったら、どんなケガでもダイサンジ！しなくていいガマンはしない！痛くなったら頼ってね！」"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect, effect_choice):
+        player = game_state.current_player
+        has_spell_in_hand = any(isinstance(c, Spell) for c in game_state.hands[player])
+        if has_spell_in_hand:
+            game_state.player_heal(player, 2, draw_ui, set_text)
+            if set_text:
+                the_actual_textbox.append_html_text(f"キラキラヒーラーの効果で、プレイヤー{player}は2回復したのじゃ。\n")
+        else:
+            if set_text:
+                the_actual_textbox.append_html_text(f"キラキラヒーラーの効果は発動しなかったのじゃ。\n")
+
+    def on_enhance_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                            selected_card_for_effect):
+        self.on_enhance_effect_default()
+        self.on_play_effect(game_state, draw_ui, set_text, the_actual_textbox,
+                            selected_card_for_effect, effect_choice=None)
+
+
+class ミスティアストロジスト(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="ミスティアストロジスト", cost=3, attack=1, hp=1, can_enhance=False)
+        self.description = "ほんの小さな瞬きからさえ、彼女は目を離しはしない。素人には分からない、輝きの価値を知るからだ。"
+        self.effect_description = "X枚引く。Xは自分の手札のフォロワーの数である。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect, effect_choice):
+        player = game_state.current_player
+        num_followers_in_hand = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
+        for _ in range(num_followers_in_hand):
+            if game_state.decks[player] and len(game_state.hands[player]) < 9:
+                drawn_card = game_state.decks[player].pop()
+                game_state.hands[player].append(drawn_card)
+                if set_text:
+                    the_actual_textbox.append_html_text(f"ミスティアストロジストの効果で、プレイヤー{player}は{drawn_card}を引いたのじゃ。\n")
+
+
+class 水竜神の巫女(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="水竜神の巫女", cost=3, attack=6, hp=5, can_enhance=False)
+        self.effect_description = "デッキの上からX枚捨てる。Xは自分の手札のフォロワーの数である。" \
+        "これは+0/+Xする。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect, effect_choice):
+        player = game_state.current_player
+        num_followers_in_hand = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
+        # Discard X cards from top of deck
+        actual_discarded = 0
+        for _ in range(num_followers_in_hand):
+            if game_state.decks[player]:
+                discarded_card = game_state.decks[player].pop()
+                actual_discarded += 1
+                if set_text:
+                    the_actual_textbox.append_html_text(f"水竜神の巫女の効果で、プレイヤー{player}はデッキの上から{discarded_card}を捨てたのじゃ。\n")
+        # Increase HP by actual discarded amount
+        self.stats_change_effect_this_card(0, actual_discarded, draw_ui, set_text, the_actual_textbox)
+
+
+class 黄金都市の姫リテュエル(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="黄金都市の姫・リテュエル", cost=2, attack=2, hp=2, can_enhance=True)
+        self.description_e = "宝殿の最奥には、黄金と化した姫が眠っている。資格持つ者訪れし日に、姫は再び目覚めるだろう。"
+        self.effect_description = "場に出す時、自分のリーダーに2ダメージ。進化時、相手のフォロワー1体を選ぶ、それを消滅させる。"
+        self.request_card_selection_on_enhance = "field_opponent"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
+        player = game_state.current_player
+        game_state.player_take_damage(player, 2, draw_ui, set_text)
+        if set_text:
+            the_actual_textbox.append_html_text(f"黄金都市の姫・リテュエルの効果で、プレイヤー{player}は2ダメージを受けたのじゃ。\n")
+
+    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect: Card | None):
+        self.on_enhance_effect_default()
+        target = selected_card_for_effect
+        if target is not None and target in game_state.fields[game_state.opponent]:
+            target.remove_from_field(game_state.fields[game_state.opponent], mode="banish")
+            if set_text:
+                the_actual_textbox.append_html_text(f"黄金都市の姫・リテュエルの効果で、プレイヤー{game_state.opponent}の{target}が消滅したのじゃ。\n")
+
+
+class 癒しの奏者アンリエット(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="癒しの奏者・アンリエット", cost=3, attack=2, hp=4, can_enhance=False)
+        self.description = "「砲声轟く戦地にあっても、私の音色は響き渡るわ。調べに込めるは癒しの祈り。あぁ、平穏があらんことを」"
+        self.effect_description = "場に出す時、自分の場のフォロワー1体を選ぶ。それは+2/+2し、突進を持つ。"
+        self.request_card_selection_on_play = "field"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Follower | None, effect_choice: str | None):
+        target = selected_card_for_effect
+        if target is not None and target in game_state.fields[game_state.current_player]:
+            target.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
+                                       imposter=self, attack_change=2, hp_change=2)
+            if target.attack_ability < 1:
+                target.advance_attack_ability()
+                if target.how_many_attacks_done_of_turn < selected_card_for_effect.how_many_attacks_max_of_turn:
+                    target.can_attack_this_turn = True
+            target.ability_rush = True
+            if set_text:
+                the_actual_textbox.append_html_text(f"癒しの奏者・アンリエットの効果で、プレイヤー{game_state.current_player}の{target}は+2/+2し、突進を得たのじゃ。\n")
+
+
+class フレイルナイト(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="フレイルナイト", cost=3, attack=2, hp=2, can_enhance=False)
+        self.description = "「骨まで砕く、我が一撃！お前の頭上に飛来する！熾烈な戦場、恐れはしない！この剛技にて時代を変える！」"
+        self.effect_description = "場のフォロワー1体を選ぶ。それとそれのリーダーにXダメージ。Xは自分の手札のフォロワーの数である。"
+        self.request_card_selection_on_play = "field_both"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Follower | None, effect_choice: str | None):
+        target = selected_card_for_effect
+        # find out the player who owns the target
+        for p in [1, 2]:
+            if target in game_state.fields[p]:
+                target_owner = p
+                break
+        player = game_state.current_player
+        num_followers_in_hand = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
+        if target is not None and num_followers_in_hand > 0:
+            target.take_damage(num_followers_in_hand, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+            # Deal damage to leader
+            game_state.player_take_damage(target_owner, num_followers_in_hand, draw_ui, set_text)
+
+
+
 # ==============================
 # Spells
 # ==============================
@@ -791,7 +961,6 @@ class 神秘の指輪(Spell):
                     game_state.hands[player].append(drawn_card)
                     if set_text:
                         the_actual_textbox.append_html_text(f"神秘の指輪の効果で、プレイヤー{player}は{drawn_card}を引いたのじゃ。\n")
-
 
 
 class ミヒライテ(Spell):
@@ -983,6 +1152,37 @@ class 簒奪の蛇剣(Spell):
             game_state.player_take_damage(opponent, x, draw_ui, set_text)
 
 
+class 円卓会議(Spell):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="円卓会議", cost=3)
+        self.effect_description = "下記の効果を1つ選び発動する。Xは自分の手札のフォロワーの数である。【1】" \
+        "自分の場のフォロワーをすべて+0/+Xする。【2】自分の場のフォロワーをすべて+X/+0する。"
+        self.request_effect_choose_option = ["+0/+X", "+X/+0"]
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: Card | None, effect_choice: str | None):
+        player = game_state.current_player
+        x = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
+        if x == 0:
+            if set_text:
+                the_actual_textbox.append_html_text("円卓会議の効果は発動しなかったのじゃ。\n")
+            return
+        if effect_choice == "+0/+X":
+            for c in game_state.fields[player]:
+                if isinstance(c, Follower):
+                    c.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
+                                          imposter=self, attack_change=0, hp_change=x)
+        elif effect_choice == "+X/+0":
+            for c in game_state.fields[player]:
+                if isinstance(c, Follower):
+                    c.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
+                                          imposter=self, attack_change=x, hp_change=0)
+        else:
+            raise ValueError("Invalid effect choice for 円卓会議.")
+
+
 # ===============================
 # Amulets
 # ===============================
@@ -1057,7 +1257,8 @@ all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ,
                 機構翼の少女ローザ, 飢餓の使徒, 飢餓の輝き, 飢餓の絶傑ギルネリーゼ,
                 不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪, 唯我の一刀, 侮蔑の絶傑ガルミーユ,
                 神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣, オウルキャット, 円卓の騎士ガウェイン, 天界への階段,
-                スターフェニックス, 白翼の守護神アイテール, 祈りの燭台, 神秘の指輪]
+                スターフェニックス, 白翼の守護神アイテール, 祈りの燭台, 神秘の指輪, キラキラヒーラー, ミスティアストロジスト,
+                水竜神の巫女, 黄金都市の姫リテュエル, 癒しの奏者アンリエット, フレイルナイト, 円卓会議]
 
 # sort with follower spell amulet order, then by cost ascending, then by name alphabetical
 _type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}

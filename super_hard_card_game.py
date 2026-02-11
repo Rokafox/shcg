@@ -212,7 +212,7 @@ class SHCGGameState:
             # drain ability
             if attacker.ability_drain and target_hp_changed > 0:
                 self.player_heal(player, target_hp_changed, ui_draw, ui_set_text)
-            attacker.take_damage(target.attack, self, ui_draw, ui_set_text, text_box, attacker=attacker, is_battle_damage=True)
+            attacker.take_damage(target.attack, self, ui_draw, ui_set_text, text_box, attacker=target, is_battle_damage=True)
             # Remove dead followers handled in take_damage method
             attacker.after_attack_effect()
             if ui_draw:
@@ -405,6 +405,7 @@ class SHCGGameState:
         global_vars_shcg.use_foxtail(player, 1, ui_draw=True, ui_set_text=True)
         if ui_draw:
             global_vars_shcg.draw_field_ui(player)
+            global_vars_shcg.draw_field_ui(3 - player)
 
 
     # ====================================

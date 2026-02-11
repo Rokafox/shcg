@@ -66,7 +66,7 @@ class Card:
         """
         Can be used to handle card having immunity to eg destroy
         """
-        assert mode in ["generic", "destroy", "banish"], "Invalid mode for remove_from_field."
+        assert mode in ["generic", "destroy", "banish", "to_hand"], "Invalid mode for remove_from_field."
         fields.remove(self)
 
 
@@ -90,6 +90,7 @@ class Follower(Card):
         self.ability_super_rush: bool = False
         self.ability_protect: bool = False  # Opponent's followers cannot target leader while this follower is on field
         self.ability_drain: bool = False  # Heals leader when it attacks and deals damage.
+        self.ability_lethal: bool = False  # Can destroy any follower it damages, regardless of hp.
     
     def tooltip_str(self):
         s = f"{self.name}\n"
@@ -102,6 +103,8 @@ class Follower(Card):
             s += "【守護】\n"
         if self.ability_drain:
             s += "【ドレイン】\n"
+        if self.ability_lethal:
+            s += "【必殺】\n"
         if self.effect_description:
             s += f"{self.effect_description}\n"
         if self.is_enhanced and self.description_e:
@@ -178,7 +181,7 @@ class Follower(Card):
                 player = p
                 break
         assert player in [1, 2], "Follower not found on any player's field."
-        if self.hp <= 0:
+        if self.hp <= 0 or (isinstance(attacker, Follower) and attacker.ability_lethal and is_battle_damage):
             self.remove_from_field(game_state.fields[player], mode="destroy")
             self.effect_on_destroyed(game_state, draw_ui, set_text, the_actual_textbox, player, destroyed_by=attacker, is_battle_destroyed=is_battle_damage)
             if set_text:
@@ -907,6 +910,29 @@ class フレイルナイト(Follower):
             game_state.player_take_damage(target_owner, num_followers_in_hand, draw_ui, set_text)
 
 
+class お爺さんとお婆さん(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="お爺さんとお婆さん", cost=3, attack=1, hp=1, can_enhance=False)
+        self.description = "おじいさんは山へ鬼狩りに、おばあさんは川へ鬼の皮を洗いに。「これが異国の悪魔退治？絵本で見るよりずっと刺激的ね！」"
+        self.effect_description = "自分のエンドフェイズが来た時、これを手札に戻す。"
+        self.ability_lethal = True
+        self.ability_rush = True
+
+    def end_of_turn_on_field_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
+        for p in [1, 2]:
+            if self in game_state.fields[p]:
+                self_owner = p
+                break
+
+        if self in game_state.fields[self_owner]:
+            self.remove_from_field(game_state.fields[self_owner], mode="to_hand")
+            if len(game_state.hands[self_owner]) < 9:
+                game_state.hands[self_owner].append(self)
+                if set_text:
+                    the_actual_textbox.append_html_text(f"お爺さんとお婆さんはこれを手札に戻したのじゃ。\n")
+
 
 # ==============================
 # Spells
@@ -1258,7 +1284,7 @@ all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ,
                 不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪, 唯我の一刀, 侮蔑の絶傑ガルミーユ,
                 神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣, オウルキャット, 円卓の騎士ガウェイン, 天界への階段,
                 スターフェニックス, 白翼の守護神アイテール, 祈りの燭台, 神秘の指輪, キラキラヒーラー, ミスティアストロジスト,
-                水竜神の巫女, 黄金都市の姫リテュエル, 癒しの奏者アンリエット, フレイルナイト, 円卓会議]
+                水竜神の巫女, 黄金都市の姫リテュエル, 癒しの奏者アンリエット, フレイルナイト, 円卓会議, お爺さんとお婆さん]
 
 # sort with follower spell amulet order, then by cost ascending, then by name alphabetical
 _type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}

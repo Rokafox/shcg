@@ -205,7 +205,8 @@ def _copy_card(card: cards.Card) -> cards.Card:
             'description_e', 'attack', 'hp', 'max_hp', 'can_enhance', 'is_enhanced',
             'summoned_this_turn', 'enhanced_this_turn', 'request_card_selection_on_enhance',
             'attack_ability', 'how_many_attacks_max_of_turn', 'how_many_attacks_done_of_turn',
-            'can_attack_this_turn', 'ability_rush', 'ability_super_rush', 'ability_protect', 'ability_drain'
+            'can_attack_this_turn', 'ability_rush', 'ability_super_rush', 'ability_protect', 'ability_drain',
+            'ability_lethal'
         ]
         for attr in follower_attrs:
             if hasattr(card, attr):
@@ -574,6 +575,9 @@ class Evaluator:
                 # drain 者の攻撃力の100%を追加ボーナスとして加算
                 if f.ability_drain:
                     own_field_power += f.attack
+                # lethal 4 points
+                if f.ability_lethal:
+                    own_field_power += 4
             elif isinstance(f, cards.Amulet):
                 own_field_power += f.amulet_value_for_evaluate
         opp_field_power = 0
@@ -584,6 +588,8 @@ class Evaluator:
                     opp_field_power += f.hp
                 if f.ability_drain:
                     opp_field_power += f.attack
+                if f.ability_lethal:
+                    opp_field_power += 4
             elif isinstance(f, cards.Amulet):
                 opp_field_power += f.amulet_value_for_evaluate
         score += (own_field_power - opp_field_power) * Evaluator.FIELD_POWER_WEIGHT
@@ -712,7 +718,7 @@ class MinimaxAI:
                         f"{f.attack_ability}:{f.can_enhance}:{f.is_enhanced}:"
                         f"{f.how_many_attacks_max_of_turn}:{f.how_many_attacks_done_of_turn}:"
                         f"{f.ability_rush}:{f.ability_super_rush}:"
-                        f"{f.ability_protect}:{f.ability_drain}"
+                        f"{f.ability_protect}:{f.ability_drain}:{f.ability_lethal}"
                     )
             field_str_follower = ",".join(field_str_follower)
             # amulet cards

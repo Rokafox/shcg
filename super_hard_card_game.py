@@ -1,4 +1,5 @@
 import os
+import json
 import more_itertools as mit
 import itertools
 import pygame, pygame_gui
@@ -984,6 +985,7 @@ build_component_tooltips()
 
 def build_settings_window():
     global theme_selection_menu, settings_window, ai_player1_toggle, ai_player2_toggle
+    global settings_p1_deck_dropdown, settings_p2_deck_dropdown
     try:
         settings_window.kill()
     except Exception as e:
@@ -996,7 +998,7 @@ def build_settings_window():
     # Get current AI manager based on toggle
     current_ai_manager = global_vars_minimax_ai_manager
 
-    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 200), (400, 500)),
+    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 150), (400, 600)),
                                         ui_manager,
                                         window_display_title=local_translate("Settings"),
                                         object_id="#settings_window",
@@ -1071,6 +1073,54 @@ def build_settings_window():
                                         container=settings_window,
                                         object_id="#ai_depth_dropdown_opp")
 
+    # Deck Selection for New Games
+    deck_settings_label = pygame_gui.elements.UILabel(pygame.Rect((10, 290), (340, 35)),
+                                        local_translate("Deck Settings:"),
+                                        ui_manager,
+                                        container=settings_window)
+
+    deck_options = _get_deck_options_list()
+
+    p1_deck_label = pygame_gui.elements.UILabel(pygame.Rect((10, 330), (120, 35)),
+                                        local_translate("Player 1 Deck:"),
+                                        ui_manager,
+                                        container=settings_window)
+
+    # Ensure selected deck is valid, fallback to Random
+    p1_selected = deck_builder_selected_decks.get(1, "Random")
+    if p1_selected not in deck_options:
+        p1_selected = "Random"
+        deck_builder_selected_decks[1] = "Random"
+
+    settings_p1_deck_dropdown = pygame_gui.elements.UIDropDownMenu(
+                                        options_list=deck_options,
+                                        starting_option=p1_selected,
+                                        relative_rect=pygame.Rect((140, 330), (200, 35)),
+                                        manager=ui_manager,
+                                        container=settings_window,
+                                        object_id="#settings_p1_deck")
+
+    p2_deck_label = pygame_gui.elements.UILabel(pygame.Rect((10, 375), (120, 35)),
+                                        local_translate("Player 2 Deck:"),
+                                        ui_manager,
+                                        container=settings_window)
+
+    p2_selected = deck_builder_selected_decks.get(2, "Random")
+    if p2_selected not in deck_options:
+        p2_selected = "Random"
+        deck_builder_selected_decks[2] = "Random"
+
+    settings_p2_deck_dropdown = pygame_gui.elements.UIDropDownMenu(
+                                        options_list=deck_options,
+                                        starting_option=p2_selected,
+                                        relative_rect=pygame.Rect((140, 375), (200, 35)),
+                                        manager=ui_manager,
+                                        container=settings_window,
+                                        object_id="#settings_p2_deck")
+
+    settings_p1_deck_dropdown.set_tooltip("Select which deck Player 1 uses when starting a new game.", delay=0.1, wrap_width=300)
+    settings_p2_deck_dropdown.set_tooltip("Select which deck Player 2 uses when starting a new game.", delay=0.1, wrap_width=300)
+
 
 settings_window = None
 theme_selection_menu = None
@@ -1117,31 +1167,32 @@ global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
 global_vars_use_minimax_ai: bool = True  # Default to new minimax AI
 global_vars_minimax_ai_manager = ai_player_new.MinimaxAIManager(6, 3)
 
+def _build_random_deck() -> list[cards.Card]:
+    """Build a random deck (15 types x 3 copies = 45 cards)."""
+    deck: list[cards.Card] = []
+    selected_card_types = random.sample(cards.all_card_types, 15)
+    for card_type in selected_card_types:
+        for _ in range(3):
+            deck.append(card_type())
+    random.shuffle(deck)
+    return deck
+
+
+def _resolve_deck_for_player(player: int) -> list[cards.Card]:
+    """Resolve which deck to use for a player based on settings selection."""
+    deck_name = deck_builder_selected_decks.get(player, "Random")
+    if deck_name != "Random" and deck_name in deck_builder_saved_decks:
+        return _build_deck_from_recipe(deck_builder_saved_decks[deck_name])
+    return _build_random_deck()
+
+
 def start_new_game():
     # fetch decks, deck and deck for cpu are selected by player
     # shuffle decks
     # draw UI components
-    # Use custom decks from deck builder if set, otherwise random
-    if deck_builder_custom_decks[1]:
-        example_deck_1 = _build_deck_from_recipe(deck_builder_custom_decks[1])
-    else:
-        example_deck_1: list[cards.Card] = []
-        all_card_types_1 = cards.all_card_types
-        selected_card_types = random.sample(all_card_types_1, 15)
-        for card_type in selected_card_types:
-            for _ in range(3):
-                example_deck_1.append(card_type())
-                random.shuffle(example_deck_1)
-    if deck_builder_custom_decks[2]:
-        example_deck_2 = _build_deck_from_recipe(deck_builder_custom_decks[2])
-    else:
-        example_deck_2: list[cards.Card] = []
-        all_card_types_2 = cards.all_card_types
-        selected_card_types = random.sample(all_card_types_2, 15)
-        for card_type in selected_card_types:
-            for _ in range(3):
-                example_deck_2.append(card_type())
-                random.shuffle(example_deck_2)
+    # Use deck selected in settings (saved deck or random)
+    example_deck_1 = _resolve_deck_for_player(1)
+    example_deck_2 = _resolve_deck_for_player(2)
 
     text_box.set_text(text_box_introduction_text)
     global global_vars_shcg
@@ -1307,7 +1358,10 @@ debug_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1500, 10)
 # Deck builder state
 deck_builder_window = None
 deck_builder_deck: dict[str, int] = {}  # card_name -> copy count (1-3)
-deck_builder_custom_decks: dict[int, dict[str, int] | None] = {1: None, 2: None}  # player -> recipe or None
+deck_builder_saved_decks: dict[str, dict[str, int]] = {}  # deck_name -> recipe
+deck_builder_selected_decks: dict[int, str] = {1: "Random", 2: "Random"}  # player -> deck name or "Random"
+
+DECKS_SAVE_FILE = "saved_decks.json"
 
 # UI element references
 deck_builder_collection_list = None
@@ -1320,15 +1374,59 @@ deck_builder_randomize_button = None
 deck_builder_deck_count_label = None
 deck_builder_card_preview = None
 deck_builder_card_info_label = None
-deck_builder_apply_p1_button = None
-deck_builder_apply_p2_button = None
-deck_builder_start_button = None
+deck_builder_save_button = None
+deck_builder_load_button = None
+deck_builder_delete_button = None
+deck_builder_rename_button = None
+deck_builder_saved_list = None
+deck_builder_name_entry = None
 deck_builder_status_label = None
+
+# Settings window deck selection UI references
+settings_p1_deck_dropdown = None
+settings_p2_deck_dropdown = None
 
 # Mapping from display string to card type class
 deck_builder_collection_map: dict[str, type] = {}
 
 DECK_MAX_COPIES = 3
+
+
+def save_decks_to_file():
+    """Save all saved decks and selected deck settings to JSON file."""
+    data = {
+        "saved_decks": deck_builder_saved_decks,
+        "selected_decks": deck_builder_selected_decks,
+    }
+    with open(DECKS_SAVE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def load_decks_from_file():
+    """Load saved decks and selected deck settings from JSON file."""
+    global deck_builder_saved_decks, deck_builder_selected_decks
+    if not os.path.exists(DECKS_SAVE_FILE):
+        return
+    try:
+        with open(DECKS_SAVE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if "saved_decks" in data and isinstance(data["saved_decks"], dict):
+            deck_builder_saved_decks = data["saved_decks"]
+        if "selected_decks" in data and isinstance(data["selected_decks"], dict):
+            for key in ["1", "2"]:
+                if key in data["selected_decks"]:
+                    deck_builder_selected_decks[int(key)] = data["selected_decks"][key]
+    except (json.JSONDecodeError, KeyError, ValueError):
+        pass
+
+
+def _get_deck_options_list() -> list[str]:
+    """Get list of deck names for dropdowns, with 'Random' as first option."""
+    return ["Random"] + sorted(deck_builder_saved_decks.keys())
+
+
+# Load saved decks on startup
+load_decks_from_file()
 
 
 def _deck_builder_card_display_str(card_type) -> str:
@@ -1363,8 +1461,10 @@ def build_deck_builder_window():
     global deck_builder_randomize_button
     global deck_builder_deck_count_label, deck_builder_card_preview
     global deck_builder_card_info_label
-    global deck_builder_apply_p1_button, deck_builder_apply_p2_button
-    global deck_builder_start_button, deck_builder_status_label
+    global deck_builder_save_button, deck_builder_load_button
+    global deck_builder_delete_button, deck_builder_rename_button
+    global deck_builder_saved_list, deck_builder_name_entry
+    global deck_builder_status_label
     global deck_builder_collection_map
 
     try:
@@ -1373,7 +1473,7 @@ def build_deck_builder_window():
         pass
 
     deck_builder_window = pygame_gui.elements.UIWindow(
-        pygame.Rect((200, 75), (1100, 700)),
+        pygame.Rect((150, 50), (1200, 750)),
         ui_manager,
         window_display_title="Deck Builder",
         object_id="#deck_builder_window",
@@ -1468,40 +1568,79 @@ def build_deck_builder_window():
     )
 
     deck_builder_deck_list = pygame_gui.elements.UISelectionList(
-        pygame.Rect((540, 35), (380, 470)),
+        pygame.Rect((540, 35), (380, 370)),
         [],
         ui_manager,
         container=deck_builder_window,
         allow_multi_select=False
     )
 
-    # === Bottom: Apply & Start Buttons ===
-    deck_builder_apply_p1_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((10, 520), (240, 40)),
-        text="Set P1 Deck",
-        manager=ui_manager,
-        container=deck_builder_window,
-        object_id="#deck_builder_apply_p1"
+    # === Bottom: Deck Name Entry + Save/Load/Delete/Rename + Saved Decks List ===
+    pygame_gui.elements.UILabel(
+        pygame.Rect((10, 515), (80, 30)),
+        "Deck Name:",
+        ui_manager,
+        container=deck_builder_window
     )
 
-    deck_builder_apply_p2_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((260, 520), (240, 40)),
-        text="Set P2 Deck",
+    deck_builder_name_entry = pygame_gui.elements.UITextEntryLine(
+        pygame.Rect((95, 515), (290, 30)),
+        ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_name_entry"
+    )
+    deck_builder_name_entry.set_text("My Deck")
+
+    deck_builder_save_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((10, 555), (180, 35)),
+        text="Save Deck",
         manager=ui_manager,
         container=deck_builder_window,
-        object_id="#deck_builder_apply_p2"
+        object_id="#deck_builder_save"
     )
 
-    deck_builder_start_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((540, 520), (380, 40)),
-        text="New Game with Deck",
+    deck_builder_load_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((200, 555), (180, 35)),
+        text="Load Deck",
         manager=ui_manager,
         container=deck_builder_window,
-        object_id="#deck_builder_start"
+        object_id="#deck_builder_load"
+    )
+
+    deck_builder_delete_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((10, 600), (180, 35)),
+        text="Delete Deck",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_delete"
+    )
+
+    deck_builder_rename_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((200, 600), (180, 35)),
+        text="Rename Deck",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_rename"
+    )
+
+    # Saved decks list
+    pygame_gui.elements.UILabel(
+        pygame.Rect((540, 410), (200, 25)),
+        "Saved Decks:",
+        ui_manager,
+        container=deck_builder_window
+    )
+
+    deck_builder_saved_list = pygame_gui.elements.UISelectionList(
+        pygame.Rect((540, 440), (380, 195)),
+        _get_saved_decks_display_list(),
+        ui_manager,
+        container=deck_builder_window,
+        allow_multi_select=False
     )
 
     deck_builder_status_label = pygame_gui.elements.UILabel(
-        pygame.Rect((10, 570), (910, 30)),
+        pygame.Rect((10, 645), (520, 30)),
         _deck_builder_status_text(),
         ui_manager,
         container=deck_builder_window
@@ -1513,25 +1652,59 @@ def build_deck_builder_window():
     deck_builder_remove_button.set_tooltip("Remove 1 copy of the selected card from the deck.", delay=0.1, wrap_width=300)
     deck_builder_clear_button.set_tooltip("Remove all cards from the deck.", delay=0.1, wrap_width=300)
     deck_builder_randomize_button.set_tooltip("Fill the deck with 15 random card types (x3 each).", delay=0.1, wrap_width=300)
-    deck_builder_apply_p1_button.set_tooltip("Save this deck for Player 1. Next new game will use it.", delay=0.1, wrap_width=300)
-    deck_builder_apply_p2_button.set_tooltip("Save this deck for Player 2. Next new game will use it.", delay=0.1, wrap_width=300)
-    deck_builder_start_button.set_tooltip("Apply deck to both players and start a new game.", delay=0.1, wrap_width=300)
+    deck_builder_save_button.set_tooltip("Save the current deck with the name in the text field.", delay=0.1, wrap_width=300)
+    deck_builder_load_button.set_tooltip("Load the selected saved deck into the editor.", delay=0.1, wrap_width=300)
+    deck_builder_delete_button.set_tooltip("Delete the selected saved deck.", delay=0.1, wrap_width=300)
+    deck_builder_rename_button.set_tooltip("Rename the selected saved deck to the name in the text field.", delay=0.1, wrap_width=300)
 
     # Refresh deck display
     _update_deck_builder_deck_display()
 
 
 def _deck_builder_status_text() -> str:
-    """Generate status text showing P1/P2 deck status."""
+    """Generate status text showing P1/P2 deck selection status."""
     parts = []
     for p in [1, 2]:
-        recipe = deck_builder_custom_decks[p]
-        if recipe:
+        deck_name = deck_builder_selected_decks.get(p, "Random")
+        if deck_name != "Random" and deck_name in deck_builder_saved_decks:
+            recipe = deck_builder_saved_decks[deck_name]
             total = sum(recipe.values())
-            parts.append(f"P{p}: Custom ({total} cards, {len(recipe)} types)")
+            parts.append(f"P{p}: {deck_name} ({total} cards)")
         else:
             parts.append(f"P{p}: Random")
     return " | ".join(parts)
+
+
+def _get_saved_decks_display_list() -> list[str]:
+    """Build display strings for the saved decks list."""
+    items = []
+    for name in sorted(deck_builder_saved_decks.keys()):
+        recipe = deck_builder_saved_decks[name]
+        total = sum(recipe.values())
+        items.append(f"{name} ({total} cards, {len(recipe)} types)")
+    return items if items else ["(No saved decks)"]
+
+
+def _get_saved_list_selected_name() -> str | None:
+    """Get the deck name from the selected saved decks list item."""
+    if not deck_builder_saved_list:
+        return None
+    selected = deck_builder_saved_list.get_single_selection()
+    if not selected or selected == "(No saved decks)":
+        return None
+    # Format is "DeckName (N cards, M types)" - extract name before " ("
+    idx = selected.rfind(" (")
+    if idx > 0:
+        return selected[:idx]
+    return selected
+
+
+def _refresh_saved_decks_list():
+    """Refresh the saved decks list widget."""
+    if deck_builder_saved_list:
+        deck_builder_saved_list.set_item_list(_get_saved_decks_display_list())
+    if deck_builder_status_label:
+        deck_builder_status_label.set_text(_deck_builder_status_text())
 
 
 def _get_selected_collection_card_type():
@@ -1654,28 +1827,63 @@ def _update_deck_builder_card_info():
         deck_builder_card_info_label.set_text("")
 
 
-def deck_builder_apply_to_player(player: int):
-    """Save the current deck recipe for a player."""
-    global deck_builder_custom_decks
-    if deck_builder_deck:
-        deck_builder_custom_decks[player] = dict(deck_builder_deck)
-    else:
-        deck_builder_custom_decks[player] = None
-    if deck_builder_status_label:
-        deck_builder_status_label.set_text(_deck_builder_status_text())
+def deck_builder_save_deck():
+    """Save the current deck editor contents under the name in the text entry."""
+    if not deck_builder_name_entry or not deck_builder_deck:
+        return
+    name = deck_builder_name_entry.get_text().strip()
+    if not name:
+        return
+    deck_builder_saved_decks[name] = dict(deck_builder_deck)
+    save_decks_to_file()
+    _refresh_saved_decks_list()
 
 
-def deck_builder_start_new_game():
-    """Apply current deck to both players and start a new game."""
-    global deck_builder_custom_decks
-    if deck_builder_deck:
-        deck_builder_custom_decks[1] = dict(deck_builder_deck)
-        deck_builder_custom_decks[2] = dict(deck_builder_deck)
-    if deck_builder_status_label:
-        deck_builder_status_label.set_text(_deck_builder_status_text())
-    start_new_game()
-    if deck_builder_window:
-        deck_builder_window.kill()
+def deck_builder_load_deck():
+    """Load the selected saved deck into the editor."""
+    name = _get_saved_list_selected_name()
+    if not name or name not in deck_builder_saved_decks:
+        return
+    deck_builder_deck.clear()
+    deck_builder_deck.update(deck_builder_saved_decks[name])
+    if deck_builder_name_entry:
+        deck_builder_name_entry.set_text(name)
+    _update_deck_builder_deck_display()
+    _update_deck_builder_card_info()
+
+
+def deck_builder_delete_deck():
+    """Delete the selected saved deck."""
+    name = _get_saved_list_selected_name()
+    if not name or name not in deck_builder_saved_decks:
+        return
+    del deck_builder_saved_decks[name]
+    # If any player had this deck selected, reset to Random
+    for p in [1, 2]:
+        if deck_builder_selected_decks.get(p) == name:
+            deck_builder_selected_decks[p] = "Random"
+    save_decks_to_file()
+    _refresh_saved_decks_list()
+
+
+def deck_builder_rename_deck():
+    """Rename the selected saved deck to the name in the text entry."""
+    old_name = _get_saved_list_selected_name()
+    if not old_name or old_name not in deck_builder_saved_decks:
+        return
+    if not deck_builder_name_entry:
+        return
+    new_name = deck_builder_name_entry.get_text().strip()
+    if not new_name or new_name == old_name:
+        return
+    # Move recipe to new name
+    deck_builder_saved_decks[new_name] = deck_builder_saved_decks.pop(old_name)
+    # Update any player selections that referenced the old name
+    for p in [1, 2]:
+        if deck_builder_selected_decks.get(p) == old_name:
+            deck_builder_selected_decks[p] = new_name
+    save_decks_to_file()
+    _refresh_saved_decks_list()
 
 
 # =====================================
@@ -1712,6 +1920,7 @@ if __name__ == "__main__":
         time_delta = clock.tick(60)/1000.0
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                save_decks_to_file()
                 running = False
                             
             if event.type == pygame.KEYDOWN:
@@ -1834,6 +2043,7 @@ if __name__ == "__main__":
                 if event.ui_element == new_game_button:
                     start_new_game()
                 if event.ui_element == quit_game_button:
+                    save_decks_to_file()
                     running = False
                 if event.ui_element == end_turn_button:
                     global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
@@ -1850,12 +2060,14 @@ if __name__ == "__main__":
                     deck_builder_clear()
                 if deck_builder_randomize_button and event.ui_element == deck_builder_randomize_button:
                     deck_builder_randomize()
-                if deck_builder_apply_p1_button and event.ui_element == deck_builder_apply_p1_button:
-                    deck_builder_apply_to_player(1)
-                if deck_builder_apply_p2_button and event.ui_element == deck_builder_apply_p2_button:
-                    deck_builder_apply_to_player(2)
-                if deck_builder_start_button and event.ui_element == deck_builder_start_button:
-                    deck_builder_start_new_game()
+                if deck_builder_save_button and event.ui_element == deck_builder_save_button:
+                    deck_builder_save_deck()
+                if deck_builder_load_button and event.ui_element == deck_builder_load_button:
+                    deck_builder_load_deck()
+                if deck_builder_delete_button and event.ui_element == deck_builder_delete_button:
+                    deck_builder_delete_deck()
+                if deck_builder_rename_button and event.ui_element == deck_builder_rename_button:
+                    deck_builder_rename_deck()
                 # AI toggle buttons
                 current_ai_manager = global_vars_minimax_ai_manager
                 if ai_player1_toggle and event.ui_element == ai_player1_toggle:
@@ -1874,12 +2086,18 @@ if __name__ == "__main__":
             if event.type == pygame_gui.UI_SELECTION_LIST_NEW_SELECTION:
                 if deck_builder_collection_list and event.ui_element == deck_builder_collection_list:
                     _update_deck_builder_card_info()
+                if deck_builder_saved_list and event.ui_element == deck_builder_saved_list:
+                    name = _get_saved_list_selected_name()
+                    if name and deck_builder_name_entry:
+                        deck_builder_name_entry.set_text(name)
 
             if event.type == pygame_gui.UI_SELECTION_LIST_DOUBLE_CLICKED_SELECTION:
                 if deck_builder_collection_list and event.ui_element == deck_builder_collection_list:
                     deck_builder_add_card(1)
                 if deck_builder_deck_list and event.ui_element == deck_builder_deck_list:
                     deck_builder_remove_card()
+                if deck_builder_saved_list and event.ui_element == deck_builder_saved_list:
+                    deck_builder_load_deck()
 
             if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
                 if event.ui_element == theme_selection_menu:
@@ -1892,6 +2110,13 @@ if __name__ == "__main__":
                     global_vars_cuets_opp_turn_set_option = int(cuets_opp_turn_dropdown.selected_option[0])
                     global_vars_minimax_ai_manager.set_new_cuets(global_vars_cuets_player_turn_set_option,
                                                 global_vars_cuets_opp_turn_set_option)
+                # Deck selection in settings
+                if settings_p1_deck_dropdown and event.ui_element == settings_p1_deck_dropdown:
+                    deck_builder_selected_decks[1] = settings_p1_deck_dropdown.selected_option[0]
+                    save_decks_to_file()
+                if settings_p2_deck_dropdown and event.ui_element == settings_p2_deck_dropdown:
+                    deck_builder_selected_decks[2] = settings_p2_deck_dropdown.selected_option[0]
+                    save_decks_to_file()
 
             ui_manager_lower.process_events(event)
             ui_manager.process_events(event)

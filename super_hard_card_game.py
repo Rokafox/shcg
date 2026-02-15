@@ -814,6 +814,10 @@ quit_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 4
                                     text='Quit Game',
                                     manager=ui_manager,)
 
+deck_builder_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 510), (200, 50)),
+                                    text='Deck Builder',
+                                    manager=ui_manager,)
+
 text_box = pygame_gui.elements.UITextEntryBox(pygame.Rect((895, 255), (410, 345)),"", ui_manager)
 text_box_introduction_text = "======================================\n"
 text_box.set_text(text_box_introduction_text)
@@ -969,6 +973,7 @@ def build_component_tooltips():
     end_turn_button.set_tooltip("End your turn and pass to opponent.", delay=0.1, wrap_width=300)
     new_game_button.set_tooltip("Start a new game.", delay=0.1, wrap_width=300)
     effect_choice_dropdown_label.set_tooltip("Select an effect choice for card effects that require a choice.", delay=0.1, wrap_width=300)
+    deck_builder_button.set_tooltip("Open deck builder to create custom decks.", delay=0.1, wrap_width=300)
 
 
 build_component_tooltips()
@@ -1116,19 +1121,27 @@ def start_new_game():
     # fetch decks, deck and deck for cpu are selected by player
     # shuffle decks
     # draw UI components
-    example_deck_1: list[cards.Card] = []
-    example_deck_2: list[cards.Card] = []
-    all_card_types = cards.all_card_types
-    selected_card_types = random.sample(all_card_types, 15)
-    for card_type in selected_card_types:
-        for _ in range(3):
-            example_deck_1.append(card_type())
-            random.shuffle(example_deck_1)
-    selected_card_types = random.sample(all_card_types, 15)
-    for card_type in selected_card_types:
-        for _ in range(3):
-            example_deck_2.append(card_type())
-            random.shuffle(example_deck_2)
+    # Use custom decks from deck builder if set, otherwise random
+    if deck_builder_custom_decks[1]:
+        example_deck_1 = _build_deck_from_recipe(deck_builder_custom_decks[1])
+    else:
+        example_deck_1: list[cards.Card] = []
+        all_card_types_1 = cards.all_card_types
+        selected_card_types = random.sample(all_card_types_1, 15)
+        for card_type in selected_card_types:
+            for _ in range(3):
+                example_deck_1.append(card_type())
+                random.shuffle(example_deck_1)
+    if deck_builder_custom_decks[2]:
+        example_deck_2 = _build_deck_from_recipe(deck_builder_custom_decks[2])
+    else:
+        example_deck_2: list[cards.Card] = []
+        all_card_types_2 = cards.all_card_types
+        selected_card_types = random.sample(all_card_types_2, 15)
+        for card_type in selected_card_types:
+            for _ in range(3):
+                example_deck_2.append(card_type())
+                random.shuffle(example_deck_2)
 
     text_box.set_text(text_box_introduction_text)
     global global_vars_shcg
@@ -1287,11 +1300,387 @@ debug_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1500, 10)
                                     command=build_debug_window)
 
 
+# =====================================
+# Deck Builder
+# =====================================
+
+# Deck builder state
+deck_builder_window = None
+deck_builder_deck: dict[str, int] = {}  # card_name -> copy count (1-3)
+deck_builder_custom_decks: dict[int, dict[str, int] | None] = {1: None, 2: None}  # player -> recipe or None
+
+# UI element references
+deck_builder_collection_list = None
+deck_builder_deck_list = None
+deck_builder_add_button = None
+deck_builder_add3_button = None
+deck_builder_remove_button = None
+deck_builder_clear_button = None
+deck_builder_randomize_button = None
+deck_builder_deck_count_label = None
+deck_builder_card_preview = None
+deck_builder_card_info_label = None
+deck_builder_apply_p1_button = None
+deck_builder_apply_p2_button = None
+deck_builder_start_button = None
+deck_builder_status_label = None
+
+# Mapping from display string to card type class
+deck_builder_collection_map: dict[str, type] = {}
+
+DECK_MAX_COPIES = 3
 
 
+def _deck_builder_card_display_str(card_type) -> str:
+    """Create a display string for a card type in the collection list."""
+    card = card_type()
+    if card.type == 'follower':
+        return f"[{card.cost}] {card.name} ({card.attack}/{card.hp})"
+    elif card.type == 'spell':
+        return f"[{card.cost}] {card.name} (Spell)"
+    elif card.type == 'amulet':
+        return f"[{card.cost}] {card.name} (Amulet)"
+    return f"[{card.cost}] {card.name}"
 
 
+def _build_deck_from_recipe(recipe: dict[str, int]) -> list[cards.Card]:
+    """Build a list of Card instances from a deck recipe."""
+    deck = []
+    for card_type in cards.all_card_types:
+        card = card_type()
+        if card.name in recipe:
+            for _ in range(recipe[card.name]):
+                deck.append(card_type())
+    random.shuffle(deck)
+    return deck
 
+
+def build_deck_builder_window():
+    global deck_builder_window
+    global deck_builder_collection_list, deck_builder_deck_list
+    global deck_builder_add_button, deck_builder_add3_button
+    global deck_builder_remove_button, deck_builder_clear_button
+    global deck_builder_randomize_button
+    global deck_builder_deck_count_label, deck_builder_card_preview
+    global deck_builder_card_info_label
+    global deck_builder_apply_p1_button, deck_builder_apply_p2_button
+    global deck_builder_start_button, deck_builder_status_label
+    global deck_builder_collection_map
+
+    try:
+        deck_builder_window.kill()
+    except Exception:
+        pass
+
+    deck_builder_window = pygame_gui.elements.UIWindow(
+        pygame.Rect((200, 75), (1100, 700)),
+        ui_manager,
+        window_display_title="Deck Builder",
+        object_id="#deck_builder_window",
+        resizable=False
+    )
+
+    # === Left Panel: Card Collection ===
+    pygame_gui.elements.UILabel(
+        pygame.Rect((10, 5), (380, 25)),
+        "Card Collection",
+        ui_manager,
+        container=deck_builder_window
+    )
+
+    # Build card list items and mapping
+    card_list_items = []
+    deck_builder_collection_map = {}
+    for card_type in cards.all_card_types:
+        display_str = _deck_builder_card_display_str(card_type)
+        card_list_items.append(display_str)
+        deck_builder_collection_map[display_str] = card_type
+
+    deck_builder_collection_list = pygame_gui.elements.UISelectionList(
+        pygame.Rect((10, 35), (380, 470)),
+        card_list_items,
+        ui_manager,
+        container=deck_builder_window,
+        allow_multi_select=False
+    )
+
+    # === Center Panel: Preview & Controls ===
+    deck_builder_card_preview = pygame_gui.elements.UIImage(
+        pygame.Rect((405, 35), (120, 174)),
+        pygame.transform.scale(image_405_card_slot, (120, 174)),
+        ui_manager,
+        container=deck_builder_window
+    )
+
+    deck_builder_card_info_label = pygame_gui.elements.UILabel(
+        pygame.Rect((405, 215), (120, 40)),
+        "",
+        ui_manager,
+        container=deck_builder_window
+    )
+
+    deck_builder_add_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((405, 260), (120, 35)),
+        text="Add x1",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_add"
+    )
+
+    deck_builder_add3_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((405, 300), (120, 35)),
+        text="Add x3",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_add3"
+    )
+
+    deck_builder_remove_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((405, 345), (120, 35)),
+        text="Remove x1",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_remove"
+    )
+
+    deck_builder_clear_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((405, 390), (120, 35)),
+        text="Clear Deck",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_clear"
+    )
+
+    deck_builder_randomize_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((405, 435), (120, 35)),
+        text="Random",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_random"
+    )
+
+    # === Right Panel: Deck Contents ===
+    deck_builder_deck_count_label = pygame_gui.elements.UILabel(
+        pygame.Rect((540, 5), (380, 25)),
+        "Deck: 0 cards (0 types)",
+        ui_manager,
+        container=deck_builder_window
+    )
+
+    deck_builder_deck_list = pygame_gui.elements.UISelectionList(
+        pygame.Rect((540, 35), (380, 470)),
+        [],
+        ui_manager,
+        container=deck_builder_window,
+        allow_multi_select=False
+    )
+
+    # === Bottom: Apply & Start Buttons ===
+    deck_builder_apply_p1_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((10, 520), (240, 40)),
+        text="Set P1 Deck",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_apply_p1"
+    )
+
+    deck_builder_apply_p2_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((260, 520), (240, 40)),
+        text="Set P2 Deck",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_apply_p2"
+    )
+
+    deck_builder_start_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((540, 520), (380, 40)),
+        text="New Game with Deck",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_start"
+    )
+
+    deck_builder_status_label = pygame_gui.elements.UILabel(
+        pygame.Rect((10, 570), (910, 30)),
+        _deck_builder_status_text(),
+        ui_manager,
+        container=deck_builder_window
+    )
+
+    # Set tooltips
+    deck_builder_add_button.set_tooltip("Add 1 copy of the selected card to the deck.", delay=0.1, wrap_width=300)
+    deck_builder_add3_button.set_tooltip("Set the selected card to 3 copies in the deck.", delay=0.1, wrap_width=300)
+    deck_builder_remove_button.set_tooltip("Remove 1 copy of the selected card from the deck.", delay=0.1, wrap_width=300)
+    deck_builder_clear_button.set_tooltip("Remove all cards from the deck.", delay=0.1, wrap_width=300)
+    deck_builder_randomize_button.set_tooltip("Fill the deck with 15 random card types (x3 each).", delay=0.1, wrap_width=300)
+    deck_builder_apply_p1_button.set_tooltip("Save this deck for Player 1. Next new game will use it.", delay=0.1, wrap_width=300)
+    deck_builder_apply_p2_button.set_tooltip("Save this deck for Player 2. Next new game will use it.", delay=0.1, wrap_width=300)
+    deck_builder_start_button.set_tooltip("Apply deck to both players and start a new game.", delay=0.1, wrap_width=300)
+
+    # Refresh deck display
+    _update_deck_builder_deck_display()
+
+
+def _deck_builder_status_text() -> str:
+    """Generate status text showing P1/P2 deck status."""
+    parts = []
+    for p in [1, 2]:
+        recipe = deck_builder_custom_decks[p]
+        if recipe:
+            total = sum(recipe.values())
+            parts.append(f"P{p}: Custom ({total} cards, {len(recipe)} types)")
+        else:
+            parts.append(f"P{p}: Random")
+    return " | ".join(parts)
+
+
+def _get_selected_collection_card_type():
+    """Get the card type class for the currently selected collection item."""
+    if not deck_builder_collection_list:
+        return None
+    selected = deck_builder_collection_list.get_single_selection()
+    if not selected:
+        return None
+    return deck_builder_collection_map.get(selected)
+
+
+def _get_deck_list_selected_card_name() -> str | None:
+    """Get the card name from the selected deck list item."""
+    if not deck_builder_deck_list:
+        return None
+    selected = deck_builder_deck_list.get_single_selection()
+    if not selected:
+        return None
+    # Format is "CardName x3" - split from the right
+    parts = selected.rsplit(" x", 1)
+    if len(parts) == 2:
+        return parts[0]
+    return None
+
+
+def deck_builder_add_card(count: int = 1):
+    """Add copies of the selected card to the deck."""
+    card_type = _get_selected_collection_card_type()
+    if not card_type:
+        return
+    card_name = card_type().name
+    current = deck_builder_deck.get(card_name, 0)
+    if count == 1:
+        deck_builder_deck[card_name] = min(current + 1, DECK_MAX_COPIES)
+    else:
+        deck_builder_deck[card_name] = DECK_MAX_COPIES
+    _update_deck_builder_deck_display()
+    _update_deck_builder_card_info()
+
+
+def deck_builder_remove_card():
+    """Remove one copy of a card from the deck (selected from either list)."""
+    # Try deck list selection first
+    card_name = _get_deck_list_selected_card_name()
+    if not card_name:
+        # Try collection list selection
+        card_type = _get_selected_collection_card_type()
+        if card_type:
+            card_name = card_type().name
+    if not card_name or card_name not in deck_builder_deck:
+        return
+    deck_builder_deck[card_name] -= 1
+    if deck_builder_deck[card_name] <= 0:
+        del deck_builder_deck[card_name]
+    _update_deck_builder_deck_display()
+    _update_deck_builder_card_info()
+
+
+def deck_builder_clear():
+    """Clear all cards from the deck."""
+    deck_builder_deck.clear()
+    _update_deck_builder_deck_display()
+    _update_deck_builder_card_info()
+
+
+def deck_builder_randomize():
+    """Fill the deck with 15 random card types, 3 copies each."""
+    deck_builder_deck.clear()
+    selected = random.sample(cards.all_card_types, 15)
+    for card_type in selected:
+        card = card_type()
+        deck_builder_deck[card.name] = 3
+    _update_deck_builder_deck_display()
+    _update_deck_builder_card_info()
+
+
+def _update_deck_builder_deck_display():
+    """Refresh the deck list and count label."""
+    if not deck_builder_deck_list or not deck_builder_deck_count_label:
+        return
+
+    # Build sorted deck list items (by type priority, then cost, then name)
+    type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}
+    entries = []
+    for card_type in cards.all_card_types:
+        card = card_type()
+        if card.name in deck_builder_deck:
+            count = deck_builder_deck[card.name]
+            entries.append((type_priority[card.type], card.cost, card.name, count))
+
+    entries.sort()
+    items = [f"{name} x{count}" for _, _, name, count in entries]
+    total_cards = sum(count for _, _, _, count in entries)
+
+    deck_builder_deck_list.set_item_list(items)
+    deck_builder_deck_count_label.set_text(
+        f"Deck: {total_cards} cards ({len(deck_builder_deck)} types)"
+    )
+
+
+def _update_deck_builder_card_info():
+    """Update card preview image and info label based on current selection."""
+    if not deck_builder_card_preview or not deck_builder_card_info_label:
+        return
+    card_type = _get_selected_collection_card_type()
+    if card_type:
+        card = card_type()
+        preview_surface = draw_card(card)
+        scaled = pygame.transform.scale(preview_surface, (120, 174))
+        deck_builder_card_preview.set_image(scaled)
+        deck_builder_card_preview.set_tooltip(card.tooltip_str(), delay=0.1, wrap_width=300)
+        count = deck_builder_deck.get(card.name, 0)
+        deck_builder_card_info_label.set_text(f"In deck: {count}/{DECK_MAX_COPIES}")
+    else:
+        deck_builder_card_preview.set_image(
+            pygame.transform.scale(image_405_card_slot, (120, 174))
+        )
+        deck_builder_card_preview.set_tooltip("", delay=0.1, wrap_width=300)
+        deck_builder_card_info_label.set_text("")
+
+
+def deck_builder_apply_to_player(player: int):
+    """Save the current deck recipe for a player."""
+    global deck_builder_custom_decks
+    if deck_builder_deck:
+        deck_builder_custom_decks[player] = dict(deck_builder_deck)
+    else:
+        deck_builder_custom_decks[player] = None
+    if deck_builder_status_label:
+        deck_builder_status_label.set_text(_deck_builder_status_text())
+
+
+def deck_builder_start_new_game():
+    """Apply current deck to both players and start a new game."""
+    global deck_builder_custom_decks
+    if deck_builder_deck:
+        deck_builder_custom_decks[1] = dict(deck_builder_deck)
+        deck_builder_custom_decks[2] = dict(deck_builder_deck)
+    if deck_builder_status_label:
+        deck_builder_status_label.set_text(_deck_builder_status_text())
+    start_new_game()
+    if deck_builder_window:
+        deck_builder_window.kill()
+
+
+# =====================================
+# End of Deck Builder
+# =====================================
 
 
 # =====================================
@@ -1448,6 +1837,25 @@ if __name__ == "__main__":
                     running = False
                 if event.ui_element == end_turn_button:
                     global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
+                if event.ui_element == deck_builder_button:
+                    build_deck_builder_window()
+                # Deck builder buttons
+                if deck_builder_add_button and event.ui_element == deck_builder_add_button:
+                    deck_builder_add_card(1)
+                if deck_builder_add3_button and event.ui_element == deck_builder_add3_button:
+                    deck_builder_add_card(3)
+                if deck_builder_remove_button and event.ui_element == deck_builder_remove_button:
+                    deck_builder_remove_card()
+                if deck_builder_clear_button and event.ui_element == deck_builder_clear_button:
+                    deck_builder_clear()
+                if deck_builder_randomize_button and event.ui_element == deck_builder_randomize_button:
+                    deck_builder_randomize()
+                if deck_builder_apply_p1_button and event.ui_element == deck_builder_apply_p1_button:
+                    deck_builder_apply_to_player(1)
+                if deck_builder_apply_p2_button and event.ui_element == deck_builder_apply_p2_button:
+                    deck_builder_apply_to_player(2)
+                if deck_builder_start_button and event.ui_element == deck_builder_start_button:
+                    deck_builder_start_new_game()
                 # AI toggle buttons
                 current_ai_manager = global_vars_minimax_ai_manager
                 if ai_player1_toggle and event.ui_element == ai_player1_toggle:
@@ -1461,6 +1869,17 @@ if __name__ == "__main__":
 
             if event.type == pygame_gui.UI_TEXT_BOX_LINK_CLICKED:
                 pass
+
+            # Deck builder selection list events
+            if event.type == pygame_gui.UI_SELECTION_LIST_NEW_SELECTION:
+                if deck_builder_collection_list and event.ui_element == deck_builder_collection_list:
+                    _update_deck_builder_card_info()
+
+            if event.type == pygame_gui.UI_SELECTION_LIST_DOUBLE_CLICKED_SELECTION:
+                if deck_builder_collection_list and event.ui_element == deck_builder_collection_list:
+                    deck_builder_add_card(1)
+                if deck_builder_deck_list and event.ui_element == deck_builder_deck_list:
+                    deck_builder_remove_card()
 
             if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
                 if event.ui_element == theme_selection_menu:

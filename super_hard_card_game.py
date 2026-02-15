@@ -824,49 +824,73 @@ text_box_introduction_text = "======================================\n"
 text_box.set_text(text_box_introduction_text)
 
 
-def draw_card(card: cards.Card, show_attack_status_indicator: bool = False) -> pygame.Surface:
-    card_surface = pygame.Surface((100, 145))
+def draw_card(card: cards.Card, show_attack_status_indicator: bool = False, wh: tuple = (200, 290)) -> pygame.Surface:
+    width = max(1, int(wh[0]))
+    height = max(1, int(wh[1]))
+    card_surface = pygame.Surface((width, height))
+
+    base_width = 100
+    base_height = 145
+    scale_x = width / base_width
+    scale_y = height / base_height
+    scale_min = min(scale_x, scale_y)
+
+    def sx(x: int) -> int:
+        return int(round(x * scale_x))
+
+    def sy(y: int) -> int:
+        return int(round(y * scale_y))
+
+    font_size = max(12, int(round(32 * scale_min)))
+    font_bold = pygame.font.Font(None, font_size)
+    outline_1 = max(1, int(round(1 * scale_min)))
+    outline_2 = max(1, int(round(2 * scale_min)))
+    outline_offsets = [
+        (-outline_1, -outline_1), (-outline_1, outline_1),
+        (outline_1, -outline_1), (outline_1, outline_1),
+        (-outline_2, 0), (outline_2, 0),
+        (0, -outline_2), (0, outline_2),
+    ]
     
     # 強化済みカードは別画像を使用
     if hasattr(card, 'is_enhanced') and card.is_enhanced:
         card_image_key = f"{card.name}_e"
         if card_image_key in image_cards:
-            scaled_card_img = pygame.transform.scale(image_cards[card_image_key], (100, 145))
+            scaled_card_img = pygame.transform.scale(image_cards[card_image_key], (width, height))
             card_surface.blit(scaled_card_img, (0, 0))
         else:
-            scaled_card_img = pygame.transform.scale(image_others["404coyote"], (100, 145))
+            scaled_card_img = pygame.transform.scale(image_others["404coyote"], (width, height))
             card_surface.blit(scaled_card_img, (0, 0))
     elif card.name in image_cards:
         # 通常カード画像
-        scaled_card_img = pygame.transform.scale(image_cards[card.name], (100, 145))
+        scaled_card_img = pygame.transform.scale(image_cards[card.name], (width, height))
         card_surface.blit(scaled_card_img, (0, 0))
     else:
-        scaled_card_img = pygame.transform.scale(image_others["404coyote"], (100, 145))
+        scaled_card_img = pygame.transform.scale(image_others["404coyote"], (width, height))
         card_surface.blit(scaled_card_img, (0, 0))
-    
-    font_bold = pygame.font.Font(None, 32)
+
     cost_text = str(card.cost)
-    for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+    for dx, dy in outline_offsets:
         cost_outline = font_bold.render(cost_text, True, (0, 0, 0))
-        card_surface.blit(cost_outline, (8 + dx, 8 + dy))
+        card_surface.blit(cost_outline, (sx(8) + dx, sy(8) + dy))
     cost_render = font_bold.render(cost_text, True, (255, 215, 0))
-    card_surface.blit(cost_render, (8, 8))
+    card_surface.blit(cost_render, (sx(8), sy(8)))
     
     if card.type == 'follower':
         attack_text = str(card.attack)
-        for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+        for dx, dy in outline_offsets:
             attack_outline = font_bold.render(attack_text, True, (0, 0, 0))
-            card_surface.blit(attack_outline, (8 + dx, 120 + dy))
+            card_surface.blit(attack_outline, (sx(8) + dx, sy(120) + dy))
         attack_render = font_bold.render(attack_text, True, (255, 50, 50))
-        card_surface.blit(attack_render, (8, 120))
+        card_surface.blit(attack_render, (sx(8), sy(120)))
         
         hp_text = str(card.hp)
         hp_width = font_bold.size(hp_text)[0]
-        for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+        for dx, dy in outline_offsets:
             hp_outline = font_bold.render(hp_text, True, (0, 0, 0))
-            card_surface.blit(hp_outline, (92 - hp_width + dx, 120 + dy))
+            card_surface.blit(hp_outline, (sx(92) - hp_width + dx, sy(120) + dy))
         hp_render = font_bold.render(hp_text, True, (50, 255, 50))
-        card_surface.blit(hp_render, (92 - hp_width, 120))
+        card_surface.blit(hp_render, (sx(92) - hp_width, sy(120)))
     
         if show_attack_status_indicator:  # show can attack status for followers
                 if card.attack_ability == 0 or card.can_attack_this_turn == False:
@@ -881,43 +905,44 @@ def draw_card(card: cards.Card, show_attack_status_indicator: bool = False) -> p
                 else:
                     raise ValueError(f"Unknown attack ability: {card.attack_ability}")
                 # outline the card with the indicator color
-                pygame.draw.rect(card_surface, indicator_color, pygame.Rect(0, 0, 100, 145), 2)
+                indicator_line_width = max(1, int(round(2 * scale_min)))
+                pygame.draw.rect(card_surface, indicator_color, pygame.Rect(0, 0, width, height), indicator_line_width)
     elif card.type == 'spell':
         # draw "S" at bottom left, blue color
         spell_text = "S"
-        for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+        for dx, dy in outline_offsets:
             spell_outline = font_bold.render(spell_text, True, (0, 0, 0))
-            card_surface.blit(spell_outline, (8 + dx, 120 + dy))
+            card_surface.blit(spell_outline, (sx(8) + dx, sy(120) + dy))
         spell_render = font_bold.render(spell_text, True, (108, 210, 253))
-        card_surface.blit(spell_render, (8, 120))
+        card_surface.blit(spell_render, (sx(8), sy(120)))
     elif card.type == 'amulet':
         # draw "A" at bottom left, purple color
         amulet_text = "A"
-        for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+        for dx, dy in outline_offsets:
             amulet_outline = font_bold.render(amulet_text, True, (0, 0, 0))
-            card_surface.blit(amulet_outline, (8 + dx, 120 + dy))
+            card_surface.blit(amulet_outline, (sx(8) + dx, sy(120) + dy))
         amulet_render = font_bold.render(amulet_text, True, (231, 130, 242))
-        card_surface.blit(amulet_render, (8, 120))
+        card_surface.blit(amulet_render, (sx(8), sy(120)))
         # draw counter, if any on bottom right
         if hasattr(card, 'counter'):
             counter_text = str(card.counter)
             counter_width = font_bold.size(counter_text)[0]
-            for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+            for dx, dy in outline_offsets:
                 counter_outline = font_bold.render(counter_text, True, (0, 0, 0))
-                card_surface.blit(counter_outline, (92 - counter_width + dx, 120 + dy))
+                card_surface.blit(counter_outline, (sx(92) - counter_width + dx, sy(120) + dy))
             counter_render = font_bold.render(counter_text, True, (231, 130, 242))
-            card_surface.blit(counter_render, (92 - counter_width, 120))
+            card_surface.blit(counter_render, (sx(92) - counter_width, sy(120)))
     
     # 強化可能マーカーを右上に表示
     if hasattr(card, 'can_enhance') and card.can_enhance:
         # foxtail_img = pygame.transform.scale(image_others["foxtail"], (24, 24))
         # card_surface.blit(foxtail_img, (68, 0))  # Does not look good. Instead, use word "E"
         enhance_text = "E"
-        for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1), (-2,0), (2,0), (0,-2), (0,2)]:
+        for dx, dy in outline_offsets:
             enhance_outline = font_bold.render(enhance_text, True, (0, 0, 0))
-            card_surface.blit(enhance_outline, (80 + dx, 8 + dy))
+            card_surface.blit(enhance_outline, (sx(80) + dx, sy(8) + dy))
         enhance_render = font_bold.render(enhance_text, True, (255, 215, 0))
-        card_surface.blit(enhance_render, (80, 8))
+        card_surface.blit(enhance_render, (sx(80), sy(8)))
     
     return card_surface
 
@@ -1218,9 +1243,6 @@ def start_new_game():
     text_box.append_html_text(f"ターン{global_vars_shcg.turn}\n")
     global_vars_minimax_ai_manager.ai_clear_pending_actions()
 
-    
-start_new_game()
-
 
 def build_debug_window():
     """
@@ -1380,7 +1402,6 @@ deck_builder_delete_button = None
 deck_builder_rename_button = None
 deck_builder_saved_list = None
 deck_builder_name_entry = None
-deck_builder_status_label = None
 
 # Settings window deck selection UI references
 settings_p1_deck_dropdown = None
@@ -1388,6 +1409,7 @@ settings_p2_deck_dropdown = None
 
 # Mapping from display string to card type class
 deck_builder_collection_map: dict[str, type] = {}
+deck_builder_deck_item_to_name: dict[str, str] = {}
 
 DECK_MAX_COPIES = 3
 
@@ -1464,7 +1486,6 @@ def build_deck_builder_window():
     global deck_builder_save_button, deck_builder_load_button
     global deck_builder_delete_button, deck_builder_rename_button
     global deck_builder_saved_list, deck_builder_name_entry
-    global deck_builder_status_label
     global deck_builder_collection_map
 
     try:
@@ -1639,12 +1660,6 @@ def build_deck_builder_window():
         allow_multi_select=False
     )
 
-    deck_builder_status_label = pygame_gui.elements.UILabel(
-        pygame.Rect((10, 645), (520, 30)),
-        _deck_builder_status_text(),
-        ui_manager,
-        container=deck_builder_window
-    )
 
     # Set tooltips
     deck_builder_add_button.set_tooltip("Add 1 copy of the selected card to the deck.", delay=0.1, wrap_width=300)
@@ -1660,19 +1675,6 @@ def build_deck_builder_window():
     # Refresh deck display
     _update_deck_builder_deck_display()
 
-
-def _deck_builder_status_text() -> str:
-    """Generate status text showing P1/P2 deck selection status."""
-    parts = []
-    for p in [1, 2]:
-        deck_name = deck_builder_selected_decks.get(p, "Random")
-        if deck_name != "Random" and deck_name in deck_builder_saved_decks:
-            recipe = deck_builder_saved_decks[deck_name]
-            total = sum(recipe.values())
-            parts.append(f"P{p}: {deck_name} ({total} cards)")
-        else:
-            parts.append(f"P{p}: Random")
-    return " | ".join(parts)
 
 
 def _get_saved_decks_display_list() -> list[str]:
@@ -1703,8 +1705,6 @@ def _refresh_saved_decks_list():
     """Refresh the saved decks list widget."""
     if deck_builder_saved_list:
         deck_builder_saved_list.set_item_list(_get_saved_decks_display_list())
-    if deck_builder_status_label:
-        deck_builder_status_label.set_text(_deck_builder_status_text())
 
 
 def _get_selected_collection_card_type():
@@ -1724,11 +1724,7 @@ def _get_deck_list_selected_card_name() -> str | None:
     selected = deck_builder_deck_list.get_single_selection()
     if not selected:
         return None
-    # Format is "CardName x3" - split from the right
-    parts = selected.rsplit(" x", 1)
-    if len(parts) == 2:
-        return parts[0]
-    return None
+    return deck_builder_deck_item_to_name.get(selected)
 
 
 def deck_builder_add_card(count: int = 1):
@@ -1784,6 +1780,7 @@ def deck_builder_randomize():
 
 def _update_deck_builder_deck_display():
     """Refresh the deck list and count label."""
+    global deck_builder_deck_item_to_name
     if not deck_builder_deck_list or not deck_builder_deck_count_label:
         return
 
@@ -1794,11 +1791,16 @@ def _update_deck_builder_deck_display():
         card = card_type()
         if card.name in deck_builder_deck:
             count = deck_builder_deck[card.name]
-            entries.append((type_priority[card.type], card.cost, card.name, count))
+            entries.append((type_priority[card.type], card.cost, card.name, count, card_type))
 
     entries.sort()
-    items = [f"{name} x{count}" for _, _, name, count in entries]
-    total_cards = sum(count for _, _, _, count in entries)
+    items = []
+    deck_builder_deck_item_to_name = {}
+    for _, _, name, count, card_type in entries:
+        display = f"{_deck_builder_card_display_str(card_type)} x{count}"
+        items.append(display)
+        deck_builder_deck_item_to_name[display] = name
+    total_cards = sum(count for _, _, _, count, _ in entries)
 
     deck_builder_deck_list.set_item_list(items)
     deck_builder_deck_count_label.set_text(
@@ -1814,8 +1816,7 @@ def _update_deck_builder_card_info():
     if card_type:
         card = card_type()
         preview_surface = draw_card(card)
-        scaled = pygame.transform.scale(preview_surface, (120, 174))
-        deck_builder_card_preview.set_image(scaled)
+        deck_builder_card_preview.set_image(preview_surface)
         deck_builder_card_preview.set_tooltip(card.tooltip_str(), delay=0.1, wrap_width=300)
         count = deck_builder_deck.get(card.name, 0)
         deck_builder_card_info_label.set_text(f"In deck: {count}/{DECK_MAX_COPIES}")
@@ -1890,6 +1891,7 @@ def deck_builder_rename_deck():
 # End of Deck Builder
 # =====================================
 
+start_new_game()
 
 # =====================================
 # End of Windows & Support Functions
@@ -2091,13 +2093,13 @@ if __name__ == "__main__":
                     if name and deck_builder_name_entry:
                         deck_builder_name_entry.set_text(name)
 
-            if event.type == pygame_gui.UI_SELECTION_LIST_DOUBLE_CLICKED_SELECTION:
-                if deck_builder_collection_list and event.ui_element == deck_builder_collection_list:
-                    deck_builder_add_card(1)
-                if deck_builder_deck_list and event.ui_element == deck_builder_deck_list:
-                    deck_builder_remove_card()
-                if deck_builder_saved_list and event.ui_element == deck_builder_saved_list:
-                    deck_builder_load_deck()
+            # if event.type == pygame_gui.UI_SELECTION_LIST_DOUBLE_CLICKED_SELECTION:
+            #     if deck_builder_collection_list and event.ui_element == deck_builder_collection_list:
+            #         deck_builder_add_card(1)
+            #     if deck_builder_deck_list and event.ui_element == deck_builder_deck_list:
+            #         deck_builder_remove_card()
+            #     if deck_builder_saved_list and event.ui_element == deck_builder_saved_list:
+            #         deck_builder_load_deck()
 
             if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
                 if event.ui_element == theme_selection_menu:

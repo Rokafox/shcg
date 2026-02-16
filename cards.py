@@ -183,6 +183,7 @@ class Follower(Card):
         assert player in [1, 2], "Follower not found on any player's field."
         if self.hp <= 0 or (isinstance(attacker, Follower) and attacker.ability_lethal and is_battle_damage):
             self.remove_from_field(game_state.fields[player], mode="destroy")
+            game_state.graveyard[player].append(self)
             self.effect_on_destroyed(game_state, draw_ui, set_text, the_actual_textbox, player, destroyed_by=attacker, is_battle_destroyed=is_battle_damage)
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受け、破壊されたのじゃ。\n")
@@ -228,6 +229,7 @@ class Follower(Card):
         # clean up if hp goes below 0
         if self.hp <= 0:
             self.remove_from_field(game_state.fields[player], mode="banish")
+            game_state.banished[player].append(self)
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}のステータスが{imposter}によって変更され、追放されたのじゃ。\n")
         else:
@@ -291,6 +293,7 @@ class Amulet(Card):
         Destroy this amulet on the field of the specified player.
         """
         self.remove_from_field(game_state.fields[player], mode="destroy")
+        game_state.graveyard[player].append(self)
         if set_text:
             the_actual_textbox.append_html_text(f"プレイヤー{player}のアミュレット{self}が破壊されたのじゃ。\n")
         self.on_destroy_effect(game_state, draw_ui, set_text, the_actual_textbox, player)
@@ -588,11 +591,11 @@ class 真実の絶傑ライオ(Follower):
                         selected_card_for_effect: Card | None, effect_choice: str | None):
         player = game_state.current_player
         spell_cards_to_discard = [c for c in game_state.hands[player] if isinstance(c, Spell)]
-        # Discard all spell cards from hand
-        # NOTE: using remove now, if discard effect is needed, update this.
+        # Discard all spell cards from hand to graveyard
         bullet = len(spell_cards_to_discard)
         for c in spell_cards_to_discard:
             game_state.hands[player].remove(c)
+            game_state.graveyard[player].append(c)
         if bullet > 0:
             if set_text:
                 the_actual_textbox.append_html_text(f"真実の絶傑・ライオの効果で、プレイヤー{player}は手札のスペルカードを{bullet}枚捨てたのじゃ。\n")
@@ -697,6 +700,7 @@ class オウルキャット(Follower):
                 for c in game_state.fields[p].copy():
                     if isinstance(c, Follower) and (c.attack <= 1 or c.hp <= 1):
                         c.remove_from_field(game_state.fields[p], mode="banish")
+                        game_state.banished[p].append(c)
                         activated_effect = True
                         if set_text:
                             the_actual_textbox.append_html_text(f"オウルキャットの効果で、プレイヤー{p}の{c}が消滅したのじゃ。\n")
@@ -705,6 +709,7 @@ class オウルキャット(Follower):
             if game_state.hands[player] and activated_effect:
                 # banish all cards in hand
                 num_discarded = len(game_state.hands[player])
+                game_state.banished[player].extend(game_state.hands[player])
                 game_state.hands[player].clear()
                 if set_text:
                     the_actual_textbox.append_html_text(f"オウルキャットの効果で、プレイヤー{player}は手札のカード{num_discarded}枚を消滅したのじゃ。\n")
@@ -735,10 +740,7 @@ class スターフェニックス(Follower):
     """
     def __init__(self):
         super().__init__(name="スターフェニックス", cost=4, attack=2, hp=2, can_enhance=True)
-        self.effect_description = "場のこれが破壊された後、スペルカードをプレイする時、これを場に出し、すべての状態をリセットされる。"
-
-    def effect_on_destroyed(self, game_state, draw_ui, set_text, the_actual_textbox, player, destroyed_by, is_battle_destroyed = False):
-        game_state.hidden_cards[player].append(self)
+        self.effect_description = "場のこれが破壊された後、スペルカードをプレイする時、これを墓場から場に出し、すべての状態をリセットされる。"
 
 
 class 白翼の守護神アイテール(Follower):
@@ -823,11 +825,12 @@ class 水竜神の巫女(Follower):
                         selected_card_for_effect, effect_choice):
         player = game_state.current_player
         num_followers_in_hand = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
-        # Discard X cards from top of deck
+        # Discard X cards from top of deck to graveyard
         actual_discarded = 0
         for _ in range(num_followers_in_hand):
             if game_state.decks[player]:
                 discarded_card = game_state.decks[player].pop()
+                game_state.graveyard[player].append(discarded_card)
                 actual_discarded += 1
                 if set_text:
                     the_actual_textbox.append_html_text(f"水竜神の巫女の効果で、プレイヤー{player}はデッキの上から{discarded_card}を捨てたのじゃ。\n")
@@ -857,6 +860,7 @@ class 黄金都市の姫リテュエル(Follower):
         target = selected_card_for_effect
         if target is not None and target in game_state.fields[game_state.opponent]:
             target.remove_from_field(game_state.fields[game_state.opponent], mode="banish")
+            game_state.banished[game_state.opponent].append(target)
             if set_text:
                 the_actual_textbox.append_html_text(f"黄金都市の姫・リテュエルの効果で、プレイヤー{game_state.opponent}の{target}が消滅したのじゃ。\n")
 

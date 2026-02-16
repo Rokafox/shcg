@@ -71,98 +71,30 @@ class SHCGGameState:
 
     def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, additional_target: cards.Card | None,
                   is_ai_player: bool, effect_choice: str | None):
-        global scsd_player_field, scsd_opponent_field, scsd_all_field, text_box
-        require_draw_deck_ui = False
+        global text_box
         if len(self.fields[player]) > 4 and card.type != 'spell':
             return
         if self.foxtail[player] < card.cost:
             return
         self.use_foxtail(player, card.cost, ui_draw, ui_set_text)
-        # hand selection ui is not updated to removed state, so use hand_prev for enumerate
-        hand_prev = self.hands[player].copy()
         self.hands[player].remove(card)
         if ui_set_text:
             text_box.append_html_text(f"プレイヤー{player}が{card}をプレイしたぞ！\n")
         if card.request_card_selection_on_play:
-            if is_ai_player:
-                target = additional_target
-                if ui_set_text:
-                    text_box.append_html_text(f"AIプレイヤー{player}が{card}をプレイする時に{target}を選択したのじゃ。\n")
-            else:
-                target = None
-                if card.request_card_selection_on_play == "field":
-                    for i, c in enumerate(self.fields[player]):
-                        if f"{i + 1} {str(c)}" == scsd_player_field.selected_option[0]:
-                            target = c
-                            break
-                    if not isinstance(target, cards.Follower) and self.fields[player]:
-                        # randomly select one if invalid selection
-                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                        target = random.choice(self.fields[player])
-                elif card.request_card_selection_on_play == "field_opponent":
-                    for i, c in enumerate(self.fields[3 - player]):
-                        if f"{i + 1} {str(c)}" == scsd_opponent_field.selected_option[0]:
-                            target = c
-                            break
-                    if not isinstance(target, cards.Follower) and self.fields[3 - player]:
-                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                        target = random.choice(self.fields[3 - player])
-                elif card.request_card_selection_on_play == "field_both":
-                    for i, c in enumerate(self.fields[player]):
-                        if f"CP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
-                            target = c
-                            break
-                    if target is None:
-                        for i, c in enumerate(self.fields[3 - player]):
-                            if f"OP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
-                                target = c
-                                break
-                    if not isinstance(target, cards.Follower) and (self.fields[player] + self.fields[3 - player]):
-                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                        target = random.choice(self.fields[player] + self.fields[3 - player])
-                elif card.request_card_selection_on_play == "hand":
-                    for i, c in enumerate(hand_prev):
-                        if f"{i + 1} {str(c)}" == scsd_hand.selected_option[0]:
-                            target = c
-                            break
-                    if not isinstance(target, cards.Card) and self.hands[player]:
-                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                        target = random.choice(self.hands[player])
-                elif card.request_card_selection_on_play == "hand_spell":
-                    for i, c in enumerate(hand_prev):
-                        if f"{i + 1} {str(c)}" == scsd_hand.selected_option[0]:
-                            target = c
-                            break
-                    if not isinstance(target, cards.Spell) and any(c.type == 'spell' for c in self.hands[player]):
-                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                        target = random.choice([c for c in self.hands[player] if c.type == 'spell'])
-                elif card.request_card_selection_on_play == "hand_follower_aiteru":
-                    # 手札からコストX以下のフォロワー1体を選び、場に出す。それは場に出す効果を発動しない。Xは自分の手札のフォロワーの数である。
-                    for i, c in enumerate(hand_prev):
-                        if f"{i + 1} {str(c)}" == scsd_hand.selected_option[0]:
-                            target = c
-                            break
-                    valid_followers = [c for c in self.hands[player] if c.type == 'follower' and c.cost <= len([x for x in self.hands[player] if x.type == 'follower'])]
-                    if not isinstance(target, cards.Follower) or target not in valid_followers:
-                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                        target = random.choice(valid_followers)
-                else:
-                    raise Exception(f"Unknown request_card_selection_on_play: {card.request_card_selection_on_play}")
-
-                if ui_set_text:
-                    text_box.append_html_text(f"プレイヤー{player}が{card}をプレイする時に{target}を選択したのじゃ。\n")
+            target = additional_target
+            if ui_set_text and target is not None:
+                prefix = "AI" if is_ai_player else ""
+                text_box.append_html_text(f"{prefix}プレイヤー{player}が{card}をプレイする時に{target}を選択したのじゃ。\n")
         else:
             target = None
-        
+
         if card.request_effect_choose_option:
-            if is_ai_player:
+            if effect_choice is None or effect_choice not in card.request_effect_choose_option:
                 if ui_set_text:
-                    text_box.append_html_text(f"AIプレイヤー{player}が{card}の効果選択として{effect_choice}を選択したのじゃ。\n")
-            else:
-                effect_choice = effect_choice_dropdown.selected_option[0]
-                if effect_choice not in card.request_effect_choose_option:
                     text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                    effect_choice = random.choice(card.request_effect_choose_option)
+                effect_choice = random.choice(card.request_effect_choose_option)
+            elif ui_set_text and is_ai_player:
+                text_box.append_html_text(f"AIプレイヤー{player}が{card}の効果選択として{effect_choice}を選択したのじゃ。\n")
         else:
             effect_choice = None
 
@@ -350,50 +282,10 @@ class SHCGGameState:
         if ui_set_text:
             text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化するぞ！\n")
         if card_to_enhance.request_card_selection_on_enhance:
-            if is_ai_player:
-                target = additional_target
-                if ui_set_text:
-                    text_box.append_html_text(f"AIプレイヤー{player}が{card_to_enhance}を強化する時に{target}を選択したのじゃ。\n")
-            else:
-                target = None
-                if card_to_enhance.request_card_selection_on_enhance == "field":
-                    for i, c in enumerate(self.fields[player]):
-                        if f"{i + 1} {str(c)}" == scsd_player_field.selected_option[0]:
-                            target = c
-                            break
-                    if not isinstance(target, cards.Follower) and self.fields[player]:
-                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                        target = random.choice(self.fields[player])
-                elif card_to_enhance.request_card_selection_on_enhance == "field_opponent":
-                    for i, c in enumerate(self.fields[3 - player]):
-                        if f"{i + 1} {str(c)}" == scsd_opponent_field.selected_option[0]:
-                            target = c
-                            break
-                    if not isinstance(target, cards.Follower) and self.fields[3 - player]:
-                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                        target = random.choice(self.fields[3 - player])
-                elif card_to_enhance.request_card_selection_on_enhance == "field_both":
-                    for i, c in enumerate(self.fields[player]):
-                        if f"CP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
-                            target = c
-                            break
-                    if target is None:
-                        for i, c in enumerate(self.fields[3 - player]):
-                            if f"OP {i + 1} {str(c)}" == scsd_all_field.selected_option[0]:
-                                target = c
-                                break
-                    if not isinstance(target, cards.Follower) and (self.fields[player] + self.fields[3 - player]):
-                        text_box.append_html_text(f"プレイヤー{player}の選択は無効じゃった。ランダムに選ぶのじゃ。\n")
-                        target = random.choice(self.fields[player] + self.fields[3 - player])
-                elif card_to_enhance.request_card_selection_on_enhance == "hand_opponent":
-                    for i, c in enumerate(self.hands[3 - player]):
-                        if f"{i + 1} {str(c)}" == scsd_opponent_hand.selected_option[0]:
-                            target = c
-                            break
-                else:
-                    raise Exception(f"Unknown request_card_selection_on_enhance: {card_to_enhance.request_card_selection_on_enhance}")
-                if ui_set_text:
-                    text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化する時に{target}を選択したのじゃ。\n")
+            target = additional_target
+            if ui_set_text and target is not None:
+                prefix = "AI" if is_ai_player else ""
+                text_box.append_html_text(f"{prefix}プレイヤー{player}が{card_to_enhance}を強化する時に{target}を選択したのじゃ。\n")
             card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
                                               the_actual_textbox=text_box,
                                               selected_card_for_effect=target)
@@ -441,7 +333,6 @@ class SHCGGameState:
             if i == len(deck) - 1:
                 self.top_of_the_deck_ui_marker[player] = card_ui
                 card_ui.set_tooltip(deck_tooltip_str, delay=0.1, wrap_width=600)
-        update_scsd_options_deck(self.decks[self.current_player], self.decks[3 - self.current_player])
         return
 
 
@@ -457,7 +348,6 @@ class SHCGGameState:
             else:
                 slots[i].set_image(image_405_card_slot)
                 slots[i].set_tooltip("", delay=0.1, wrap_width=300)
-        update_scsd_options_hand(self.hands[self.current_player], self.hands[3 - self.current_player])
         return
 
 
@@ -473,7 +363,6 @@ class SHCGGameState:
             else:
                 slots[i].set_image(image_405_card_slot)
                 slots[i].set_tooltip("", delay=0.1, wrap_width=300)
-        update_scsd_options_field(self.fields[self.current_player], self.fields[3 - self.current_player]) # must be current player innstead of player
         return
 
 
@@ -621,185 +510,242 @@ end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 
                                     text='End Turn',
                                     manager=ui_manager,)
 
-scsd_player_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 355), (30, 35)),
-                                    "F",
-                                    ui_manager,)
-
-# single card selection dropdown
-scsd_player_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                        starting_option="",
-                                                        relative_rect=pygame.Rect((1355, 355), (225, 35)),
-                                                        manager=ui_manager,)
-
-scsd_opponent_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 395), (30, 35)),
-                                    "OF",
-                                    ui_manager,)
-
-scsd_opponent_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                        starting_option="",
-                                                        relative_rect=pygame.Rect((1355, 395), (225, 35)),
-                                                        manager=ui_manager,)
-
-scsd_all_field_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 435), (30, 35)),
-                                    "EF",
-                                    ui_manager,)
-
-scsd_all_field = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                        starting_option="",
-                                                        relative_rect=pygame.Rect((1355, 435), (225, 35)),
-                                                        manager=ui_manager,)
-
-scsd_hand_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 475), (30, 35)),
-                                    "H",
-                                    ui_manager,)
-
-scsd_hand = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                        starting_option="",
-                                                        relative_rect=pygame.Rect((1355, 475), (225, 35)),
-                                                        manager=ui_manager,)
-
-scsd_opponent_hand_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 515), (30, 35)),
-                                    "OH",
-                                    ui_manager,)
-
-scsd_opponent_hand = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                        starting_option="",
-                                                        relative_rect=pygame.Rect((1355, 515), (225, 35)),
-                                                        manager=ui_manager,)
-
-scsd_deck_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 555), (30, 35)),
-                                    "D",
-                                    ui_manager,)
-
-scsd_deck = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                        starting_option="",
-                                                        relative_rect=pygame.Rect((1355, 555), (225, 35)),
-                                                        manager=ui_manager,)
-
-scsd_opponent_deck_label = pygame_gui.elements.UILabel(pygame.Rect((1320, 595), (30, 35)),
-                                    "OD",
-                                    ui_manager,)
-
-scsd_opponent_deck = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                        starting_option="",
-                                                        relative_rect=pygame.Rect((1355, 595), (225, 35)),
-                                                        manager=ui_manager,)
-
-effect_choice_dropdown_label = pygame_gui.elements.UILabel(pygame.Rect((895, 605), (30, 35)),
-                                    "EC",
-                                    ui_manager,)
-
-effect_choice_dropdown = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                        starting_option="",
-                                                        relative_rect=pygame.Rect((930, 605), (375, 35)),
-                                                        manager=ui_manager,)
 
 
+# =====================================
+# Card/Effect Selection Window
+# =====================================
 
-def update_scsd_options_field(current_player_field: list[cards.Card], opponent_player_field: list[cards.Card]):
-    global scsd_player_field, scsd_opponent_field, scsd_all_field
-    scsd_player_field.kill()
-    if current_player_field:
-        card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(current_player_field)]
-    else:
-        card_list: list[str] = [""]
-    scsd_player_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
-                                                                      starting_option=card_list[0],
-                                                                      relative_rect=pygame.Rect((1355, 355), (225, 35)),
-                                                                      manager=ui_manager,)
-    scsd_opponent_field.kill()
-    if opponent_player_field:
-        card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(opponent_player_field)]
-    else:
-        card_list: list[str] = [""]
-    scsd_opponent_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
-                                                                      starting_option=card_list[0],
-                                                                      relative_rect=pygame.Rect((1355, 395), (225, 35)),
-                                                                      manager=ui_manager,)
-    scsd_all_field.kill()
-    if current_player_field or opponent_player_field:
-        card_list: list[str] = []
-        for i, card in enumerate(current_player_field):
-            card_list.append(f"CP {i + 1} {str(card)}")
-        for i, card in enumerate(opponent_player_field):
-            card_list.append(f"OP {i + 1} {str(card)}")
-    else:
-        card_list: list[str] = [""]
-    scsd_all_field = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
-                                                                      starting_option=card_list[0],
-                                                                      relative_rect=pygame.Rect((1355, 435), (225, 35)),
-                                                                      manager=ui_manager,)
+card_selection_window = None
+card_selection_list = None
+effect_selection_list = None
+card_selection_confirm_button = None
+card_selection_cancel_button = None
+pending_selection_action = None  # dict with pending play/enhance action info
+_card_selection_option_map: dict[str, cards.Card] = {}  # display string -> card object
 
 
-def update_scsd_options_hand(current_player_hand: list[cards.Card], opponent_player_hand: list[cards.Card]):
-    global scsd_hand, scsd_opponent_hand
-    scsd_hand.kill()
-    if current_player_hand:
-        card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(current_player_hand)]
-    else:
-        card_list: list[str] = [""]
-    scsd_hand = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
-                                                    starting_option=card_list[0],
-                                                    relative_rect=pygame.Rect((1355, 475), (225, 35)),
-                                                    manager=ui_manager,)
-    scsd_opponent_hand.kill()
-    if opponent_player_hand:
-        card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(opponent_player_hand)]
-    else:
-        card_list: list[str] = [""]
-    scsd_opponent_hand = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
-                                                            starting_option=card_list[0],
-                                                            relative_rect=pygame.Rect((1355, 515), (225, 35)),
-                                                            manager=ui_manager,)
+def _build_card_selection_options(selection_type: str, pending_info: dict) -> list[str]:
+    """Build display strings for the card selection list and populate the option map."""
+    global _card_selection_option_map
+    _card_selection_option_map = {}
+
+    cp = global_vars_shcg.current_player
+    op = 3 - cp
+    played_card = pending_info.get('card')
+    action_type = pending_info.get('type')  # 'play' or 'enhance'
+
+    options: list[str] = []
+
+    if selection_type == "field":
+        for i, c in enumerate(global_vars_shcg.fields[cp]):
+            if isinstance(c, cards.Follower):
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                _card_selection_option_map[display] = c
+
+    elif selection_type == "field_opponent":
+        for i, c in enumerate(global_vars_shcg.fields[op]):
+            if isinstance(c, cards.Follower):
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                _card_selection_option_map[display] = c
+
+    elif selection_type == "field_both":
+        for i, c in enumerate(global_vars_shcg.fields[cp]):
+            if isinstance(c, cards.Follower):
+                display = f"CP {i + 1} {str(c)}"
+                options.append(display)
+                _card_selection_option_map[display] = c
+        for i, c in enumerate(global_vars_shcg.fields[op]):
+            if isinstance(c, cards.Follower):
+                display = f"OP {i + 1} {str(c)}"
+                options.append(display)
+                _card_selection_option_map[display] = c
+
+    elif selection_type == "hand":
+        for i, c in enumerate(global_vars_shcg.hands[cp]):
+            if action_type == 'play' and c is played_card:
+                continue
+            display = f"{i + 1} {str(c)}"
+            options.append(display)
+            _card_selection_option_map[display] = c
+
+    elif selection_type == "hand_spell":
+        for i, c in enumerate(global_vars_shcg.hands[cp]):
+            if action_type == 'play' and c is played_card:
+                continue
+            if isinstance(c, cards.Spell):
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                _card_selection_option_map[display] = c
+
+    elif selection_type == "hand_follower_aiteru":
+        hand_after = [c for c in global_vars_shcg.hands[cp] if c is not played_card]
+        num_followers = len([c for c in hand_after if c.type == 'follower'])
+        for i, c in enumerate(hand_after):
+            if c.type == 'follower' and c.cost <= num_followers:
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                _card_selection_option_map[display] = c
+
+    elif selection_type == "hand_opponent":
+        for i, c in enumerate(global_vars_shcg.hands[op]):
+            display = f"{i + 1} {str(c)}"
+            options.append(display)
+            _card_selection_option_map[display] = c
+
+    return options
 
 
-def update_scsd_options_deck(current_player_deck: list[cards.Card], opponent_player_deck: list[cards.Card]):
-    global scsd_deck, scsd_opponent_deck
-    scsd_deck.kill()
-    if current_player_deck:
-        card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(current_player_deck)]
-        card_list.reverse()  # reverse to show top of deck at the top
-    else:
-        card_list: list[str] = [""]
-    scsd_deck = pygame_gui.elements.UIDropDownMenu(options_list=card_list,
-                                                    starting_option=card_list[0],
-                                                    relative_rect=pygame.Rect((1355, 555), (225, 35)),
-                                                    manager=ui_manager,)
-    scsd_opponent_deck.kill()
-    if opponent_player_deck:
-        card_list: list[str] = [f"{i + 1} {str(card)}" for i, card in enumerate(opponent_player_deck)]
-        card_list.reverse()  # reverse to show top of deck at the top
-    else:
-        card_list: list[str] = [""]
-    scsd_opponent_deck = pygame_gui.elements.UIDropDownMenu(options_list=card_list, 
-                                                            starting_option=card_list[0],
-                                                            relative_rect=pygame.Rect((1355, 595), (225, 35)),
-                                                            manager=ui_manager,)
+def build_card_selection_window(pending_info: dict):
+    """Open a window for the player to select a target card and/or effect choice."""
+    global card_selection_window, card_selection_list, effect_selection_list
+    global card_selection_confirm_button, card_selection_cancel_button
+    global pending_selection_action
+
+    pending_selection_action = pending_info
+
+    if card_selection_window:
+        card_selection_window.kill()
+
+    card_sel_type = pending_info.get('needs_card_selection', '')
+    effect_options = pending_info.get('needs_effect_choice', [])
+
+    # Compute card options
+    card_options = []
+    if card_sel_type:
+        card_options = _build_card_selection_options(card_sel_type, pending_info)
+
+    # Compute window height dynamically
+    y_offset = 10
+    win_height = 80  # base for buttons + padding
+    if card_options:
+        win_height += 30 + min(len(card_options) * 25, 200) + 10
+    if effect_options:
+        win_height += 30 + min(len(effect_options) * 25, 100) + 10
+    win_height = max(win_height, 180)
+
+    card_name = str(pending_info['card'])
+    action_label = "プレイ" if pending_info['type'] == 'play' else "強化"
+    win_title = f"{card_name} - {action_label} 選択"
+
+    card_selection_window = pygame_gui.elements.UIWindow(
+        pygame.Rect((500, 200), (420, win_height)),
+        ui_manager,
+        window_display_title=win_title,
+        object_id="#card_selection_window",
+        resizable=False
+    )
+
+    card_selection_list = None
+    effect_selection_list = None
+
+    if card_options:
+        pygame_gui.elements.UILabel(
+            pygame.Rect((10, y_offset), (380, 25)),
+            "ターゲットを選択：",
+            ui_manager,
+            container=card_selection_window
+        )
+        y_offset += 30
+        list_height = min(len(card_options) * 25, 200)
+        card_selection_list = pygame_gui.elements.UISelectionList(
+            pygame.Rect((10, y_offset), (380, list_height)),
+            card_options,
+            ui_manager,
+            container=card_selection_window,
+            allow_multi_select=False
+        )
+        y_offset += list_height + 10
+
+    if effect_options:
+        pygame_gui.elements.UILabel(
+            pygame.Rect((10, y_offset), (380, 25)),
+            "効果を選択：",
+            ui_manager,
+            container=card_selection_window
+        )
+        y_offset += 30
+        list_height = min(len(effect_options) * 25, 100)
+        effect_selection_list = pygame_gui.elements.UISelectionList(
+            pygame.Rect((10, y_offset), (380, list_height)),
+            effect_options,
+            ui_manager,
+            container=card_selection_window,
+            allow_multi_select=False
+        )
+        y_offset += list_height + 10
+
+    card_selection_cancel_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((10, y_offset), (180, 35)),
+        text="キャンセル",
+        manager=ui_manager,
+        container=card_selection_window,
+        object_id="#card_selection_cancel"
+    )
+    card_selection_confirm_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((210, y_offset), (180, 35)),
+        text="確定",
+        manager=ui_manager,
+        container=card_selection_window,
+        object_id="#card_selection_confirm"
+    )
 
 
-def update_effect_choice_dropdown(options: list[str]):
-    global effect_choice_dropdown
-    # print(effect_choice_dropdown.options_list)
-    # print(options)
-    # [('デッキの下に置く', 'デッキの下に置く'), ('コーピーして手札に加える', 'コーピーして手札に加える')]
-    # ['デッキの下に置く', 'コーピーして手札に加える']
-    # if the options are the same as current, do nothing
-    current = [value for _, value in effect_choice_dropdown.options_list]
-    if options == current:
-        print("Effect choice dropdown options are the same, not updating.")
+def _execute_pending_selection():
+    """Read selections from the window and execute the pending play/enhance action."""
+    global pending_selection_action, card_selection_window
+
+    if not pending_selection_action:
         return
 
-    effect_choice_dropdown.kill()
-    if options:
-        effect_choice_dropdown = pygame_gui.elements.UIDropDownMenu(options_list=options,
-                                                        starting_option=options[0],
-                                                        relative_rect=pygame.Rect((930, 605), (375, 35)),
-                                                        manager=ui_manager,)
-    else:
-        effect_choice_dropdown = pygame_gui.elements.UIDropDownMenu(options_list=[""],
-                                                        starting_option="",
-                                                        relative_rect=pygame.Rect((930, 605), (375, 35)),
-                                                        manager=ui_manager,)
+    info = pending_selection_action
+    action_type = info['type']
+    player = info['player']
+    card = info['card']
+
+    selected_target = None
+    selected_effect = None
+
+    # Read card selection
+    if card_selection_list:
+        selected_str = card_selection_list.get_single_selection()
+        if selected_str and selected_str in _card_selection_option_map:
+            selected_target = _card_selection_option_map[selected_str]
+
+    # Read effect choice
+    if effect_selection_list:
+        selected_effect = effect_selection_list.get_single_selection()
+
+    # Execute action
+    if action_type == 'play':
+        global_vars_shcg.play_card(player, card, ui_draw=True, ui_set_text=True,
+                                   additional_target=selected_target,
+                                   is_ai_player=False, effect_choice=selected_effect)
+    elif action_type == 'enhance':
+        global_vars_shcg.on_card_enhanced(player, card_to_enhance=card,
+                                          additional_target=selected_target,
+                                          is_ai_player=False,
+                                          ui_draw=True, ui_set_text=True)
+
+    # Clean up
+    _cancel_pending_selection()
+
+
+def _cancel_pending_selection():
+    """Cancel any pending selection and close the window."""
+    global pending_selection_action, card_selection_window
+    global card_selection_list, effect_selection_list
+    global card_selection_confirm_button, card_selection_cancel_button
+    pending_selection_action = None
+    if card_selection_window:
+        card_selection_window.kill()
+    card_selection_window = None
+    card_selection_list = None
+    effect_selection_list = None
+    card_selection_confirm_button = None
+    card_selection_cancel_button = None
 
 
 
@@ -989,16 +935,8 @@ def build_component_tooltips():
     All tooltips here. Delay should always be 0.1
     """
     settings_button.set_tooltip("Open settings window.", delay=0.1, wrap_width=300)
-    scsd_player_field_label.set_tooltip("Select a card from your field for card effects.", delay=0.1, wrap_width=300)
-    scsd_opponent_field_label.set_tooltip("Select a card from opponent's field for card effects.", delay=0.1, wrap_width=300)
-    scsd_all_field_label.set_tooltip("Select a card from either field for card effects.", delay=0.1, wrap_width=300)
-    scsd_hand_label.set_tooltip("Select a card from your hand for card effects.", delay=0.1, wrap_width=300)
-    scsd_opponent_hand_label.set_tooltip("Select a card from opponent's hand forcard effects.", delay=0.1, wrap_width=300)
-    scsd_deck_label.set_tooltip("Select a card from your deck for card effects.", delay=0.1, wrap_width=300)
-    scsd_opponent_deck_label.set_tooltip("Select a card from opponent's deck for card effects.", delay=0.1, wrap_width=300)
     end_turn_button.set_tooltip("End your turn and pass to opponent.", delay=0.1, wrap_width=300)
     new_game_button.set_tooltip("Start a new game.", delay=0.1, wrap_width=300)
-    effect_choice_dropdown_label.set_tooltip("Select an effect choice for card effects that require a choice.", delay=0.1, wrap_width=300)
     deck_builder_button.set_tooltip("Open deck builder to create custom decks.", delay=0.1, wrap_width=300)
 
 
@@ -1953,7 +1891,6 @@ if __name__ == "__main__":
                         # find which card in hand this is
                         if index < len(global_vars_shcg.hands[cp]):
                             the_selected_card = global_vars_shcg.hands[cp][index]
-                            update_effect_choice_dropdown(the_selected_card.request_effect_choose_option)
                         ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
                         ui_drag_and_drop_usage = "play_card_player"
                         ui_drag_and_drop_target = card_slot
@@ -1963,7 +1900,6 @@ if __name__ == "__main__":
                         # find which card on field this is
                         if index < len(global_vars_shcg.fields[cp]):
                             the_selected_card = global_vars_shcg.fields[cp][index]
-                            update_effect_choice_dropdown(the_selected_card.request_effect_choose_option)
                         if the_selected_card and the_selected_card.type == 'follower' and the_selected_card.attack_ability > 0 and the_selected_card.can_attack_this_turn:
                             ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
                             ui_drag_and_drop_usage = "attack_with_follower_player"
@@ -1988,8 +1924,33 @@ if __name__ == "__main__":
                     elif ui_drag_and_drop_usage == "play_card_player":
                         if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in global_vars_field_slots[cp]]):
                             if the_selected_card:
-                                global_vars_shcg.play_card(cp, the_selected_card, ui_draw=True, ui_set_text=True, additional_target=None,
-                                                           is_ai_player=False, effect_choice=None)
+                                needs_card_sel = the_selected_card.request_card_selection_on_play
+                                needs_effect_sel = the_selected_card.request_effect_choose_option
+                                if needs_card_sel or needs_effect_sel:
+                                    # Check if card selection has valid targets; skip if empty
+                                    has_valid_targets = True
+                                    if needs_card_sel:
+                                        test_options = _build_card_selection_options(needs_card_sel, {
+                                            'type': 'play', 'card': the_selected_card, 'player': cp})
+                                        if not test_options:
+                                            has_valid_targets = False
+                                    if has_valid_targets:
+                                        build_card_selection_window({
+                                            'type': 'play',
+                                            'player': cp,
+                                            'card': the_selected_card,
+                                            'needs_card_selection': needs_card_sel,
+                                            'needs_effect_choice': needs_effect_sel,
+                                        })
+                                    else:
+                                        # No valid targets, play with None target
+                                        global_vars_shcg.play_card(cp, the_selected_card, ui_draw=True, ui_set_text=True,
+                                                                   additional_target=None,
+                                                                   is_ai_player=False, effect_choice=None)
+                                else:
+                                    global_vars_shcg.play_card(cp, the_selected_card, ui_draw=True, ui_set_text=True,
+                                                               additional_target=None,
+                                                               is_ai_player=False, effect_choice=None)
                                 the_selected_card = None
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
@@ -2025,11 +1986,30 @@ if __name__ == "__main__":
                                     if index < len(global_vars_shcg.fields[cp]):
                                         target_card = global_vars_shcg.fields[cp][index]
                                         if isinstance(target_card, cards.Follower) and target_card.can_enhance:
-                                            global_vars_shcg.on_card_enhanced(cp, card_to_enhance=target_card,
-                                                                              additional_target=None,
-                                                                              is_ai_player=False,
-                                                                              ui_draw=True,
-                                                                              ui_set_text=True)
+                                            needs_card_sel = target_card.request_card_selection_on_enhance
+                                            if needs_card_sel:
+                                                test_options = _build_card_selection_options(needs_card_sel, {
+                                                    'type': 'enhance', 'card': target_card, 'player': cp})
+                                                if test_options:
+                                                    build_card_selection_window({
+                                                        'type': 'enhance',
+                                                        'player': cp,
+                                                        'card': target_card,
+                                                        'needs_card_selection': needs_card_sel,
+                                                        'needs_effect_choice': [],
+                                                    })
+                                                else:
+                                                    global_vars_shcg.on_card_enhanced(cp, card_to_enhance=target_card,
+                                                                                      additional_target=None,
+                                                                                      is_ai_player=False,
+                                                                                      ui_draw=True,
+                                                                                      ui_set_text=True)
+                                            else:
+                                                global_vars_shcg.on_card_enhanced(cp, card_to_enhance=target_card,
+                                                                                  additional_target=None,
+                                                                                  is_ai_player=False,
+                                                                                  ui_draw=True,
+                                                                                  ui_set_text=True)
 
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
@@ -2046,6 +2026,11 @@ if __name__ == "__main__":
                     ui_drag_and_drop_target.set_position((ui_drag_and_drop_target.rect.x + event.rel[0], ui_drag_and_drop_target.rect.y + event.rel[1]))
 
             if event.type == pygame_gui.UI_BUTTON_PRESSED:
+                # Card selection window buttons
+                if card_selection_confirm_button and event.ui_element == card_selection_confirm_button:
+                    _execute_pending_selection()
+                if card_selection_cancel_button and event.ui_element == card_selection_cancel_button:
+                    _cancel_pending_selection()
                 if event.ui_element == settings_button:
                     build_settings_window()
                 if event.ui_element == new_game_button:
@@ -2121,6 +2106,10 @@ if __name__ == "__main__":
                 if settings_p2_deck_dropdown and event.ui_element == settings_p2_deck_dropdown:
                     deck_builder_selected_decks[2] = settings_p2_deck_dropdown.selected_option[0]
                     save_decks_to_file()
+
+            if event.type == pygame_gui.UI_WINDOW_CLOSE:
+                if card_selection_window and event.ui_element == card_selection_window:
+                    _cancel_pending_selection()
 
             ui_manager_lower.process_events(event)
             ui_manager.process_events(event)

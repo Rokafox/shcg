@@ -269,7 +269,6 @@ def simulate_games(
     num_games: int,
     deck1_recipe: dict[str, int] | None = None,
     deck2_recipe: dict[str, int] | None = None,
-    exchange_decks: bool = False,
     cuets_player_turn: int = 6,
     cuets_opp_turn: int = 3,
 ) -> dict:
@@ -280,7 +279,6 @@ def simulate_games(
         num_games: Number of games to simulate
         deck1_recipe: Deck recipe for player 1 (None = random each game)
         deck2_recipe: Deck recipe for player 2 (None = random each game)
-        exchange_decks: If True, players swap decks every other game
         cuets_player_turn: CUETS (Continuous Unique End Turn States) for player's turn
         cuets_opp_turn: CUETS for opponent's turn simulation
 
@@ -304,11 +302,7 @@ def simulate_games(
             sys.stdout.flush()
             last_progress = progress
 
-        # Swap decks every other game if exchange is enabled
-        if exchange_decks and i % 2 == 1:
-            winner = simulate_single_game(ai1, ai2, deck2_recipe, deck1_recipe)
-        else:
-            winner = simulate_single_game(ai1, ai2, deck1_recipe, deck2_recipe)
+        winner = simulate_single_game(ai1, ai2, deck1_recipe, deck2_recipe)
         wins[winner] += 1
 
     return {
@@ -378,16 +372,11 @@ def main():
     # Deck selection
     deck1_recipe = None
     deck2_recipe = None
-    exchange_decks = False
 
     if saved_decks:
         deck1_recipe = ask_deck_selection(1, saved_decks)
         deck2_recipe = ask_deck_selection(2, saved_decks)
 
-        exchange = input("\nCan players exchange decks between games? (y/N): ").strip().lower()
-        exchange_decks = exchange in ("y", "yes")
-        if exchange_decks:
-            print("Deck exchange enabled: players swap decks every other game.")
     print()
 
     # Simulation parameters
@@ -410,7 +399,6 @@ def main():
     print(f"\nSimulating {num_games} games...")
     print(f"  Player 1 deck: {deck1_label}")
     print(f"  Player 2 deck: {deck2_label}")
-    print(f"  Exchange decks: {'Yes' if exchange_decks else 'No'}")
     print(f"  CUETS: player={cuets_player}, opp={cuets_opp}")
     print("=" * 50)
 
@@ -418,7 +406,6 @@ def main():
         num_games,
         deck1_recipe=deck1_recipe,
         deck2_recipe=deck2_recipe,
-        exchange_decks=exchange_decks,
         cuets_player_turn=cuets_player,
         cuets_opp_turn=cuets_opp,
     )

@@ -3,7 +3,8 @@ AI vs AI Game Simulation Script for Super Hard Card Game.
 Simulates multiple games between two AI players and reports win rates.
 """
 import random
-import argparse
+import json
+import os
 import cards
 from ai_player_new import (
     GameStateSnapshot,
@@ -19,6 +20,34 @@ from ai_player_new import (
     _find_card_in_zones_by_void_id,
 )
 
+DECKS_SAVE_FILE = "saved_decks.json"
+
+
+def load_saved_decks() -> dict[str, dict[str, int]]:
+    """Load saved decks from JSON file. Returns empty dict if file not found."""
+    if not os.path.exists(DECKS_SAVE_FILE):
+        return {}
+    try:
+        with open(DECKS_SAVE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if "saved_decks" in data and isinstance(data["saved_decks"], dict):
+            return data["saved_decks"]
+    except (json.JSONDecodeError, KeyError, ValueError):
+        pass
+    return {}
+
+
+def build_deck_from_recipe(recipe: dict[str, int]) -> list[cards.Card]:
+    """Build a list of Card instances from a deck recipe."""
+    deck = []
+    for card_type in cards.all_card_types:
+        card = card_type()
+        if card.name in recipe:
+            for _ in range(recipe[card.name]):
+                deck.append(card_type())
+    random.shuffle(deck)
+    return deck
+
 
 def create_random_deck() -> list[cards.Card]:
     """Create a random deck using the default card types."""
@@ -32,23 +61,39 @@ def create_random_deck() -> list[cards.Card]:
     return example_deck
 
 
-def create_game_state() -> GameStateSnapshot:
-    """Create a new game state with random decks."""
+def create_deck(recipe: dict[str, int] | None) -> list[cards.Card]:
+    """Create a deck from a recipe, or a random deck if recipe is None."""
+    if recipe is not None:
+        return build_deck_from_recipe(recipe)
+    return create_random_deck()
+
+
+def create_game_state(
+    deck1_recipe: dict[str, int] | None = None,
+    deck2_recipe: dict[str, int] | None = None,
+) -> GameStateSnapshot:
+    """Create a new game state with specified or random decks."""
     state = GameStateSnapshot()
-    state.decks[1] = create_random_deck()
-    state.decks[2] = create_random_deck()
+    state.decks[1] = create_deck(deck1_recipe)
+    state.decks[2] = create_deck(deck2_recipe)
     state.current_player = 2  # Player 2 goes first (as in the original game)
     return state
 
 
-def simulate_single_game(ai1: MinimaxAI, ai2: MinimaxAI, max_turns: int = 200) -> int | None:
+def simulate_single_game(
+    ai1: MinimaxAI,
+    ai2: MinimaxAI,
+    deck1_recipe: dict[str, int] | None = None,
+    deck2_recipe: dict[str, int] | None = None,
+    max_turns: int = 200,
+) -> int | None:
     """
     Simulate a single game between two AIs.
 
     Returns:
         1 if player 1 wins, 2 if player 2 wins, None if draw
     """
-    state = create_game_state()
+    state = create_game_state(deck1_recipe, deck2_recipe)
     ais = {1: ai1, 2: ai2}
 
     while not state.concluded and state.turn <= max_turns:
@@ -220,12 +265,22 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
     return False
 
 
-def simulate_games(num_games: int, cuets_player_turn: int = 6, cuets_opp_turn: int = 3) -> dict:
+def simulate_games(
+    num_games: int,
+    deck1_recipe: dict[str, int] | None = None,
+    deck2_recipe: dict[str, int] | None = None,
+    exchange_decks: bool = False,
+    cuets_player_turn: int = 6,
+    cuets_opp_turn: int = 3,
+) -> dict:
     """
     Simulate multiple games and return statistics.
 
     Args:
         num_games: Number of games to simulate
+        deck1_recipe: Deck recipe for player 1 (None = random each game)
+        deck2_recipe: Deck recipe for player 2 (None = random each game)
+        exchange_decks: If True, players swap decks every other game
         cuets_player_turn: CUETS (Continuous Unique End Turn States) for player's turn
         cuets_opp_turn: CUETS for opponent's turn simulation
 
@@ -249,7 +304,11 @@ def simulate_games(num_games: int, cuets_player_turn: int = 6, cuets_opp_turn: i
             sys.stdout.flush()
             last_progress = progress
 
-        winner = simulate_single_game(ai1, ai2)
+        # Swap decks every other game if exchange is enabled
+        if exchange_decks and i % 2 == 1:
+            winner = simulate_single_game(ai1, ai2, deck2_recipe, deck1_recipe)
+        else:
+            winner = simulate_single_game(ai1, ai2, deck1_recipe, deck2_recipe)
         wins[winner] += 1
 
     return {
@@ -263,26 +322,106 @@ def simulate_games(num_games: int, cuets_player_turn: int = 6, cuets_opp_turn: i
     }
 
 
+def ask_int(prompt: str, default: int | None = None) -> int:
+    """Ask the user for an integer value."""
+    while True:
+        suffix = f" [{default}]" if default is not None else ""
+        raw = input(f"{prompt}{suffix}: ").strip()
+        if raw == "" and default is not None:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            print("Please enter a valid integer.")
+
+
+def ask_deck_selection(player: int, saved_decks: dict[str, dict[str, int]]) -> dict[str, int] | None:
+    """Ask the user to select a deck for a player. Returns recipe or None for random."""
+    deck_names = list(saved_decks.keys())
+    print(f"\nSelect deck for Player {player}:")
+    print("  0: Random")
+    for i, name in enumerate(deck_names, 1):
+        print(f"  {i}: {name}")
+
+    while True:
+        raw = input(f"Player {player} deck [0]: ").strip()
+        if raw == "":
+            choice = 0
+        else:
+            try:
+                choice = int(raw)
+            except ValueError:
+                print("Please enter a valid number.")
+                continue
+
+        if choice == 0:
+            print(f"Player {player}: Random deck")
+            return None
+        elif 1 <= choice <= len(deck_names):
+            name = deck_names[choice - 1]
+            print(f"Player {player}: {name}")
+            return saved_decks[name]
+        else:
+            print(f"Please enter a number between 0 and {len(deck_names)}.")
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Simulate AI vs AI games for Super Hard Card Game')
-    parser.add_argument('num_games', type=int,
-                        help='Number of games to simulate')
-    parser.add_argument('--cuets-player', type=int, default=1,
-                        help='Always use 1 for quick tests for card effects.')
-    parser.add_argument('--cuets-opp', type=int, default=1,
-                        help='Always use 1 for quick tests for card effects.')
-    parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')
+    print("=== Super Hard Card Game - AI Simulation ===\n")
 
-    args = parser.parse_args()
+    # Load saved decks
+    saved_decks = load_saved_decks()
+    if saved_decks:
+        print(f"Loaded {len(saved_decks)} saved deck(s) from {DECKS_SAVE_FILE}.")
+    else:
+        print(f"No saved decks found ({DECKS_SAVE_FILE} not found or empty). Using random decks.\n")
 
-    if args.seed is not None:
-        random.seed(args.seed)
-        print(f"Random seed set to: {args.seed}")
+    # Deck selection
+    deck1_recipe = None
+    deck2_recipe = None
+    exchange_decks = False
 
-    print(f"Simulating {args.num_games} games with CUETS player={args.cuets_player}, opp={args.cuets_opp}...")
+    if saved_decks:
+        deck1_recipe = ask_deck_selection(1, saved_decks)
+        deck2_recipe = ask_deck_selection(2, saved_decks)
+
+        exchange = input("\nCan players exchange decks between games? (y/N): ").strip().lower()
+        exchange_decks = exchange in ("y", "yes")
+        if exchange_decks:
+            print("Deck exchange enabled: players swap decks every other game.")
+    print()
+
+    # Simulation parameters
+    num_games = ask_int("Number of games to simulate", default=100)
+    cuets_player = ask_int("CUETS for player turn", default=1)
+    cuets_opp = ask_int("CUETS for opponent turn", default=1)
+    seed_input = input("Random seed (leave empty for none): ").strip()
+
+    if seed_input:
+        try:
+            seed = int(seed_input)
+            random.seed(seed)
+            print(f"\nRandom seed set to: {seed}")
+        except ValueError:
+            print("\nInvalid seed, proceeding without seed.")
+
+    # Describe setup
+    deck1_label = "Random" if deck1_recipe is None else "Custom"
+    deck2_label = "Random" if deck2_recipe is None else "Custom"
+    print(f"\nSimulating {num_games} games...")
+    print(f"  Player 1 deck: {deck1_label}")
+    print(f"  Player 2 deck: {deck2_label}")
+    print(f"  Exchange decks: {'Yes' if exchange_decks else 'No'}")
+    print(f"  CUETS: player={cuets_player}, opp={cuets_opp}")
     print("=" * 50)
 
-    results = simulate_games(args.num_games, args.cuets_player, args.cuets_opp)
+    results = simulate_games(
+        num_games,
+        deck1_recipe=deck1_recipe,
+        deck2_recipe=deck2_recipe,
+        exchange_decks=exchange_decks,
+        cuets_player_turn=cuets_player,
+        cuets_opp_turn=cuets_opp,
+    )
 
     print("=" * 50)
     print("Results:")

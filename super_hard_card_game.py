@@ -1386,11 +1386,12 @@ deck_builder_selected_decks: dict[int, str] = {1: "Random", 2: "Random"}  # play
 DECKS_SAVE_FILE = "saved_decks.json"
 
 # UI element references
-deck_builder_collection_list = None
-deck_builder_deck_list = None
+deck_builder_collection_list: pygame_gui.elements.UISelectionList | None = None # List of available cards
+deck_builder_deck_list: pygame_gui.elements.UISelectionList | None = None # List of cards in current deck with counts
 deck_builder_add_button = None
 deck_builder_add3_button = None
 deck_builder_remove_button = None
+deck_builder_remove3_button = None
 deck_builder_clear_button = None
 deck_builder_randomize_button = None
 deck_builder_deck_count_label = None
@@ -1411,7 +1412,9 @@ settings_p2_deck_dropdown = None
 deck_builder_collection_map: dict[str, type] = {}
 deck_builder_deck_item_to_name: dict[str, str] = {}
 
-DECK_MAX_COPIES = 3
+global_vars_db_deck_max_copies = 3
+global_vars_db_where_currently_selected: str = "collection"  # or "deck"
+global_vars_db_recently_selected_card: cards.Card | None = None
 
 
 def save_decks_to_file():
@@ -1479,7 +1482,7 @@ def build_deck_builder_window():
     global deck_builder_window
     global deck_builder_collection_list, deck_builder_deck_list
     global deck_builder_add_button, deck_builder_add3_button
-    global deck_builder_remove_button, deck_builder_clear_button
+    global deck_builder_remove_button, deck_builder_remove3_button, deck_builder_clear_button
     global deck_builder_randomize_button
     global deck_builder_deck_count_label, deck_builder_card_preview
     global deck_builder_card_info_label
@@ -1527,21 +1530,21 @@ def build_deck_builder_window():
 
     # === Center Panel: Preview & Controls ===
     deck_builder_card_preview = pygame_gui.elements.UIImage(
-        pygame.Rect((405, 35), (120, 174)),
-        pygame.transform.scale(image_405_card_slot, (120, 174)),
+        pygame.Rect((405, 35), (200, 290)),
+        pygame.transform.scale(image_405_card_slot, (200, 290)),
         ui_manager,
         container=deck_builder_window
     )
 
     deck_builder_card_info_label = pygame_gui.elements.UILabel(
-        pygame.Rect((405, 215), (120, 40)),
+        pygame.Rect((405, 330), (200, 40)),
         "",
         ui_manager,
         container=deck_builder_window
     )
 
     deck_builder_add_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((405, 260), (120, 35)),
+        relative_rect=pygame.Rect((405, 375), (120, 35)),
         text="Add x1",
         manager=ui_manager,
         container=deck_builder_window,
@@ -1549,7 +1552,7 @@ def build_deck_builder_window():
     )
 
     deck_builder_add3_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((405, 300), (120, 35)),
+        relative_rect=pygame.Rect((405, 415), (120, 35)),
         text="Add x3",
         manager=ui_manager,
         container=deck_builder_window,
@@ -1557,15 +1560,23 @@ def build_deck_builder_window():
     )
 
     deck_builder_remove_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((405, 345), (120, 35)),
+        relative_rect=pygame.Rect((405, 455), (120, 35)),
         text="Remove x1",
         manager=ui_manager,
         container=deck_builder_window,
         object_id="#deck_builder_remove"
     )
 
+    deck_builder_remove3_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((405, 495), (120, 35)),
+        text="Remove x3",
+        manager=ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_remove3"
+    )
+
     deck_builder_clear_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((405, 390), (120, 35)),
+        relative_rect=pygame.Rect((405, 535), (120, 35)),
         text="Clear Deck",
         manager=ui_manager,
         container=deck_builder_window,
@@ -1573,7 +1584,7 @@ def build_deck_builder_window():
     )
 
     deck_builder_randomize_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((405, 435), (120, 35)),
+        relative_rect=pygame.Rect((405, 575), (120, 35)),
         text="Random",
         manager=ui_manager,
         container=deck_builder_window,
@@ -1582,14 +1593,14 @@ def build_deck_builder_window():
 
     # === Right Panel: Deck Contents ===
     deck_builder_deck_count_label = pygame_gui.elements.UILabel(
-        pygame.Rect((540, 5), (380, 25)),
+        pygame.Rect((620, 5), (380, 25)),
         "Deck: 0 cards (0 types)",
         ui_manager,
         container=deck_builder_window
     )
 
     deck_builder_deck_list = pygame_gui.elements.UISelectionList(
-        pygame.Rect((540, 35), (380, 370)),
+        pygame.Rect((620, 35), (380, 370)),
         [],
         ui_manager,
         container=deck_builder_window,
@@ -1620,12 +1631,12 @@ def build_deck_builder_window():
         object_id="#deck_builder_save"
     )
 
-    deck_builder_load_button = pygame_gui.elements.UIButton(
+    deck_builder_rename_button = pygame_gui.elements.UIButton(
         relative_rect=pygame.Rect((200, 555), (180, 35)),
-        text="Load Deck",
+        text="Rename Deck",
         manager=ui_manager,
         container=deck_builder_window,
-        object_id="#deck_builder_load"
+        object_id="#deck_builder_rename"
     )
 
     deck_builder_delete_button = pygame_gui.elements.UIButton(
@@ -1634,14 +1645,6 @@ def build_deck_builder_window():
         manager=ui_manager,
         container=deck_builder_window,
         object_id="#deck_builder_delete"
-    )
-
-    deck_builder_rename_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((200, 600), (180, 35)),
-        text="Rename Deck",
-        manager=ui_manager,
-        container=deck_builder_window,
-        object_id="#deck_builder_rename"
     )
 
     # Saved decks list
@@ -1665,10 +1668,10 @@ def build_deck_builder_window():
     deck_builder_add_button.set_tooltip("Add 1 copy of the selected card to the deck.", delay=0.1, wrap_width=300)
     deck_builder_add3_button.set_tooltip("Set the selected card to 3 copies in the deck.", delay=0.1, wrap_width=300)
     deck_builder_remove_button.set_tooltip("Remove 1 copy of the selected card from the deck.", delay=0.1, wrap_width=300)
+    deck_builder_remove3_button.set_tooltip("Remove up to 3 copies of the selected card from the deck.", delay=0.1, wrap_width=300)
     deck_builder_clear_button.set_tooltip("Remove all cards from the deck.", delay=0.1, wrap_width=300)
     deck_builder_randomize_button.set_tooltip("Fill the deck with 15 random card types (x3 each).", delay=0.1, wrap_width=300)
     deck_builder_save_button.set_tooltip("Save the current deck with the name in the text field.", delay=0.1, wrap_width=300)
-    deck_builder_load_button.set_tooltip("Load the selected saved deck into the editor.", delay=0.1, wrap_width=300)
     deck_builder_delete_button.set_tooltip("Delete the selected saved deck.", delay=0.1, wrap_width=300)
     deck_builder_rename_button.set_tooltip("Rename the selected saved deck to the name in the text field.", delay=0.1, wrap_width=300)
 
@@ -1707,64 +1710,66 @@ def _refresh_saved_decks_list():
         deck_builder_saved_list.set_item_list(_get_saved_decks_display_list())
 
 
-def _get_selected_collection_card_type():
-    """Get the card type class for the currently selected collection item."""
+def _get_selected_card_type(where: str):
+    """
+    Get the card type class.
+    where: collection or deck
+    """
+    global global_vars_db_where_currently_selected, global_vars_db_recently_selected_card
     if not deck_builder_collection_list:
         return None
-    selected = deck_builder_collection_list.get_single_selection()
+    if where == "collection":
+        global_vars_db_where_currently_selected = "collection"
+        selected = deck_builder_collection_list.get_single_selection()
+    elif where == "deck":
+        global_vars_db_where_currently_selected = "deck"
+        selected = deck_builder_deck_list.get_single_selection()
+        # remove x1 x2 x3 from end of string for mapping
+        if selected:
+            selected = selected.rsplit(" x", 1)[0]
+    else:
+        raise ValueError(f"Invalid where parameter: {where}")
     if not selected:
         return None
-    return deck_builder_collection_map.get(selected)
-
-
-def _get_deck_list_selected_card_name() -> str | None:
-    """Get the card name from the selected deck list item."""
-    if not deck_builder_deck_list:
-        return None
-    selected = deck_builder_deck_list.get_single_selection()
-    if not selected:
-        return None
-    return deck_builder_deck_item_to_name.get(selected)
+    global_vars_db_recently_selected_card = deck_builder_collection_map.get(selected)
+    return global_vars_db_recently_selected_card
 
 
 def deck_builder_add_card(count: int = 1):
     """Add copies of the selected card to the deck."""
-    card_type = _get_selected_collection_card_type()
+    card_type = global_vars_db_recently_selected_card
     if not card_type:
         return
     card_name = card_type().name
     current = deck_builder_deck.get(card_name, 0)
     if count == 1:
-        deck_builder_deck[card_name] = min(current + 1, DECK_MAX_COPIES)
+        deck_builder_deck[card_name] = min(current + 1, global_vars_db_deck_max_copies)
     else:
-        deck_builder_deck[card_name] = DECK_MAX_COPIES
+        deck_builder_deck[card_name] = global_vars_db_deck_max_copies
     _update_deck_builder_deck_display()
-    _update_deck_builder_card_info()
 
 
-def deck_builder_remove_card():
-    """Remove one copy of a card from the deck (selected from either list)."""
-    # Try deck list selection first
-    card_name = _get_deck_list_selected_card_name()
-    if not card_name:
-        # Try collection list selection
-        card_type = _get_selected_collection_card_type()
-        if card_type:
-            card_name = card_type().name
+def deck_builder_remove_card(count: int = 1):
+    """Remove copies of a card from the deck (selected from either list)."""
+    card_name = None
+    card_type = global_vars_db_recently_selected_card
+    if card_type:
+        card_name = card_type().name
     if not card_name or card_name not in deck_builder_deck:
         return
-    deck_builder_deck[card_name] -= 1
+    if count <= 1:
+        deck_builder_deck[card_name] -= 1
+    else:
+        deck_builder_deck[card_name] -= count
     if deck_builder_deck[card_name] <= 0:
         del deck_builder_deck[card_name]
     _update_deck_builder_deck_display()
-    _update_deck_builder_card_info()
 
 
 def deck_builder_clear():
     """Clear all cards from the deck."""
     deck_builder_deck.clear()
     _update_deck_builder_deck_display()
-    _update_deck_builder_card_info()
 
 
 def deck_builder_randomize():
@@ -1775,7 +1780,6 @@ def deck_builder_randomize():
         card = card_type()
         deck_builder_deck[card.name] = 3
     _update_deck_builder_deck_display()
-    _update_deck_builder_card_info()
 
 
 def _update_deck_builder_deck_display():
@@ -1808,21 +1812,24 @@ def _update_deck_builder_deck_display():
     )
 
 
-def _update_deck_builder_card_info():
-    """Update card preview image and info label based on current selection."""
+def _update_deck_builder_card_info(where: str):
+    """
+    Update card preview image and info label based on current selection.
+    where: collection or deck, determines which selection to read from for preview
+    """
     if not deck_builder_card_preview or not deck_builder_card_info_label:
         return
-    card_type = _get_selected_collection_card_type()
+    card_type = _get_selected_card_type(where)
     if card_type:
         card = card_type()
         preview_surface = draw_card(card)
         deck_builder_card_preview.set_image(preview_surface)
         deck_builder_card_preview.set_tooltip(card.tooltip_str(), delay=0.1, wrap_width=300)
         count = deck_builder_deck.get(card.name, 0)
-        deck_builder_card_info_label.set_text(f"In deck: {count}/{DECK_MAX_COPIES}")
+        deck_builder_card_info_label.set_text(f"In deck: {count}/{global_vars_db_deck_max_copies}")
     else:
         deck_builder_card_preview.set_image(
-            pygame.transform.scale(image_405_card_slot, (120, 174))
+            image_405_card_slot
         )
         deck_builder_card_preview.set_tooltip("", delay=0.1, wrap_width=300)
         deck_builder_card_info_label.set_text("")
@@ -1850,7 +1857,6 @@ def deck_builder_load_deck():
     if deck_builder_name_entry:
         deck_builder_name_entry.set_text(name)
     _update_deck_builder_deck_display()
-    _update_deck_builder_card_info()
 
 
 def deck_builder_delete_deck():
@@ -2057,15 +2063,15 @@ if __name__ == "__main__":
                 if deck_builder_add3_button and event.ui_element == deck_builder_add3_button:
                     deck_builder_add_card(3)
                 if deck_builder_remove_button and event.ui_element == deck_builder_remove_button:
-                    deck_builder_remove_card()
+                    deck_builder_remove_card(1)
+                if deck_builder_remove3_button and event.ui_element == deck_builder_remove3_button:
+                    deck_builder_remove_card(3)
                 if deck_builder_clear_button and event.ui_element == deck_builder_clear_button:
                     deck_builder_clear()
                 if deck_builder_randomize_button and event.ui_element == deck_builder_randomize_button:
                     deck_builder_randomize()
                 if deck_builder_save_button and event.ui_element == deck_builder_save_button:
                     deck_builder_save_deck()
-                if deck_builder_load_button and event.ui_element == deck_builder_load_button:
-                    deck_builder_load_deck()
                 if deck_builder_delete_button and event.ui_element == deck_builder_delete_button:
                     deck_builder_delete_deck()
                 if deck_builder_rename_button and event.ui_element == deck_builder_rename_button:
@@ -2087,19 +2093,15 @@ if __name__ == "__main__":
             # Deck builder selection list events
             if event.type == pygame_gui.UI_SELECTION_LIST_NEW_SELECTION:
                 if deck_builder_collection_list and event.ui_element == deck_builder_collection_list:
-                    _update_deck_builder_card_info()
+                    _update_deck_builder_card_info('collection')
+                if deck_builder_deck_list and event.ui_element == deck_builder_deck_list:
+                    _update_deck_builder_card_info('deck')
                 if deck_builder_saved_list and event.ui_element == deck_builder_saved_list:
                     name = _get_saved_list_selected_name()
                     if name and deck_builder_name_entry:
                         deck_builder_name_entry.set_text(name)
-
-            # if event.type == pygame_gui.UI_SELECTION_LIST_DOUBLE_CLICKED_SELECTION:
-            #     if deck_builder_collection_list and event.ui_element == deck_builder_collection_list:
-            #         deck_builder_add_card(1)
-            #     if deck_builder_deck_list and event.ui_element == deck_builder_deck_list:
-            #         deck_builder_remove_card()
-            #     if deck_builder_saved_list and event.ui_element == deck_builder_saved_list:
-            #         deck_builder_load_deck()
+                    # load
+                    deck_builder_load_deck()
 
             if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
                 if event.ui_element == theme_selection_menu:

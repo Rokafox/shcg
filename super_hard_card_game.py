@@ -11,14 +11,6 @@ import ai_player_new
 pygame.init()
 clock = pygame.time.Clock()
 
-# If we ever need a temporary folder
-# if not os.path.exists("./.tmp"):
-#     os.mkdir("./.tmp")
-
-# # clean everything in ./.tmp, old data
-# for file in os.listdir("./.tmp"):
-#     os.remove(f"./.tmp/{file}")
-
 # ====================================
 # Game State
 # ====================================
@@ -708,29 +700,42 @@ def _execute_pending_selection():
     selected_target = None
     selected_effect = None
 
+    can_proceed = False # Unless selectable are all selected, no proceed to execute the action
+
     # Read card selection
     if card_selection_list:
         selected_str = card_selection_list.get_single_selection()
         if selected_str and selected_str in _card_selection_option_map:
             selected_target = _card_selection_option_map[selected_str]
+        if selected_target:
+            can_proceed = True
+        else:
+            can_proceed = False
 
     # Read effect choice
     if effect_selection_list:
         selected_effect = effect_selection_list.get_single_selection()
+        if selected_effect:
+            can_proceed = True
+        else:
+            can_proceed = False
 
+    if can_proceed:
     # Execute action
-    if action_type == 'play':
-        global_vars_shcg.play_card(player, card, ui_draw=True, ui_set_text=True,
-                                   additional_target=selected_target,
-                                   is_ai_player=False, effect_choice=selected_effect)
-    elif action_type == 'enhance':
-        global_vars_shcg.on_card_enhanced(player, card_to_enhance=card,
-                                          additional_target=selected_target,
-                                          is_ai_player=False,
-                                          ui_draw=True, ui_set_text=True)
+        if action_type == 'play':
+            global_vars_shcg.play_card(player, card, ui_draw=True, ui_set_text=True,
+                                    additional_target=selected_target,
+                                    is_ai_player=False, effect_choice=selected_effect)
+        elif action_type == 'enhance':
+            global_vars_shcg.on_card_enhanced(player, card_to_enhance=card,
+                                            additional_target=selected_target,
+                                            is_ai_player=False,
+                                            ui_draw=True, ui_set_text=True)
 
-    # Clean up
-    _cancel_pending_selection()
+        # Clean up
+        _cancel_pending_selection()
+    else:
+        return
 
 
 def _cancel_pending_selection():

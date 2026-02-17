@@ -132,7 +132,8 @@ def get_ai_actions(ai: MinimaxAI, state: GameStateSnapshot) -> list[tuple]:
 
     all_sequences = ai._generate_random_turn_sequences(
         state, ai.player_number,
-        ai.continuous_unique_endturnstates_req_player_turn
+        ai.continuous_unique_endturnstates_req_player_turn,
+        ai.unique_states_max_player_turn
     )
 
     for actions in all_sequences:
@@ -148,7 +149,8 @@ def get_ai_actions(ai: MinimaxAI, state: GameStateSnapshot) -> list[tuple]:
         if not score == float('inf') and not score == float('-inf') and not score == 0.0:
             opponent_sequences = ai._generate_random_turn_sequences(
                 test_state, 3 - ai.player_number,
-                ai.continuous_unique_endturnstates_req_opp_turn
+                ai.continuous_unique_endturnstates_req_opp_turn,
+                ai.unique_states_max_opp_turn
             )
             for single_opp_seq in opponent_sequences:
                 opp_test_state = test_state.copy()
@@ -271,6 +273,8 @@ def simulate_games(
     deck2_recipe: dict[str, int] | None = None,
     cuets_player_turn: int = 6,
     cuets_opp_turn: int = 3,
+    usm_player_turn: int = 400,
+    usm_opp_turn: int = 80,
 ) -> dict:
     """
     Simulate multiple games and return statistics.
@@ -287,8 +291,10 @@ def simulate_games(
     """
     import sys
 
-    ai1 = MinimaxAI(player_number=1, cuets_player_turn=cuets_player_turn, cuets_opp_turn=cuets_opp_turn)
-    ai2 = MinimaxAI(player_number=2, cuets_player_turn=cuets_player_turn, cuets_opp_turn=cuets_opp_turn)
+    ai1 = MinimaxAI(player_number=1, cuets_player_turn=cuets_player_turn, cuets_opp_turn=cuets_opp_turn,
+                    unique_states_max_player_turn=usm_player_turn, unique_states_max_opp_turn=usm_opp_turn)
+    ai2 = MinimaxAI(player_number=2, cuets_player_turn=cuets_player_turn, cuets_opp_turn=cuets_opp_turn,
+                    unique_states_max_player_turn=usm_player_turn, unique_states_max_opp_turn=usm_opp_turn)
 
     wins = {1: 0, 2: 0, None: 0}  # None = draw
 
@@ -381,17 +387,10 @@ def main():
 
     # Simulation parameters
     num_games = ask_int("Number of games to simulate", default=100)
-    cuets_player = ask_int("CUETS for player turn", default=1)
-    cuets_opp = ask_int("CUETS for opponent turn", default=1)
-    seed_input = input("Random seed (leave empty for none): ").strip()
-
-    if seed_input:
-        try:
-            seed = int(seed_input)
-            random.seed(seed)
-            print(f"\nRandom seed set to: {seed}")
-        except ValueError:
-            print("\nInvalid seed, proceeding without seed.")
+    cuets_player = ask_int("CUETS for player turn", default=6)
+    cuets_opp = ask_int("CUETS for opponent turn", default=3)
+    usm_player = ask_int("Unique States Max for player turn", default=300)
+    usm_opp = ask_int("Unique States Max for opponent turn", default=60)
 
     # Describe setup
     deck1_label = "Random" if deck1_recipe is None else "Custom"
@@ -400,6 +399,7 @@ def main():
     print(f"  Player 1 deck: {deck1_label}")
     print(f"  Player 2 deck: {deck2_label}")
     print(f"  CUETS: player={cuets_player}, opp={cuets_opp}")
+    print(f"  Unique States Max: player={usm_player}, opp={usm_opp}")
     print("=" * 50)
 
     results = simulate_games(
@@ -408,6 +408,8 @@ def main():
         deck2_recipe=deck2_recipe,
         cuets_player_turn=cuets_player,
         cuets_opp_turn=cuets_opp,
+        usm_player_turn=usm_player,
+        usm_opp_turn=usm_opp,
     )
 
     print("=" * 50)

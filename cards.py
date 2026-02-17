@@ -32,7 +32,7 @@ class Card:
         # field_c: player field any card
         # field_opponent_c: opponent field any card
         # field_both_c: both fields any card
-        self.request_effect_choose_option: list[str] = [] # e.g., ["Option 1", "Option 2"]
+        self.request_effect_choose_option: list[str] = [] # e.g., ["Option 1", "Option 2"] on playing this card
 
 
     def tooltip_str(self):

@@ -979,7 +979,7 @@ def build_settings_window():
     # Get current AI manager based on toggle
     current_ai_manager = global_vars_minimax_ai_manager
 
-    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 150), (400, 600)),
+    settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 50), (400, 800)),
                                         ui_manager,
                                         window_display_title=local_translate("Settings"),
                                         object_id="#settings_window",
@@ -1054,15 +1054,45 @@ def build_settings_window():
                                         container=settings_window,
                                         object_id="#ai_depth_dropdown_opp")
 
+    global unique_states_max_player_turn_dropdown, unique_states_max_opp_turn_dropdown
+    unique_states_max_player_turn_label = pygame_gui.elements.UILabel(pygame.Rect((10, 280), (180, 35)),
+                                        local_translate("USM Player Turn:"),
+                                        ui_manager,
+                                        container=settings_window)
+    unique_states_max_player_turn_dropdown = pygame_gui.elements.UIDropDownMenu(
+                                        options_list=["100", "200", "300", "400", "500", "600", "700", "800", "900", "1000"],
+                                        starting_option=str(global_vars_unique_states_max_player_turn),
+                                        relative_rect=pygame.Rect((200, 280), (100, 35)),
+                                        manager=ui_manager,
+                                        container=settings_window,
+                                        object_id="#cuets_unique_states_max_player_turn_dropdown")
+    unique_states_max_player_turn_label.set_tooltip("Explore up to this many unique states for the current player turn.", delay=0.1, wrap_width=300)
+
+    unique_states_max_opp_turn_label = pygame_gui.elements.UILabel(pygame.Rect((10, 325), (180, 35)),
+                                        local_translate("USM Opponent Turn:"),
+                                        ui_manager,
+                                        container=settings_window)
+    unique_states_max_opp_turn_dropdown = pygame_gui.elements.UIDropDownMenu(
+                                        options_list=["20", "40", "60", "80", "100", "120", "140", "160", "180", "200"],
+                                        starting_option=str(global_vars_unique_states_max_opp_turn),
+                                        relative_rect=pygame.Rect((200, 325), (100, 35)),
+                                        manager=ui_manager,
+                                        container=settings_window,
+                                        object_id="#cuets_unique_states_max_opp_turn_dropdown")
+    unique_states_max_opp_turn_label.set_tooltip("Explore up to this many unique states for the opponent player.", delay=0.1, wrap_width=300)
+
+
+
+
     # Deck Selection for New Games
-    deck_settings_label = pygame_gui.elements.UILabel(pygame.Rect((10, 290), (340, 35)),
+    deck_settings_label = pygame_gui.elements.UILabel(pygame.Rect((10, 370), (340, 35)),
                                         local_translate("Deck Settings:"),
                                         ui_manager,
                                         container=settings_window)
 
     deck_options = deck_builder.get_deck_options_list()
 
-    p1_deck_label = pygame_gui.elements.UILabel(pygame.Rect((10, 330), (120, 35)),
+    p1_deck_label = pygame_gui.elements.UILabel(pygame.Rect((10, 410), (120, 35)),
                                         local_translate("Player 1 Deck:"),
                                         ui_manager,
                                         container=settings_window)
@@ -1076,12 +1106,12 @@ def build_settings_window():
     settings_p1_deck_dropdown = pygame_gui.elements.UIDropDownMenu(
                                         options_list=deck_options,
                                         starting_option=p1_selected,
-                                        relative_rect=pygame.Rect((140, 330), (200, 35)),
+                                        relative_rect=pygame.Rect((140, 410), (200, 35)),
                                         manager=ui_manager,
                                         container=settings_window,
                                         object_id="#settings_p1_deck")
 
-    p2_deck_label = pygame_gui.elements.UILabel(pygame.Rect((10, 375), (120, 35)),
+    p2_deck_label = pygame_gui.elements.UILabel(pygame.Rect((10, 455), (120, 35)),
                                         local_translate("Player 2 Deck:"),
                                         ui_manager,
                                         container=settings_window)
@@ -1094,7 +1124,7 @@ def build_settings_window():
     settings_p2_deck_dropdown = pygame_gui.elements.UIDropDownMenu(
                                         options_list=deck_options,
                                         starting_option=p2_selected,
-                                        relative_rect=pygame.Rect((140, 375), (200, 35)),
+                                        relative_rect=pygame.Rect((140, 455), (200, 35)),
                                         manager=ui_manager,
                                         container=settings_window,
                                         object_id="#settings_p2_deck")
@@ -1109,8 +1139,12 @@ ai_player1_toggle = None
 ai_player2_toggle = None
 cuets_player_turn_dropdown = None
 cuets_opp_turn_dropdown = None
+unique_states_max_player_turn_dropdown = None
+unique_states_max_opp_turn_dropdown = None
 global_vars_cuets_player_turn_set_option: int = 6
 global_vars_cuets_opp_turn_set_option: int = 3
+global_vars_unique_states_max_player_turn: int = 400
+global_vars_unique_states_max_opp_turn: int = 80
 
 
 def change_theme(theme=None):
@@ -1146,7 +1180,7 @@ def change_theme(theme=None):
 
 global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
 global_vars_use_minimax_ai: bool = True  # Default to new minimax AI
-global_vars_minimax_ai_manager = ai_player_new.MinimaxAIManager(6, 3)
+global_vars_minimax_ai_manager = ai_player_new.MinimaxAIManager(6, 3, 400, 80)
 
 def _build_random_deck() -> list[cards.Card]:
     """Build a random deck (15 types x 3 copies = 45 cards)."""
@@ -1618,6 +1652,15 @@ if __name__ == "__main__":
                     global_vars_cuets_opp_turn_set_option = int(cuets_opp_turn_dropdown.selected_option[0])
                     global_vars_minimax_ai_manager.set_new_cuets(global_vars_cuets_player_turn_set_option,
                                                 global_vars_cuets_opp_turn_set_option)
+                if event.ui_element == unique_states_max_player_turn_dropdown:
+                    global_vars_unique_states_max_player_turn = int(unique_states_max_player_turn_dropdown.selected_option[0])
+                    global_vars_minimax_ai_manager.set_new_unique_states_max(global_vars_unique_states_max_player_turn,
+                                                global_vars_unique_states_max_opp_turn)
+                if event.ui_element == unique_states_max_opp_turn_dropdown:
+                    global_vars_unique_states_max_opp_turn = int(unique_states_max_opp_turn_dropdown.selected_option[0])
+                    global_vars_minimax_ai_manager.set_new_unique_states_max(global_vars_unique_states_max_player_turn,
+                                                global_vars_unique_states_max_opp_turn)
+
                 # Deck selection in settings
                 if settings_p1_deck_dropdown and event.ui_element == settings_p1_deck_dropdown:
                     deck_builder.deck_builder_selected_decks[1] = settings_p1_deck_dropdown.selected_option[0]

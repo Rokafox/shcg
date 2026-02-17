@@ -43,6 +43,9 @@ class Card:
             s += f"{self.description}\n"
         return s
 
+    def reset_stats(self):
+        self.cost = self.original_cost
+
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                         selected_card_for_effect: Card | None, effect_choice: str | None):
         """
@@ -50,7 +53,7 @@ class Card:
         """
         pass
 
-    def on_leave_field_effect(self, player: int):
+    def on_leave_field_effect(self, mode: str, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
         pass
 
     def start_of_turn_on_field_effect(self, player: int):
@@ -60,14 +63,102 @@ class Card:
         pass
 
     def effect_when_player_followers_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, destroyed_follower: Follower):
+        """
+        triggers when any follower on same side of field is destroyed.
+        """
         pass
 
-    def remove_from_field(self, fields: list[Card], mode: str = "generic"):
+    def effect_when_opponent_followers_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, destroyed_follower: Follower):
         """
-        Can be used to handle card having immunity to eg destroy
+        triggers when any follower on opponent's field is destroyed.
         """
-        assert mode in ["generic", "destroy", "banish", "to_hand"], "Invalid mode for remove_from_field."
-        fields.remove(self)
+        pass
+
+    def effect_when_either_followers_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, destroyed_follower: Follower):
+        """
+        triggers when any follower on either side of field is destroyed.
+        """
+        pass
+
+
+    def mv(self, org: list[Card], mode: str, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
+        """
+        move this card from org(like field) to another zone, based on mode.
+        available modes: generic, destroy, discard, to_g, banish, to_hand, to_deck_top, to_deck_bottom
+        """
+        org.remove(self)
+        if set_text:
+            match mode:
+                case "destroy":
+                    the_actual_textbox.append_html_text(f"{self}が破壊されたのじゃ。\n")
+                case "discard":
+                    the_actual_textbox.append_html_text(f"{self}が捨てられたのじゃ。\n")
+                case "to_g":
+                    the_actual_textbox.append_html_text(f"{self}が墓場に送られたのじゃ。\n")
+                case "banish":
+                    the_actual_textbox.append_html_text(f"{self}が消滅したのじゃ。\n")
+                case "to_hand":
+                    the_actual_textbox.append_html_text(f"{self}が手札に戻ったのじゃ。\n")
+                case "to_deck_top":
+                    the_actual_textbox.append_html_text(f"{self}がデッキの一番上に置かれたのじゃ。\n")
+                case "to_deck_bottom":
+                    the_actual_textbox.append_html_text(f"{self}がデッキの一番下に置かれたのじゃ。\n")
+                case "summon":
+                    the_actual_textbox.append_html_text(f"{self}が場に出されたのじゃ。\n")
+                case _:
+                    the_actual_textbox.append_html_text(f"{self}が移動したのじゃ。\n")
+
+        self.on_leave_field_effect(mode, game_state, draw_ui, set_text, the_actual_textbox, player)
+        match mode:
+            case "generic" | "destroy" | "discard" | "to_g":
+                game_state.graveyard[player].append(self)
+            case "banish":
+                game_state.banished[player].append(self)
+            case "to_hand":
+                if len(game_state.hands[player]) < 9:
+                    game_state.hands[player].append(self)
+                else:
+                    game_state.graveyard[player].append(self)
+            case "to_deck_top":
+                game_state.decks[player].append(self)
+            case "to_deck_bottom":
+                game_state.decks[player].insert(0, self)
+            case "summon":
+                if len(game_state.fields[player]) < 5:
+                    game_state.fields[player].append(self)
+                    if isinstance(self, Follower):
+                        self.on_summon_effect()
+                else:
+                    game_state.graveyard[player].append(self)
+            case _:
+                raise ValueError("Invalid mode for mv.")
+            
+        if mode == "destroy" and isinstance(self, Follower):
+            for c in game_state.fields[player].copy(): # the player who has his follower just destroyed
+                c.effect_when_player_followers_destroyed(game_state, draw_ui, set_text, the_actual_textbox, self)
+                c.effect_when_either_followers_destroyed(game_state, draw_ui, set_text, the_actual_textbox, self)
+            for c in game_state.fields[3 - player].copy(): # the opponent
+                c.effect_when_opponent_followers_destroyed(game_state, draw_ui, set_text, the_actual_textbox, self)
+                c.effect_when_either_followers_destroyed(game_state, draw_ui, set_text, the_actual_textbox, self)
+
+
+    @classmethod
+    def cp(cls, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox) -> Card:
+        """
+        Used to create a generated card with unique void id. A game_state, as long as it is not reset,
+        no generated cards can have the same void id.
+        """
+        try:
+            new_card = cls() # should work for all subclasses. i.e.. 飢餓の使徒()
+        except Exception as e:
+            print(f"Error creating card instance: {e}")
+        
+        game_state.amount_card_generated_from_void[game_state.current_player] += 1
+        new_card.is_generated = True
+        a = game_state.amount_card_generated_from_void[1]
+        c = game_state.amount_card_generated_from_void[2]
+        new_card.void_id = uuid.uuid8(a, 0, c)
+        return new_card
 
 
 class Follower(Card):
@@ -77,6 +168,8 @@ class Follower(Card):
         self.attack = attack
         self.hp = hp
         self.max_hp = hp
+        self.original_attack = attack
+        self.original_max_hp = hp
         self.can_enhance: bool = can_enhance # use 1 foxtail to enhance
         self.is_enhanced: bool = False
         self.summoned_this_turn: bool = True
@@ -113,6 +206,15 @@ class Follower(Card):
             s += f"{self.description}\n"
         return s
 
+    def reset_stats(self):
+        self.cost = self.original_cost
+        self.attack = self.original_attack
+        self.max_hp = self.original_max_hp
+        self.hp = self.original_max_hp
+        if self.is_enhanced:
+            self.is_enhanced = False
+            self.can_enhance = True
+
     def advance_attack_ability(self):
         """
         increase the attack ability by 1, up to 2
@@ -138,7 +240,12 @@ class Follower(Card):
             self.attack_ability = 2
             if self.how_many_attacks_done_of_turn < self.how_many_attacks_max_of_turn:
                 self.can_attack_this_turn = True
-
+        else:
+            self.attack_ability = 0
+            self.can_attack_this_turn = False
+        self.summoned_this_turn = True
+        self.enhanced_this_turn = False
+        self.how_many_attacks_done_of_turn = 0
 
     def start_of_turn_on_field_effect(self, player):
         self.enhanced_this_turn = False
@@ -181,32 +288,19 @@ class Follower(Card):
                 player = p
                 break
         assert player in [1, 2], "Follower not found on any player's field."
+        if set_text:
+            the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受けたのじゃ。\n")
         if self.hp <= 0 or (isinstance(attacker, Follower) and attacker.ability_lethal and is_battle_damage):
-            self.remove_from_field(game_state.fields[player], mode="destroy")
-            game_state.graveyard[player].append(self)
-            self.effect_on_destroyed(game_state, draw_ui, set_text, the_actual_textbox, player, destroyed_by=attacker, is_battle_destroyed=is_battle_damage)
-            if set_text:
-                the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受け、破壊されたのじゃ。\n")
-            for a in game_state.fields[player].copy(): # the player who has his follower just destroyed
-                a.effect_when_player_followers_destroyed(game_state, draw_ui, set_text, the_actual_textbox, self)
+            self.mv(game_state.fields[player], mode="destroy", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
         else:
-            if set_text:
-                the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}が{attacker}から{damage_amount}ダメージを受けたのじゃ。\n")
             self.effect_after_taking_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox)
         if draw_ui:
             game_state.draw_field_ui(player)
 
 
-    def effect_on_destroyed(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int, 
-                            destroyed_by: Card | None, is_battle_destroyed: bool = False):
-        """
-        Placeholder for any follower effect that triggers on being destroyed.
-        """
-
-
     def effect_after_taking_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
         """
-        Placeholder for any follower effect that triggers after taking damage.
+        Trigger effect after follower taking damage, unless it is destroyed by damage.
         """
         pass
 
@@ -226,12 +320,12 @@ class Follower(Card):
                 player = p
                 break
         assert player in [1, 2], "Follower not found on any player's field."
+        # make no sense for atk to be less than 0
+        if self.attack < 0:
+            self.attack = 0
         # clean up if hp goes below 0
         if self.hp <= 0:
-            self.remove_from_field(game_state.fields[player], mode="banish")
-            game_state.banished[player].append(self)
-            if set_text:
-                the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}のステータスが{imposter}によって変更され、追放されたのじゃ。\n")
+            self.mv(game_state.fields[player], mode="banish", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
         else:
             if set_text:
                 the_actual_textbox.append_html_text(f"プレイヤー{player}の{self}のステータスが{imposter}によって変更されたのじゃ：")
@@ -241,13 +335,19 @@ class Follower(Card):
                 the_actual_textbox.append_html_text(f"{attack_str}/{hp_str}なのじゃ。\n")
 
 
-    def stats_change_effect_this_card(self, attack_change: int, hp_change: int, draw_ui, set_text, the_actual_textbox):
+    def stats_change_effect_simple(self, attack_change: int, hp_change: int, draw_ui, set_text, the_actual_textbox):
+        """
+        A simplified version of stats_change_effect. No need for game state.
+        """
+        assert hp_change >= 0, "Not supported in simple version."
         self.attack += attack_change
         self.hp += hp_change
         self.max_hp += hp_change
         # clean up if hp goes below 0
         if self.hp <= 0:
             pass
+        if self.attack < 0:
+            self.attack = 0
         if set_text:
             the_actual_textbox.append_html_text(f"{self}のステータスが変更されたのじゃ：")
             # +n/-nを正しく表示するのじゃ
@@ -291,15 +391,9 @@ class Amulet(Card):
     def destroy_amulet(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
         """
         Destroy this amulet on the field of the specified player.
+        Usually called when counter reaches 0.
         """
-        self.remove_from_field(game_state.fields[player], mode="destroy")
-        game_state.graveyard[player].append(self)
-        if set_text:
-            the_actual_textbox.append_html_text(f"プレイヤー{player}のアミュレット{self}が破壊されたのじゃ。\n")
-        self.on_destroy_effect(game_state, draw_ui, set_text, the_actual_textbox, player)
-
-    def on_destroy_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
-        pass
+        self.mv(game_state.fields[player], mode="destroy", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
 
     def tooltip_str(self):
         s = f"{self.name}\n"
@@ -385,9 +479,7 @@ class ハンサ(Follower):
                         selected_card_for_effect: Card | None, effect_choice: str | None):
         if game_state.decks[game_state.current_player]:
             top_card = game_state.decks[game_state.current_player][-1]
-            self.attack += top_card.cost
-            if set_text:
-                the_actual_textbox.append_html_text(f"{self}の攻撃力が{top_card.cost}上がったのじゃ。\n")
+            self.stats_change_effect_simple(attack_change=top_card.cost, hp_change=0, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox)
 
 
 class 唯我の絶傑マゼルベイン(Follower):
@@ -401,12 +493,10 @@ class 唯我の絶傑マゼルベイン(Follower):
         self.effect_description = "自分のエンドフェイズが来た、自分のフェルトこれしかないとき、相手の場のフォロワーすべてに3ダメージ。進化後なら5ダメージ。"
 
     def end_of_turn_on_field_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
-        if len(game_state.fields[game_state.current_player]) == 1 and game_state.fields[game_state.current_player][0].name == self.name:
+        if len(game_state.fields[game_state.current_player]) == 1 and self == game_state.fields[game_state.current_player][0]: # only this card on field
             damage_amount = 5 if self.is_enhanced else 3
             for c in game_state.fields[game_state.opponent].copy():
                 if isinstance(c, Follower):
-                    if set_text:
-                        the_actual_textbox.append_html_text(f"エンドフェイズ効果:\n")
                     c.take_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
 
 
@@ -425,14 +515,7 @@ class 機構翼の少女ローザ(Follower):
     def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                           selected_card_for_effect: Card | None):
         self.on_enhance_effect_default()
-        if game_state.decks[game_state.current_player] and len(game_state.hands[game_state.current_player]) < 9:
-            drawn_card = game_state.decks[game_state.current_player].pop()
-            game_state.hands[game_state.current_player].append(drawn_card)
-            if set_text:
-                the_actual_textbox.append_html_text(f"機構翼の少女・ローザの効果で、プレイヤー{game_state.current_player}は{drawn_card}を引いたのじゃ。\n")
-            if draw_ui:
-                game_state.draw_hand_ui(game_state.current_player)
-                game_state.draw_deck_ui(game_state.current_player)
+        game_state.draw_card_by_effect(game_state.current_player, 1, draw_ui, set_text)
 
 
 class 飢餓の使徒(Follower):
@@ -488,29 +571,18 @@ class 飢餓の絶傑ギルネリーゼ(Follower):
         if target is not None and isinstance(target, Follower) and target != self:
 
             if target in game_state.fields[game_state.current_player]:
-                new_card = 飢餓の使徒()
+                new_card = 飢餓の使徒.cp(game_state, draw_ui, set_text, the_actual_textbox)
             elif target in game_state.fields[game_state.opponent]:
-                new_card = 飢餓の輝き()
+                new_card = 飢餓の輝き.cp(game_state, draw_ui, set_text, the_actual_textbox)
             else:
                 raise ValueError("Target follower not found on either player's field.")
-            
-            game_state.amount_card_generated_from_void[game_state.current_player] += 1
-            new_card.is_generated = True
-            a = game_state.amount_card_generated_from_void[1]
-            c = game_state.amount_card_generated_from_void[2]
-            new_card.void_id = uuid.uuid8(a, 0, c)
             
             target.take_damage(4, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
             if target.hp > 0:
                 target.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
                                        imposter=self, attack_change=4, hp_change=0)
             # add card to hand
-            if len(game_state.hands[game_state.current_player]) < 9:
-                game_state.hands[game_state.current_player].append(new_card)
-                if set_text:
-                    the_actual_textbox.append_html_text(f"プレイヤー{game_state.current_player}は手札に{new_card}を加えたのじゃ。\n")
-                if draw_ui:
-                    game_state.draw_hand_ui(game_state.current_player)
+            new_card.mv([new_card], mode="to_hand", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=game_state.current_player)
 
 
 class 不殺の絶傑エズディア(Follower):
@@ -594,11 +666,8 @@ class 真実の絶傑ライオ(Follower):
         # Discard all spell cards from hand to graveyard
         bullet = len(spell_cards_to_discard)
         for c in spell_cards_to_discard:
-            game_state.hands[player].remove(c)
-            game_state.graveyard[player].append(c)
+            c.mv(game_state.hands[player], "discard", game_state, draw_ui, set_text, the_actual_textbox, player=player)
         if bullet > 0:
-            if set_text:
-                the_actual_textbox.append_html_text(f"真実の絶傑・ライオの効果で、プレイヤー{player}は手札のスペルカードを{bullet}枚捨てたのじゃ。\n")
             # Deal 9 damage to opponent's followers from left to right
             if game_state.fields[game_state.opponent]:
                 for c in game_state.fields[game_state.opponent].copy():
@@ -669,13 +738,9 @@ class 簒奪の絶傑オクトリス(Follower):
         self.on_enhance_effect_default()
         target = selected_card_for_effect
         if target is not None and target in game_state.hands[game_state.opponent]:
-            game_state.hands[game_state.opponent].remove(target)
-            game_state.hands[game_state.current_player].append(target)
+            target.mv(game_state.hands[game_state.opponent], "to_hand", game_state, draw_ui, set_text, the_actual_textbox, player=game_state.current_player)
             if set_text:
                 the_actual_textbox.append_html_text(f"簒奪の絶傑・オクトリスの効果で、プレイヤー{game_state.current_player}はプレイヤー{game_state.opponent}の手札から{target}を奪ったのじゃ。\n")
-            if draw_ui:
-                game_state.draw_hand_ui(game_state.current_player)
-                game_state.draw_hand_ui(game_state.opponent)
 
 
 class オウルキャット(Follower):
@@ -699,20 +764,15 @@ class オウルキャット(Follower):
             for p in [1, 2]:
                 for c in game_state.fields[p].copy():
                     if isinstance(c, Follower) and (c.attack <= 1 or c.hp <= 1):
-                        c.remove_from_field(game_state.fields[p], mode="banish")
-                        game_state.banished[p].append(c)
+                        c.mv(game_state.fields[p], mode="banish", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=p)
                         activated_effect = True
-                        if set_text:
-                            the_actual_textbox.append_html_text(f"オウルキャットの効果で、プレイヤー{p}の{c}が消滅したのじゃ。\n")
                 if draw_ui:
                     game_state.draw_field_ui(p)
             if game_state.hands[player] and activated_effect:
                 # banish all cards in hand
-                num_discarded = len(game_state.hands[player])
-                game_state.banished[player].extend(game_state.hands[player])
-                game_state.hands[player].clear()
-                if set_text:
-                    the_actual_textbox.append_html_text(f"オウルキャットの効果で、プレイヤー{player}は手札のカード{num_discarded}枚を消滅したのじゃ。\n")
+                for c in game_state.hands[player].copy():
+                    c.mv(game_state.hands[player], mode="banish", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
+                assert len(game_state.hands[player]) == 0, "All cards in hand should have been banished."
                 if draw_ui:
                     game_state.draw_hand_ui(player)
 
@@ -728,6 +788,7 @@ class 円卓の騎士ガウェイン(Follower):
     def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect, effect_choice):
         player = game_state.current_player
         num_followers_in_hand = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
+        # NOTE: adding foxtail manually here. Not good.
         game_state.foxtail[player] += num_followers_in_hand
         if set_text:
             the_actual_textbox.append_html_text(f"円卓の騎士・ガウェインの効果で、プレイヤー{player}は狐尾を{num_followers_in_hand}回復したのじゃ。\n")
@@ -740,7 +801,7 @@ class スターフェニックス(Follower):
     """
     def __init__(self):
         super().__init__(name="スターフェニックス", cost=4, attack=2, hp=2, can_enhance=True)
-        self.effect_description = "場のこれが破壊された後、スペルカードをプレイする時、これを墓場から場に出し、すべての状態をリセットされる。"
+        self.effect_description = "スペルカードをプレイする時、これを墓場から場に出し、すべての状態をリセットされる。"
 
 
 class 白翼の守護神アイテール(Follower):
@@ -757,12 +818,7 @@ class 白翼の守護神アイテール(Follower):
         target = selected_card_for_effect
         player = game_state.current_player
         if target is not None and target in game_state.hands[player]:
-            if len(game_state.fields[player]) < 5:
-                game_state.hands[player].remove(target)
-                game_state.fields[player].append(target)
-                target.on_summon_effect()
-            if set_text:
-                the_actual_textbox.append_html_text(f"白翼の守護神・アイテールの効果で、プレイヤー{player}は手札から{target}を場に出したのじゃ。\n")
+            target.mv(game_state.hands[player], "summon", game_state, draw_ui, set_text, the_actual_textbox, player=player)
 
 
 class キラキラヒーラー(Follower):
@@ -780,8 +836,6 @@ class キラキラヒーラー(Follower):
         has_spell_in_hand = any(isinstance(c, Spell) for c in game_state.hands[player])
         if has_spell_in_hand:
             game_state.player_heal(player, 2, draw_ui, set_text)
-            if set_text:
-                the_actual_textbox.append_html_text(f"キラキラヒーラーの効果で、プレイヤー{player}は2回復したのじゃ。\n")
         else:
             if set_text:
                 the_actual_textbox.append_html_text(f"キラキラヒーラーの効果は発動しなかったのじゃ。\n")
@@ -805,12 +859,7 @@ class ミスティアストロジスト(Follower):
                         selected_card_for_effect, effect_choice):
         player = game_state.current_player
         num_followers_in_hand = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
-        for _ in range(num_followers_in_hand):
-            if game_state.decks[player] and len(game_state.hands[player]) < 9:
-                drawn_card = game_state.decks[player].pop()
-                game_state.hands[player].append(drawn_card)
-                if set_text:
-                    the_actual_textbox.append_html_text(f"ミスティアストロジストの効果で、プレイヤー{player}は{drawn_card}を引いたのじゃ。\n")
+        game_state.draw_card_by_effect(player, num_followers_in_hand, draw_ui, set_text)
 
 
 class 水竜神の巫女(Follower):
@@ -829,13 +878,13 @@ class 水竜神の巫女(Follower):
         actual_discarded = 0
         for _ in range(num_followers_in_hand):
             if game_state.decks[player]:
-                discarded_card = game_state.decks[player].pop()
-                game_state.graveyard[player].append(discarded_card)
+                top_card = game_state.decks[player][-1]
+                top_card.mv(game_state.decks[player], mode="discard", game_state=game_state, 
+                            draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
                 actual_discarded += 1
-                if set_text:
-                    the_actual_textbox.append_html_text(f"水竜神の巫女の効果で、プレイヤー{player}はデッキの上から{discarded_card}を捨てたのじゃ。\n")
+
         # Increase HP by actual discarded amount
-        self.stats_change_effect_this_card(0, actual_discarded, draw_ui, set_text, the_actual_textbox)
+        self.stats_change_effect_simple(0, actual_discarded, draw_ui, set_text, the_actual_textbox)
 
 
 class 黄金都市の姫リテュエル(Follower):
@@ -859,8 +908,7 @@ class 黄金都市の姫リテュエル(Follower):
         self.on_enhance_effect_default()
         target = selected_card_for_effect
         if target is not None and target in game_state.fields[game_state.opponent]:
-            target.remove_from_field(game_state.fields[game_state.opponent], mode="banish")
-            game_state.banished[game_state.opponent].append(target)
+            target.mv(game_state.fields[game_state.opponent], mode="banish", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=game_state.opponent)
             if set_text:
                 the_actual_textbox.append_html_text(f"黄金都市の姫・リテュエルの効果で、プレイヤー{game_state.opponent}の{target}が消滅したのじゃ。\n")
 
@@ -931,11 +979,7 @@ class お爺さんとお婆さん(Follower):
                 break
 
         if self in game_state.fields[self_owner]:
-            self.remove_from_field(game_state.fields[self_owner], mode="to_hand")
-            if len(game_state.hands[self_owner]) < 9:
-                game_state.hands[self_owner].append(self)
-                if set_text:
-                    the_actual_textbox.append_html_text(f"お爺さんとお婆さんはこれを手札に戻したのじゃ。\n")
+            self.mv(game_state.fields[self_owner], mode="to_hand", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=self_owner)
 
 
 # ==============================
@@ -956,15 +1000,9 @@ class 天なる大河(Spell):
                         selected_card_for_effect: Card | None, effect_choice: str | None):
         player = game_state.current_player
         num_cards = len(game_state.hands[player])
-        while game_state.hands[player]:
-            c = game_state.hands[player].pop()
-            game_state.decks[player].insert(0, c)  # Place at bottom of deck
-        for _ in range(num_cards + 1):
-            if game_state.decks[player]:
-                drawn_card = game_state.decks[player].pop()
-                game_state.hands[player].append(drawn_card)
-        if set_text:
-            the_actual_textbox.append_html_text(f"天なる大河の効果で、プレイヤー{player}は手札の全てのカードをデッキの下に置き、{num_cards + 1}枚のカードを引いたのじゃ。\n")
+        for c in game_state.hands[player].copy():
+            c.mv(game_state.hands[player], mode="to_deck_bottom", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
+        game_state.draw_card_by_effect(player, num_cards + 1, draw_ui, set_text)
 
 
 class 神秘の指輪(Spell):
@@ -980,17 +1018,14 @@ class 神秘の指輪(Spell):
                         selected_card_for_effect: Card | None, effect_choice: str | None):
         player = game_state.current_player
         if selected_card_for_effect is not None and selected_card_for_effect in game_state.hands[player]:
-            game_state.hands[player].remove(selected_card_for_effect)
-            game_state.decks[player].insert(0, selected_card_for_effect)  # Place at bottom of deck
+            selected_card_for_effect.mv(game_state.hands[player], mode="to_deck_bottom", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
             if set_text:
                 the_actual_textbox.append_html_text(f"神秘の指輪の効果で、プレイヤー{player}は手札の{selected_card_for_effect}をデッキの下に置いたのじゃ。\n")
             # Draw 2 cards
-            for _ in range(2):
-                if game_state.decks[player] and len(game_state.hands[player]) < 9:
-                    drawn_card = game_state.decks[player].pop()
-                    game_state.hands[player].append(drawn_card)
-                    if set_text:
-                        the_actual_textbox.append_html_text(f"神秘の指輪の効果で、プレイヤー{player}は{drawn_card}を引いたのじゃ。\n")
+            game_state.draw_card_by_effect(player, 2, draw_ui, set_text)
+        else:
+            if set_text:
+                the_actual_textbox.append_html_text(f"神秘の指輪の効果は発動しなかったのじゃ。\n")
 
 
 class ミヒライテ(Spell):
@@ -1067,32 +1102,24 @@ class 真実の宣告(Spell):
     def __init__(self):
         super().__init__(name="真実の宣告", cost=2)
         self.effect_description = "手札の他のスペルカードを一つ選び、下記から1つの効果を選択し発動する。【1】それをデッキの下に置く。" \
-        "【2】それを1枚コーピーし、手札に加える。"
+        "【2】それを1枚複写し、手札に加える。"
         self.request_card_selection_on_play = "hand_spell"
-        self.request_effect_choose_option = ["デッキの下に置く", "コーピーして手札に加える"]
+        self.request_effect_choose_option = ["デッキの下に置く", "複写して手札に加える"]
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                         selected_card_for_effect: Spell | None, effect_choice: str | None):
         if selected_card_for_effect is not None and effect_choice is not None and selected_card_for_effect != self:
             player = game_state.current_player
             if effect_choice == "デッキの下に置く":
-                game_state.hands[player].remove(selected_card_for_effect)
-                game_state.decks[player].insert(0, selected_card_for_effect)  # Place at bottom of deck
+                selected_card_for_effect.mv(game_state.hands[player], mode="to_deck_bottom", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
                 if set_text:
                     the_actual_textbox.append_html_text(f"真実の宣告の効果で、プレイヤー{player}は手札の{selected_card_for_effect}をデッキの下に置いたのじゃ。\n")
-            elif effect_choice == "コーピーして手札に加える":
+            elif effect_choice == "複写して手札に加える":
                 if len(game_state.hands[player]) < 9:
                     # Create a copy of the selected spell card
-                    new_card = eval(f"{selected_card_for_effect.__class__.__name__}()")
-                    game_state.amount_card_generated_from_void[game_state.current_player] += 1
-                    new_card.is_generated = True
-                    a = game_state.amount_card_generated_from_void[1]
-                    c = game_state.amount_card_generated_from_void[2]
-                    new_card.void_id = uuid.uuid8(a, 0, c)
-
-                    game_state.hands[player].append(new_card)
-                    if set_text:
-                        the_actual_textbox.append_html_text(f"真実の宣告の効果で、プレイヤー{player}は手札の{selected_card_for_effect}をコーピーして手札に加えたのじゃ。\n")
+                    new_card_cls: Card = eval(f"{selected_card_for_effect.__class__.__name__}")
+                    new_card = new_card_cls.cp(game_state, draw_ui, set_text, the_actual_textbox)
+                    new_card.mv([new_card], mode="to_hand", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
             else:
                 raise ValueError("Invalid effect choice for 真実の宣告.")
         else:
@@ -1177,8 +1204,6 @@ class 簒奪の蛇剣(Spell):
         # Check if opponent has any followers left
         has_followers = any(isinstance(c, Follower) for c in game_state.fields[opponent])
         if not has_followers:
-            if set_text:
-                the_actual_textbox.append_html_text(f"簒奪の蛇剣の効果で、プレイヤー{opponent}に{x}ダメージを与えるのじゃ。\n")
             game_state.player_take_damage(opponent, x, draw_ui, set_text)
 
 
@@ -1240,14 +1265,14 @@ class 天界への階段(Amulet):
         if self.decrease_counter(1):
             self.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, player_owning_this)
 
-    def on_destroy_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                          player: int):
-        heal = 5 - self.counter
-        if self.counter == 0:
-            heal += 1
-        game_state.player_heal(player, heal, draw_ui, set_text)
-        if set_text:
-            the_actual_textbox.append_html_text(f"天界への階段の効果で、プレイヤー{player}は6回復したのじゃ。\n")
+    def on_leave_field_effect(self, mode: str, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
+        if mode == "destroy":
+            heal = 5 - self.counter
+            if self.counter == 0:
+                heal += 1
+            game_state.player_heal(player, heal, draw_ui, set_text)
+            if set_text:
+                the_actual_textbox.append_html_text(f"天界への階段の効果で、プレイヤー{player}は6回復したのじゃ。\n")
         
 
 class 祈りの燭台(Amulet):

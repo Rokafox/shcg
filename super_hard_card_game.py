@@ -63,6 +63,20 @@ class SHCGGameState:
             self.draw_hand_ui(player)
             # draw_deck_ui is unnecessary as it is handled by pygame event
 
+    def draw_card_by_effect(self, player, num_cards, ui_draw, ui_set_text):
+        """
+        draw num_cards cards triggered by card effect.
+        """
+        for _ in range(num_cards):
+            if self.decks[player] == [] or len(self.hands[player]) >= 9:
+                return
+            drawn_card = self.decks[player].pop()
+            self.hands[player].append(drawn_card)
+            if ui_set_text:
+                text_box.append_html_text(f"プレイヤー{player}がカード{drawn_card}引いたのじゃ。\n")
+        if ui_draw:
+            self.draw_hand_ui(player)
+            self.draw_deck_ui(player)
 
     def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, additional_target: cards.Card | None,
                   is_ai_player: bool, effect_choice: str | None):
@@ -106,16 +120,8 @@ class SHCGGameState:
             if self.graveyard[player]:
                 for c in self.graveyard[player].copy():
                     if isinstance(c, cards.スターフェニックス):
-                        if len(self.fields[player]) > 4:
-                            break
-                        # create a new instance of star pheonix with same unique_id and void_id
-                        new_star_pheonix = cards.スターフェニックス()
-                        new_star_pheonix.unique_id = c.unique_id
-                        new_star_pheonix.void_id = c.void_id
-                        self.fields[player].append(new_star_pheonix)
-                        self.graveyard[player].remove(c)
-                        if ui_set_text:
-                            text_box.append_html_text(f"プレイヤー{player}のスターフェニックスが墓場から場に出たのじゃ！\n")
+                        c.reset_stats()  # reset stats before summoning
+                        c.mv(self.graveyard[player], "summon", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
         elif isinstance(card, cards.Amulet):
             self.fields[player].append(card)
         if ui_draw:
@@ -295,6 +301,8 @@ class SHCGGameState:
         if ui_draw:
             global_vars_shcg.draw_field_ui(player)
             global_vars_shcg.draw_field_ui(3 - player)
+            global_vars_shcg.draw_hand_ui(player)
+            global_vars_shcg.draw_hand_ui(3 - player)
 
 
     # ====================================

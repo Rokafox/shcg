@@ -187,6 +187,15 @@ class GameStateSnapshot:
         assert amount >= 0
         self.hp[player] = min(self.hp[player] + amount, self.max_hp[player])
 
+    def draw_card_by_effect(self, player, num_cards, *args, **_kwargs):
+        """
+        draw num_cards cards by card effect.
+        """
+        for _ in range(num_cards):
+            if self.decks[player] and len(self.hands[player]) < MAX_HAND_SIZE:
+                drawn_card = self.decks[player].pop()
+                self.hands[player].append(drawn_card)
+
 
 
 def _copy_card(card: cards.Card) -> cards.Card:
@@ -208,7 +217,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
     # Follower-specific attributes
     if isinstance(card, cards.Follower):
         follower_attrs = [
-            'description_e', 'attack', 'hp', 'max_hp', 'can_enhance', 'is_enhanced',
+            'description_e', 'attack', 'hp', 'max_hp', 'original_attack', 'original_max_hp', 'can_enhance', 'is_enhanced',
             'summoned_this_turn', 'enhanced_this_turn', 'request_card_selection_on_enhance',
             'attack_ability', 'how_many_attacks_max_of_turn', 'how_many_attacks_done_of_turn',
             'can_attack_this_turn', 'ability_rush', 'ability_super_rush', 'ability_protect', 'ability_drain',
@@ -265,14 +274,8 @@ class GameSimulator:
             if state.graveyard[player]:
                 for c in state.graveyard[player].copy():
                     if isinstance(c, cards.スターフェニックス):
-                        if len(state.fields[player]) > 4:
-                            break
-                        # create a new instance of star pheonix with same unique_id and void_id
-                        new_star_pheonix = cards.スターフェニックス()
-                        new_star_pheonix.unique_id = c.unique_id
-                        new_star_pheonix.void_id = c.void_id
-                        state.fields[player].append(new_star_pheonix)
-                        state.graveyard[player].remove(c)
+                        c.reset_stats()  # reset stats before summoning
+                        c.mv(state.graveyard[player], "summon", state, draw_ui=False, set_text=False, the_actual_textbox=None, player=player)
 
         return True
 
@@ -732,7 +735,8 @@ class MinimaxAI:
                         f"{f.attack_ability}:{f.can_enhance}:{f.is_enhanced}:"
                         f"{f.how_many_attacks_max_of_turn}:{f.how_many_attacks_done_of_turn}:"
                         f"{f.ability_rush}:{f.ability_super_rush}:"
-                        f"{f.ability_protect}:{f.ability_drain}:{f.ability_lethal}"
+                        f"{f.ability_protect}:{f.ability_drain}:{f.ability_lethal}:"
+                        f"{f.original_attack}:{f.original_max_hp}"
                     )
             field_str_follower = ",".join(field_str_follower)
             # amulet cards

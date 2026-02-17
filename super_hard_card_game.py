@@ -704,25 +704,24 @@ def _execute_pending_selection():
     selected_target = None
     selected_effect = None
 
-    can_proceed = False # Unless selectable are all selected, no proceed to execute the action
+    card_required = bool(info.get('needs_card_selection'))
+    effect_required = bool(info.get('needs_effect_choice'))
+    card_ok = not card_required
+    effect_ok = not effect_required
 
     # Read card selection
-    if card_selection_list:
+    if card_required and card_selection_list:
         selected_str = card_selection_list.get_single_selection()
         if selected_str and selected_str in _card_selection_option_map:
             selected_target = _card_selection_option_map[selected_str]
-        if selected_target:
-            can_proceed = True
-        else:
-            can_proceed = False
+        card_ok = selected_target is not None
 
     # Read effect choice
-    if effect_selection_list:
+    if effect_required and effect_selection_list:
         selected_effect = effect_selection_list.get_single_selection()
-        if selected_effect:
-            can_proceed = True
-        else:
-            can_proceed = False
+        effect_ok = selected_effect is not None
+
+    can_proceed = card_ok and effect_ok
 
     if can_proceed:
     # Execute action
@@ -1338,7 +1337,7 @@ def build_graveyard_window(player: int, zone: str):
         title = f"P{player} 墓場 ({len(card_list)})"
     else:
         card_list = global_vars_shcg.banished[player]
-        title = f"P{player} 追放 ({len(card_list)})"
+        title = f"P{player} 消滅 ({len(card_list)})"
 
     graveyard_window = pygame_gui.elements.UIWindow(
         pygame.Rect((400, 150), (800, 500)),
@@ -1379,26 +1378,26 @@ def build_graveyard_window(player: int, zone: str):
 # Player 1 graveyard/banished buttons (below debug button, same x)
 p1_graveyard_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((1500, 50), (90, 35)),
-    text='P1墓場',
+    text='P1 G',
     manager=ui_manager,
     command=lambda: build_graveyard_window(1, 'graveyard'))
 
 p1_banished_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((1500, 90), (90, 35)),
-    text='P1追放',
+    text='P1 B',
     manager=ui_manager,
     command=lambda: build_graveyard_window(1, 'banished'))
 
 # Player 2 graveyard/banished buttons (near bottom, same x)
 p2_graveyard_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((1500, 810), (90, 35)),
-    text='P2墓場',
+    text='P2 G',
     manager=ui_manager,
     command=lambda: build_graveyard_window(2, 'graveyard'))
 
 p2_banished_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((1500, 850), (90, 35)),
-    text='P2追放',
+    text='P2 B',
     manager=ui_manager,
     command=lambda: build_graveyard_window(2, 'banished'))
 

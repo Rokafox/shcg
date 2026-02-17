@@ -89,7 +89,9 @@ class GameStateSnapshot:
         self.enhance_used_this_turn: dict[int, int] = {1: 0, 2: 0}
         self.max_enhance_allowed_per_turn: dict[int, int] = {1: DEFAULT_MAX_ENHANCE_PER_TURN, 2: DEFAULT_MAX_ENHANCE_PER_TURN}
         self.amount_card_generated_from_void: dict[int, int] = {1: 0, 2: 0}
-        self.hidden_cards: dict[int, list[cards.Card]] = {1: [], 2: []} 
+        self.hidden_cards: dict[int, list[cards.Card]] = {1: [], 2: []}
+        self.graveyard: dict[int, list[cards.Card]] = {1: [], 2: []}
+        self.banished: dict[int, list[cards.Card]] = {1: [], 2: []}
 
     @property
     def opponent(self) -> int:
@@ -124,6 +126,8 @@ class GameStateSnapshot:
             snap.hands[player] = [_copy_card(c) for c in game_state.hands[player]]
             snap.fields[player] = [_copy_card(c) for c in game_state.fields[player]]
             snap.hidden_cards[player] = [_copy_card(c) for c in game_state.hidden_cards[player]]
+            snap.graveyard[player] = [_copy_card(c) for c in game_state.graveyard[player]]
+            snap.banished[player] = [_copy_card(c) for c in game_state.banished[player]]
 
         return snap
 
@@ -155,6 +159,8 @@ class GameStateSnapshot:
             new_snap.hands[player] = [_copy_card(c) for c in self.hands[player]]
             new_snap.fields[player] = [_copy_card(c) for c in self.fields[player]]
             new_snap.hidden_cards[player] = [_copy_card(c) for c in self.hidden_cards[player]]
+            new_snap.graveyard[player] = [_copy_card(c) for c in self.graveyard[player]]
+            new_snap.banished[player] = [_copy_card(c) for c in self.banished[player]]
 
         return new_snap
 
@@ -254,9 +260,10 @@ class GameSimulator:
         elif isinstance(card, cards.Amulet):
             state.fields[player].append(card)
         elif isinstance(card, cards.Spell):
-            # if has star pheonix, summon it.
-            if state.hidden_cards[player]:
-                for c in state.hidden_cards[player].copy():
+            state.graveyard[player].append(card)
+            # if has star pheonix in graveyard, summon it.
+            if state.graveyard[player]:
+                for c in state.graveyard[player].copy():
                     if isinstance(c, cards.スターフェニックス):
                         if len(state.fields[player]) > 4:
                             break
@@ -265,7 +272,7 @@ class GameSimulator:
                         new_star_pheonix.unique_id = c.unique_id
                         new_star_pheonix.void_id = c.void_id
                         state.fields[player].append(new_star_pheonix)
-                        state.hidden_cards[player].remove(c)
+                        state.graveyard[player].remove(c)
 
         return True
 
@@ -602,6 +609,11 @@ class Evaluator:
             for c in state.hidden_cards[player]:
                 if isinstance(c, cards.スターフェニックス):
                     score += 4.0  # 2/2
+        # graveyard - Star Phoenix can be summoned from graveyard
+        if state.graveyard[player]:
+            for c in state.graveyard[player]:
+                if isinstance(c, cards.スターフェニックス):
+                    score += 4.0  # 2/2
 
         return score
 
@@ -704,7 +716,9 @@ class MinimaxAI:
             str(state.enhance_used_this_turn[1]), str(state.enhance_used_this_turn[2]),
             str(state.max_enhance_allowed_per_turn[1]), str(state.max_enhance_allowed_per_turn[2]),
             str(state.amount_card_generated_from_void[1]), str(state.amount_card_generated_from_void[2]),
-            str(state.hidden_cards[1]), str(state.hidden_cards[2])
+            str(state.hidden_cards[1]), str(state.hidden_cards[2]),
+            str(len(state.graveyard[1])), str(len(state.graveyard[2])),
+            str(len(state.banished[1])), str(len(state.banished[2]))
         ]
 
         # Hash field states

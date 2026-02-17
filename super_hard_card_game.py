@@ -34,7 +34,10 @@ class SHCGGameState:
         # Every time a card is generated, the player who generated it gets 1 count
         self.amount_card_generated_from_void: dict[int, int] = {1: 0, 2: 0}
         # hidden card
-        self.hidden_cards: dict[int, list[cards.Card]] = {1: [], 2: []} 
+        self.hidden_cards: dict[int, list[cards.Card]] = {1: [], 2: []}
+        # graveyard and banished zones
+        self.graveyard: dict[int, list[cards.Card]] = {1: [], 2: []}
+        self.banished: dict[int, list[cards.Card]] = {1: [], 2: []}
         # ui
         self.top_of_the_deck_ui_marker: dict[int, pygame_gui.elements.UIImage | None] = {1: None, 2: None}
     
@@ -98,9 +101,10 @@ class SHCGGameState:
             self.fields[player].append(card)
             card.on_summon_effect()
         elif isinstance(card, cards.Spell):
-            # if has star pheonix, summon it.
-            if self.hidden_cards[player]:
-                for c in self.hidden_cards[player].copy():
+            self.graveyard[player].append(card)
+            # if has star pheonix in graveyard, summon it.
+            if self.graveyard[player]:
+                for c in self.graveyard[player].copy():
                     if isinstance(c, cards.スターフェニックス):
                         if len(self.fields[player]) > 4:
                             break
@@ -109,9 +113,9 @@ class SHCGGameState:
                         new_star_pheonix.unique_id = c.unique_id
                         new_star_pheonix.void_id = c.void_id
                         self.fields[player].append(new_star_pheonix)
-                        self.hidden_cards[player].remove(c)
+                        self.graveyard[player].remove(c)
                         if ui_set_text:
-                            text_box.append_html_text(f"プレイヤー{player}のスターフェニックスがで場に出たのじゃ！\n")
+                            text_box.append_html_text(f"プレイヤー{player}のスターフェニックスが墓場から場に出たのじゃ！\n")
         elif isinstance(card, cards.Amulet):
             self.fields[player].append(card)
         if ui_draw:
@@ -700,25 +704,24 @@ def _execute_pending_selection():
     selected_target = None
     selected_effect = None
 
-    can_proceed = False # Unless selectable are all selected, no proceed to execute the action
+    card_required = bool(info.get('needs_card_selection'))
+    effect_required = bool(info.get('needs_effect_choice'))
+    card_ok = not card_required
+    effect_ok = not effect_required
 
     # Read card selection
-    if card_selection_list:
+    if card_required and card_selection_list:
         selected_str = card_selection_list.get_single_selection()
         if selected_str and selected_str in _card_selection_option_map:
             selected_target = _card_selection_option_map[selected_str]
-        if selected_target:
-            can_proceed = True
-        else:
-            can_proceed = False
+        card_ok = selected_target is not None
 
     # Read effect choice
-    if effect_selection_list:
+    if effect_required and effect_selection_list:
         selected_effect = effect_selection_list.get_single_selection()
-        if selected_effect:
-            can_proceed = True
-        else:
-            can_proceed = False
+        effect_ok = selected_effect is not None
+
+    can_proceed = card_ok and effect_ok
 
     if can_proceed:
     # Execute action
@@ -1314,6 +1317,89 @@ debug_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1500, 10)
                                     text='Debug',
                                     manager=ui_manager,
                                     command=build_debug_window)
+
+# Graveyard / Banished buttons (same x as debug button)
+graveyard_window = None
+
+def build_graveyard_window(player: int, zone: str):
+    """
+    Build a window showing graveyard or banished cards for a player.
+    zone: 'graveyard' or 'banished'
+    """
+    global graveyard_window
+    try:
+        graveyard_window.kill()
+    except Exception:
+        pass
+
+    if zone == 'graveyard':
+        card_list = global_vars_shcg.graveyard[player]
+        title = f"P{player} 墓場 ({len(card_list)})"
+    else:
+        card_list = global_vars_shcg.banished[player]
+        title = f"P{player} 消滅 ({len(card_list)})"
+
+    graveyard_window = pygame_gui.elements.UIWindow(
+        pygame.Rect((400, 150), (800, 500)),
+        ui_manager,
+        window_display_title=title,
+        object_id="#graveyard_window",
+        resizable=False
+    )
+
+    if not card_list:
+        pygame_gui.elements.UILabel(
+            pygame.Rect((10, 10), (760, 35)),
+            "カードなし",
+            ui_manager,
+            container=graveyard_window
+        )
+        return
+
+    # Display cards in a grid (6 per row)
+    cards_per_row = 6
+    card_w, card_h = 100, 145
+    pad_x, pad_y = 10, 10
+    for i, card in enumerate(card_list):
+        row = i // cards_per_row
+        col = i % cards_per_row
+        x = pad_x + col * (card_w + pad_x)
+        y = pad_y + row * (card_h + pad_y)
+        card_ui = pygame_gui.elements.UIImage(
+            pygame.Rect((x, y), (card_w, card_h)),
+            pygame.Surface((card_w, card_h)),
+            ui_manager,
+            container=graveyard_window
+        )
+        card_ui.set_image(draw_card(card))
+        card_ui.set_tooltip(card.tooltip_str(), delay=0.1, wrap_width=300)
+
+
+# Player 1 graveyard/banished buttons (below debug button, same x)
+p1_graveyard_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1500, 50), (90, 35)),
+    text='P1 G',
+    manager=ui_manager,
+    command=lambda: build_graveyard_window(1, 'graveyard'))
+
+p1_banished_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1500, 90), (90, 35)),
+    text='P1 B',
+    manager=ui_manager,
+    command=lambda: build_graveyard_window(1, 'banished'))
+
+# Player 2 graveyard/banished buttons (near bottom, same x)
+p2_graveyard_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1500, 810), (90, 35)),
+    text='P2 G',
+    manager=ui_manager,
+    command=lambda: build_graveyard_window(2, 'graveyard'))
+
+p2_banished_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1500, 850), (90, 35)),
+    text='P2 B',
+    manager=ui_manager,
+    command=lambda: build_graveyard_window(2, 'banished'))
 
 
 # =====================================

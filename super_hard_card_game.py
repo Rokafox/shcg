@@ -7,6 +7,7 @@ import cards
 import random
 import ai_player_new
 import deck_builder
+import zone_viewer
 
 
 pygame.init()
@@ -1327,88 +1328,45 @@ debug_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1500, 10)
                                     manager=ui_manager,
                                     command=build_debug_window)
 
-# Graveyard / Banished buttons (same x as debug button)
-graveyard_window = None
+# Graveyard / Banished / Deck buttons (same x as debug button)
 
-def build_graveyard_window(player: int, zone: str):
-    """
-    Build a window showing graveyard or banished cards for a player.
-    zone: 'graveyard' or 'banished'
-    """
-    global graveyard_window
-    try:
-        graveyard_window.kill()
-    except Exception:
-        pass
-
-    if zone == 'graveyard':
-        card_list = global_vars_shcg.graveyard[player]
-        title = f"P{player} 墓場 ({len(card_list)})"
-    else:
-        card_list = global_vars_shcg.banished[player]
-        title = f"P{player} 消滅 ({len(card_list)})"
-
-    graveyard_window = pygame_gui.elements.UIWindow(
-        pygame.Rect((400, 150), (800, 500)),
-        ui_manager,
-        window_display_title=title,
-        object_id="#graveyard_window",
-        resizable=False
-    )
-
-    if not card_list:
-        pygame_gui.elements.UILabel(
-            pygame.Rect((10, 10), (760, 35)),
-            "カードなし",
-            ui_manager,
-            container=graveyard_window
-        )
-        return
-
-    # Display cards in a grid (6 per row)
-    cards_per_row = 6
-    card_w, card_h = 100, 145
-    pad_x, pad_y = 10, 10
-    for i, card in enumerate(card_list):
-        row = i // cards_per_row
-        col = i % cards_per_row
-        x = pad_x + col * (card_w + pad_x)
-        y = pad_y + row * (card_h + pad_y)
-        card_ui = pygame_gui.elements.UIImage(
-            pygame.Rect((x, y), (card_w, card_h)),
-            pygame.Surface((card_w, card_h)),
-            ui_manager,
-            container=graveyard_window
-        )
-        card_ui.set_image(draw_card(card))
-        card_ui.set_tooltip(card.tooltip_str(), delay=0.1, wrap_width=300)
-
-
-# Player 1 graveyard/banished buttons (below debug button, same x)
+# Player 1 buttons (below debug button)
 p1_graveyard_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((1500, 50), (90, 35)),
     text='P1 G',
     manager=ui_manager,
-    command=lambda: build_graveyard_window(1, 'graveyard'))
+    command=lambda: zone_viewer.open_viewer(1, 'graveyard'))
 
 p1_banished_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((1500, 90), (90, 35)),
     text='P1 B',
     manager=ui_manager,
-    command=lambda: build_graveyard_window(1, 'banished'))
+    command=lambda: zone_viewer.open_viewer(1, 'banished'))
 
-# Player 2 graveyard/banished buttons (near bottom, same x)
+p1_deck_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1500, 130), (90, 35)),
+    text='P1 D',
+    manager=ui_manager,
+    command=lambda: zone_viewer.open_viewer(1, 'deck'))
+
+# Player 2 buttons (near bottom)
 p2_graveyard_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((1500, 810), (90, 35)),
+    relative_rect=pygame.Rect((1500, 770), (90, 35)),
     text='P2 G',
     manager=ui_manager,
-    command=lambda: build_graveyard_window(2, 'graveyard'))
+    command=lambda: zone_viewer.open_viewer(2, 'graveyard'))
 
 p2_banished_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect((1500, 850), (90, 35)),
+    relative_rect=pygame.Rect((1500, 810), (90, 35)),
     text='P2 B',
     manager=ui_manager,
-    command=lambda: build_graveyard_window(2, 'banished'))
+    command=lambda: zone_viewer.open_viewer(2, 'banished'))
+
+p2_deck_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1500, 850), (90, 35)),
+    text='P2 D',
+    manager=ui_manager,
+    command=lambda: zone_viewer.open_viewer(2, 'deck'))
 
 # Settings window deck selection UI references
 settings_p1_deck_dropdown = None
@@ -1416,6 +1374,9 @@ settings_p2_deck_dropdown = None
 
 # Initialize deck builder with dependencies
 deck_builder.init(ui_manager, image_405_card_slot, draw_card)
+
+# Initialize zone viewer with dependencies
+zone_viewer.init(ui_manager, draw_card, lambda: global_vars_shcg)
 
 start_new_game()
 
@@ -1626,6 +1587,8 @@ if __name__ == "__main__":
                     deck_builder.build_deck_builder_window()
                 # Deck builder buttons
                 deck_builder.handle_button_pressed(event)
+                # Zone viewer buttons (< and > pagination)
+                zone_viewer.handle_button_pressed(event)
                 # AI toggle buttons
                 current_ai_manager = global_vars_minimax_ai_manager
                 if ai_player1_toggle and event.ui_element == ai_player1_toggle:

@@ -36,6 +36,7 @@ _viewer_window = None
 _prev_button = None
 _next_button = None
 _page_label = None
+_no_cards_label = None
 _card_ui_images: list[pygame_gui.elements.UIImage] = []
 
 _current_player: int = 1
@@ -72,6 +73,12 @@ def handle_button_pressed(event) -> bool:
         _change_page(1)
         return True
     return False
+
+
+def refresh():
+    """Refresh the zone viewer display if open. Call from the main loop to auto-update."""
+    if _viewer_window is not None and _viewer_window.alive():
+        _refresh_page()
 
 
 # =====================================
@@ -111,16 +118,13 @@ def _total_pages() -> int:
 
 
 def _build_window():
-    """Build or rebuild the viewer window for the current page."""
-    global _viewer_window, _prev_button, _next_button, _page_label, _card_ui_images
+    """Build the viewer window with pre-allocated card slots, then populate via _refresh_page."""
+    global _viewer_window, _prev_button, _next_button, _page_label, _no_cards_label, _card_ui_images
 
     try:
         _viewer_window.kill()
     except Exception:
         pass
-
-    card_list = _get_card_list()
-    total = _total_pages()
 
     card_w, card_h = 100, 145
     pad_x, pad_y = 10, 10
@@ -137,34 +141,30 @@ def _build_window():
         resizable=False
     )
 
-    _card_ui_images = []
+    # "No cards" label (hidden by default, shown by _refresh_page when needed)
+    _no_cards_label = pygame_gui.elements.UILabel(
+        pygame.Rect((10, 10), (win_width - 40, 35)),
+        "カードなし",
+        _ui_manager,
+        container=_viewer_window
+    )
+    _no_cards_label.hide()
 
-    if not card_list:
-        pygame_gui.elements.UILabel(
-            pygame.Rect((10, 10), (win_width - 40, 35)),
-            "カードなし",
+    # Pre-create all card image slots (hidden by default)
+    _card_ui_images = []
+    for i in range(CARDS_PER_PAGE):
+        row = i // CARDS_PER_ROW
+        col = i % CARDS_PER_ROW
+        x = pad_x + col * (card_w + pad_x)
+        y = pad_y + row * (card_h + pad_y)
+        card_ui = pygame_gui.elements.UIImage(
+            pygame.Rect((x, y), (card_w, card_h)),
+            pygame.Surface((card_w, card_h)),
             _ui_manager,
             container=_viewer_window
         )
-    else:
-        start = _current_page * CARDS_PER_PAGE
-        end = min(start + CARDS_PER_PAGE, len(card_list))
-        page_cards = card_list[start:end]
-
-        for i, card in enumerate(page_cards):
-            row = i // CARDS_PER_ROW
-            col = i % CARDS_PER_ROW
-            x = pad_x + col * (card_w + pad_x)
-            y = pad_y + row * (card_h + pad_y)
-            card_ui = pygame_gui.elements.UIImage(
-                pygame.Rect((x, y), (card_w, card_h)),
-                pygame.Surface((card_w, card_h)),
-                _ui_manager,
-                container=_viewer_window
-            )
-            card_ui.set_image(_draw_card_fn(card))
-            card_ui.set_tooltip(card.tooltip_str(), delay=0.1, wrap_width=300)
-            _card_ui_images.append(card_ui)
+        card_ui.hide()
+        _card_ui_images.append(card_ui)
 
     # Navigation bar at the bottom
     nav_y = grid_height + 5
@@ -179,7 +179,7 @@ def _build_window():
 
     _page_label = pygame_gui.elements.UILabel(
         pygame.Rect((80, nav_y), (200, 35)),
-        f"Page {_current_page + 1} / {total}",
+        f"Page 1 / 1",
         _ui_manager,
         container=_viewer_window
     )
@@ -192,12 +192,47 @@ def _build_window():
         object_id="#zone_viewer_next"
     )
 
+    _refresh_page()
+
+
+def _refresh_page():
+    """Update card images and labels for the current page without rebuilding the window."""
+    global _current_page
+    card_list = _get_card_list()
+    total = _total_pages()
+
+    # Clamp page if cards were removed while viewer was open
+    if _current_page >= total:
+        _current_page = max(0, total - 1)
+
+    if not card_list:
+        _no_cards_label.show()
+        for card_ui in _card_ui_images:
+            card_ui.hide()
+    else:
+        _no_cards_label.hide()
+        start = _current_page * CARDS_PER_PAGE
+        end = min(start + CARDS_PER_PAGE, len(card_list))
+        page_cards = card_list[start:end]
+
+        for i, card_ui in enumerate(_card_ui_images):
+            if i < len(page_cards):
+                card_ui.set_image(_draw_card_fn(page_cards[i]))
+                card_ui.set_tooltip(page_cards[i].tooltip_str(), delay=0.1, wrap_width=300)
+                card_ui.show()
+            else:
+                card_ui.hide()
+
+    # Update page label and window title
+    _page_label.set_text(f"Page {_current_page + 1} / {total}")
+    _viewer_window.set_display_title(_zone_title())
+
 
 def _change_page(delta: int):
-    """Change page by delta and rebuild the card display."""
+    """Change page by delta and update the card display in-place."""
     global _current_page
     total = _total_pages()
     new_page = _current_page + delta
     if 0 <= new_page < total:
         _current_page = new_page
-        _build_window()
+        _refresh_page()

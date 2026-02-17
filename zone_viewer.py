@@ -41,10 +41,12 @@ _card_ui_images: list[pygame_gui.elements.UIImage] = []
 _current_player: int = 1
 _current_zone: str = "graveyard"  # "graveyard", "banished", or "deck"
 _current_page: int = 0
+_last_snapshot: list = []  # snapshot of card IDs for auto-update detection
 
 CARDS_PER_ROW = 6
 ROWS_PER_PAGE = 2
 CARDS_PER_PAGE = CARDS_PER_ROW * ROWS_PER_PAGE
+_DEFAULT_POS = (400, 150)
 
 
 # =====================================
@@ -72,6 +74,24 @@ def handle_button_pressed(event) -> bool:
         _change_page(1)
         return True
     return False
+
+
+def update():
+    """
+    Call once per frame from the main loop.
+    Detects game-state changes and refreshes the viewer automatically.
+    """
+    global _current_page
+    if _viewer_window is None or not _viewer_window.alive():
+        return
+    card_list = _get_card_list()
+    current = _snapshot(card_list)
+    if current != _last_snapshot:
+        # Clamp the page in case cards were removed
+        total = max(1, (len(card_list) + CARDS_PER_PAGE - 1) // CARDS_PER_PAGE)
+        if _current_page >= total:
+            _current_page = max(0, total - 1)
+        _build_window()
 
 
 # =====================================
@@ -110,16 +130,26 @@ def _total_pages() -> int:
     return max(1, (len(card_list) + CARDS_PER_PAGE - 1) // CARDS_PER_PAGE)
 
 
+def _snapshot(card_list: list) -> list:
+    """Return a lightweight identity list used to detect zone changes."""
+    return [id(c) for c in card_list]
+
+
 def _build_window():
     """Build or rebuild the viewer window for the current page."""
-    global _viewer_window, _prev_button, _next_button, _page_label, _card_ui_images
+    global _viewer_window, _prev_button, _next_button, _page_label, _card_ui_images, _last_snapshot
 
+    # Preserve current window position before killing
+    win_pos = _DEFAULT_POS
     try:
+        if _viewer_window and _viewer_window.alive():
+            win_pos = (_viewer_window.rect.x, _viewer_window.rect.y)
         _viewer_window.kill()
     except Exception:
         pass
 
     card_list = _get_card_list()
+    _last_snapshot = _snapshot(card_list)
     total = _total_pages()
 
     card_w, card_h = 100, 145
@@ -130,7 +160,7 @@ def _build_window():
     win_height = grid_height + nav_height + 40  # extra for title bar
 
     _viewer_window = pygame_gui.elements.UIWindow(
-        pygame.Rect((400, 150), (win_width, win_height)),
+        pygame.Rect(win_pos, (win_width, win_height)),
         _ui_manager,
         window_display_title=_zone_title(),
         object_id="#zone_viewer_window",

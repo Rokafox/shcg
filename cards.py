@@ -175,6 +175,7 @@ class Follower(Card):
         self.summoned_this_turn: bool = True
         self.enhanced_this_turn: bool = False
         self.request_card_selection_on_enhance: str = ""
+        self.request_effect_choose_option_e: list[str] = []  # effect choice options when enhanced
         self.attack_ability: int = 0  # 0: cannot attack, 1: can attack follower, 2: can attack player
         self.how_many_attacks_max_of_turn: int = 1  # Number of attacks per turn
         self.how_many_attacks_done_of_turn: int = 0  # Number of attacks done this turn
@@ -272,7 +273,7 @@ class Follower(Card):
                 self.can_attack_this_turn = True
             
     def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                          selected_card_for_effect: Card | None):
+                          selected_card_for_effect: Card | None, effect_choice: str | None = None):
         self.on_enhance_effect_default()
 
     def take_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
@@ -513,7 +514,7 @@ class 機構翼の少女ローザ(Follower):
         self.ability_protect = True
 
     def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                          selected_card_for_effect: Card | None):
+                          selected_card_for_effect: Card | None, effect_choice: str | None = None):
         self.on_enhance_effect_default()
         game_state.draw_card_by_effect(game_state.current_player, 1, draw_ui, set_text)
 
@@ -541,7 +542,7 @@ class 飢餓の使徒(Follower):
             selected_card_for_effect.ability_rush = True
 
     def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                          selected_card_for_effect: Card | None):
+                          selected_card_for_effect: Card | None, effect_choice: str | None = None):
         self.on_enhance_effect_default()
         target = selected_card_for_effect
         if target is not None and isinstance(target, Follower) and target != self:
@@ -641,7 +642,7 @@ class 不殺の絶傑エズディア(Follower):
 
 
     def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                          selected_card_for_effect: Card | None):
+                          selected_card_for_effect: Card | None, effect_choice: str | None = None):
         self.on_enhance_effect_default()
         # same effect as on play
         self.on_play_effect(game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect, effect_choice=None)
@@ -734,7 +735,7 @@ class 簒奪の絶傑オクトリス(Follower):
         self.request_card_selection_on_enhance = "hand_opponent"
 
     def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                            selected_card_for_effect: Card | None):
+                            selected_card_for_effect: Card | None, effect_choice: str | None = None):
         self.on_enhance_effect_default()
         target = selected_card_for_effect
         if target is not None and target in game_state.hands[game_state.opponent]:
@@ -756,7 +757,7 @@ class オウルキャット(Follower):
         self.description_e = "褒賞はすぐそこに。獲物、今まさにフクロの鼠。忍び寄る体躯、かっぴらく双眼。これまさにネコに鰹節。"
 
     def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                            selected_card_for_effect: Card | None):
+                            selected_card_for_effect: Card | None, effect_choice: str | None = None):
             self.on_enhance_effect_default()
             player = game_state.current_player
             # banish all followers with attack or hp 1 or less
@@ -841,7 +842,7 @@ class キラキラヒーラー(Follower):
                 the_actual_textbox.append_html_text(f"キラキラヒーラーの効果は発動しなかったのじゃ。\n")
 
     def on_enhance_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
-                            selected_card_for_effect):
+                            selected_card_for_effect, effect_choice=None):
         self.on_enhance_effect_default()
         self.on_play_effect(game_state, draw_ui, set_text, the_actual_textbox,
                             selected_card_for_effect, effect_choice=None)
@@ -904,7 +905,7 @@ class 黄金都市の姫リテュエル(Follower):
             the_actual_textbox.append_html_text(f"黄金都市の姫・リテュエルの効果で、プレイヤー{player}は2ダメージを受けたのじゃ。\n")
 
     def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                          selected_card_for_effect: Card | None):
+                          selected_card_for_effect: Card | None, effect_choice: str | None = None):
         self.on_enhance_effect_default()
         target = selected_card_for_effect
         if target is not None and target in game_state.fields[game_state.opponent]:

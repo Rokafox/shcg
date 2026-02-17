@@ -272,7 +272,7 @@ class SHCGGameState:
             self.draw_tail_ui(1)
 
     def on_card_enhanced(self, player, card_to_enhance: cards.Follower, additional_target: cards.Card | None, is_ai_player: bool, ui_set_text,
-                         ui_draw):
+                         ui_draw, effect_choice: str | None = None):
         # not having foxtail will return early
         assert self.foxtail[player] > 0
         if self.foxtail[player] < 1:
@@ -292,11 +292,13 @@ class SHCGGameState:
                 text_box.append_html_text(f"{prefix}プレイヤー{player}が{card_to_enhance}を強化する時に{target}を選択したのじゃ。\n")
             card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
                                               the_actual_textbox=text_box,
-                                              selected_card_for_effect=target)
+                                              selected_card_for_effect=target,
+                                              effect_choice=effect_choice)
         else:
             card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
                                               the_actual_textbox=text_box,
-                                              selected_card_for_effect=None)
+                                              selected_card_for_effect=None,
+                                              effect_choice=effect_choice)
         
         global_vars_shcg.enhance_used_this_turn[player] += 1
         global_vars_shcg.use_foxtail(player, 1, ui_draw=True, ui_set_text=True)
@@ -743,7 +745,8 @@ def _execute_pending_selection():
             global_vars_shcg.on_card_enhanced(player, card_to_enhance=card,
                                             additional_target=selected_target,
                                             is_ai_player=False,
-                                            ui_draw=True, ui_set_text=True)
+                                            ui_draw=True, ui_set_text=True,
+                                            effect_choice=selected_effect)
 
         # Clean up
         _cancel_pending_selection()
@@ -1564,16 +1567,21 @@ if __name__ == "__main__":
                                         target_card = global_vars_shcg.fields[cp][index]
                                         if isinstance(target_card, cards.Follower) and target_card.can_enhance:
                                             needs_card_sel = target_card.request_card_selection_on_enhance
-                                            if needs_card_sel:
-                                                test_options = _build_card_selection_options(needs_card_sel, {
-                                                    'type': 'enhance', 'card': target_card, 'player': cp})
-                                                if test_options:
+                                            needs_effect_sel = target_card.request_effect_choose_option_e
+                                            if needs_card_sel or needs_effect_sel:
+                                                has_valid_targets = True
+                                                if needs_card_sel:
+                                                    test_options = _build_card_selection_options(needs_card_sel, {
+                                                        'type': 'enhance', 'card': target_card, 'player': cp})
+                                                    if not test_options:
+                                                        has_valid_targets = False
+                                                if has_valid_targets:
                                                     build_card_selection_window({
                                                         'type': 'enhance',
                                                         'player': cp,
                                                         'card': target_card,
                                                         'needs_card_selection': needs_card_sel,
-                                                        'needs_effect_choice': [],
+                                                        'needs_effect_choice': needs_effect_sel,
                                                     })
                                                 else:
                                                     global_vars_shcg.on_card_enhanced(cp, card_to_enhance=target_card,

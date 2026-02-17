@@ -1652,6 +1652,7 @@ if __name__ == "__main__":
                         # AI has no more actions, end turn
                         global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
 
+        zone_viewer.refresh()
         ui_manager_lower.update(time_delta)
         ui_manager.update(time_delta)
         ui_manager_overlay.update(time_delta)

@@ -1003,11 +1003,9 @@ class ExampleCard(Follower):
     """
     def __init__(self):
         super().__init__(name="Example Card", cost=1, attack=1, hp=1, can_enhance=True)
-        self.effect_description = "場に出す時、相手の場のフォロワーを選ぶ、それを1ダメージ。さらに、相手の場のフォロワーを2体まで選ぶ。それらを破壊する。" \
-        "進化後、下記の効果から1つ選ぶ。・フォロワーすべてに5ダメージ・相手リーダーに3ダメージ"
+        self.effect_description = "場に出す時、相手の場のフォロワーを選ぶ、それを1ダメージ。さらに、相手の場のフォロワーを2体まで選ぶ。それらを破壊する。"
         self.request_card_selection_on_play = "field_opponent"
         self.request_multi_card_selection_on_play = ("field_opponent", 2)
-        self.request_effect_choose_option_e = ["Followers 5 damage", "Leader 3 damage"]
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                         selected_card_for_effect: Card | None, effect_choice: str | None,
@@ -1022,21 +1020,6 @@ class ExampleCard(Follower):
                               game_state=game_state, draw_ui=draw_ui, set_text=set_text,
                               the_actual_textbox=the_actual_textbox, player=game_state.opponent)
 
-    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                            selected_card_for_effect: Card | None, effect_choice: str | None):
-        self.on_enhance_effect_default()
-        if effect_choice == "Followers 5 damage":
-            for p in [1, 2]:
-                for c in game_state.fields[p].copy():
-                    if isinstance(c, Follower) and c != self:
-                        c.take_damage(5, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
-            print("Example Card's effect: All followers take 5 damage.")
-        elif effect_choice == "Leader 3 damage":
-            opponent = game_state.opponent
-            game_state.player_take_damage(opponent, 3, draw_ui, set_text)
-            print("Example Card's effect: Opponent leader takes 3 damage.")
-        else:
-            raise ValueError("Invalid effect choice for Example Card.")
 
 
 # ==============================

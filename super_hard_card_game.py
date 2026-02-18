@@ -289,7 +289,8 @@ class SHCGGameState:
             self.draw_tail_ui(1)
 
     def on_card_enhanced(self, player, card_to_enhance: cards.Follower, additional_target: cards.Card | None, is_ai_player: bool, ui_set_text,
-                         ui_draw, effect_choice: str | None = None):
+                         ui_draw, effect_choice: str | None = None,
+                         additional_multi_targets: list[cards.Card] | None = None):
         # not having foxtail will return early
         assert self.foxtail[player] > 0
         if self.foxtail[player] < 1:
@@ -302,11 +303,30 @@ class SHCGGameState:
             return
         if ui_set_text:
             text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化するぞ！\n")
+
+        target = None
+        multi_targets = None
+
         if card_to_enhance.request_card_selection_on_enhance:
             target = additional_target
             if ui_set_text and target is not None:
                 prefix = "AI" if is_ai_player else ""
                 text_box.append_html_text(f"{prefix}プレイヤー{player}が{card_to_enhance}を強化する時に{target}を選択したのじゃ。\n")
+
+        if card_to_enhance.request_multi_card_selection_on_enhance[0]:
+            multi_targets = additional_multi_targets
+            if ui_set_text and multi_targets:
+                prefix = "AI" if is_ai_player else ""
+                targets_str = ", ".join(str(t) for t in multi_targets)
+                text_box.append_html_text(f"{prefix}プレイヤー{player}が{card_to_enhance}を強化する時に{targets_str}を複数選択したのじゃ。\n")
+
+        if card_to_enhance.request_multi_card_selection_on_enhance[0]:
+            card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
+                                              the_actual_textbox=text_box,
+                                              selected_card_for_effect=target,
+                                              effect_choice=effect_choice,
+                                              selected_cards_for_multi_effect=multi_targets)
+        elif card_to_enhance.request_card_selection_on_enhance:
             card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
                                               the_actual_textbox=text_box,
                                               selected_card_for_effect=target,
@@ -841,7 +861,8 @@ def _execute_pending_selection():
                                             additional_target=selected_target,
                                             is_ai_player=False,
                                             ui_draw=True, ui_set_text=True,
-                                            effect_choice=selected_effect)
+                                            effect_choice=selected_effect,
+                                            additional_multi_targets=selected_multi_targets)
 
         # Clean up
         _cancel_pending_selection()
@@ -1632,13 +1653,19 @@ if __name__ == "__main__":
                                         target_card = global_vars_shcg.fields[cp][index]
                                         if isinstance(target_card, cards.Follower) and target_card.can_enhance:
                                             needs_card_sel = target_card.request_card_selection_on_enhance
+                                            needs_multi_card_sel = target_card.request_multi_card_selection_on_enhance
                                             needs_effect_sel = target_card.request_effect_choose_option_e
-                                            if needs_card_sel or needs_effect_sel:
+                                            if needs_card_sel or needs_multi_card_sel[0] or needs_effect_sel:
                                                 has_valid_targets = True
                                                 if needs_card_sel:
                                                     test_options = _build_card_selection_options(needs_card_sel, {
                                                         'type': 'enhance', 'card': target_card, 'player': cp})
                                                     if not test_options:
+                                                        has_valid_targets = False
+                                                if needs_multi_card_sel[0] and has_valid_targets:
+                                                    test_multi_options = _build_card_selection_options(needs_multi_card_sel[0], {
+                                                        'type': 'enhance', 'card': target_card, 'player': cp})
+                                                    if not test_multi_options:
                                                         has_valid_targets = False
                                                 if has_valid_targets:
                                                     build_card_selection_window({
@@ -1646,6 +1673,7 @@ if __name__ == "__main__":
                                                         'player': cp,
                                                         'card': target_card,
                                                         'needs_card_selection': needs_card_sel,
+                                                        'needs_multi_card_selection': needs_multi_card_sel,
                                                         'needs_effect_choice': needs_effect_sel,
                                                     })
                                                 else:

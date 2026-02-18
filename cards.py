@@ -32,6 +32,17 @@ class Card:
         # field_c: player field any card
         # field_opponent_c: opponent field any card
         # field_both_c: both fields any card
+        # if selectable exist, selection cannot be None
+        self.request_multi_card_selection_on_play: tuple[str, int] = ("", 0) # e.g., ("field", 2) for selecting up to 2 followers on player field
+        # feature to be implemented.
+        # the int value must be > 1.
+        # usually for effects like "select up to 3 cards from opponent's field, destroy them". Up to 3, but 1 and 2 are also valid selections.
+        # but if selectable exist, selection cannot be None, just like request_card_selection_on_play.
+        # currently no card use this feature. Update ExampleCard class to test this.
+        # note for ui: UISelectionList can have multiselection, but does not support up to n selection feature.
+        # As a workaround, compare len(card_selection_list.get_multi_selection) before allowing to proceed.
+        # note for ai_player: implement this.
+        # note for game logic: implement this.
         self.request_effect_choose_option: list[str] = [] # e.g., ["Option 1", "Option 2"] on playing this card
 
 
@@ -175,6 +186,8 @@ class Follower(Card):
         self.summoned_this_turn: bool = True
         self.enhanced_this_turn: bool = False
         self.request_card_selection_on_enhance: str = ""
+        # same as request_card_selection_on_play but for enhance
+        # if selectable exist, selection cannot be None
         self.request_effect_choose_option_e: list[str] = []  # effect choice options when enhanced
         self.attack_ability: int = 0  # 0: cannot attack, 1: can attack follower, 2: can attack player
         self.how_many_attacks_max_of_turn: int = 1  # Number of attacks per turn
@@ -985,7 +998,7 @@ class お爺さんとお婆さん(Follower):
 
 class ExampleCard(Follower):
     """
-    This is an example card used for testing.
+    Used to test new features.
     """
     def __init__(self):
         super().__init__(name="Example Card", cost=1, attack=1, hp=1, can_enhance=True)

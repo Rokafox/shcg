@@ -724,6 +724,7 @@ def _execute_pending_selection():
     # Read card selection
     if card_required and card_selection_list:
         selected_str = card_selection_list.get_single_selection()
+        # selected_str = card_selection_list.get_multi_selection
         if selected_str and selected_str in _card_selection_option_map:
             selected_target = _card_selection_option_map[selected_str]
         card_ok = selected_target is not None
@@ -1076,7 +1077,7 @@ def build_settings_window():
                                         ui_manager,
                                         container=settings_window)
     unique_states_max_opp_turn_dropdown = pygame_gui.elements.UIDropDownMenu(
-                                        options_list=["20", "40", "60", "80", "100", "120", "140", "160", "180", "200"],
+                                        options_list=["20", "40", "60", "80", "100", "120", "140", "160", "180", "200", "220", "240", "260", "280", "300"],
                                         starting_option=str(global_vars_unique_states_max_opp_turn),
                                         relative_rect=pygame.Rect((200, 325), (100, 35)),
                                         manager=ui_manager,
@@ -1274,24 +1275,8 @@ def build_debug_window():
                                         object_id="#debug_add_card_button",
                                         command=debug_add_card_to_top_of_deck)
     
-    debug_add_player_1_hp_button = pygame_gui.elements.UIButton(
-                                        relative_rect=pygame.Rect((10, 115), (260, 50)),
-                                        text="Add 1 HP to Player 1",
-                                        manager=ui_manager,
-                                        container=debug_window,
-                                        object_id="#debug_add_player_1_hp_button",
-                                        command=debug_add_1_hp_to_player_1)
-
-    debug_add_player_2_hp_button = pygame_gui.elements.UIButton(
-                                        relative_rect=pygame.Rect((10, 175), (260, 50)),
-                                        text="Add 1 HP to Player 2",
-                                        manager=ui_manager,
-                                        container=debug_window,
-                                        object_id="#debug_add_player_2_hp_button",
-                                        command=debug_add_1_hp_to_player_2)
-    
     debug_add_foxtail_player_1_button = pygame_gui.elements.UIButton(
-                                        relative_rect=pygame.Rect((10, 235), (260, 50)),
+                                        relative_rect=pygame.Rect((10, 110), (260, 50)),
                                         text="Add Foxtail to Current Player",
                                         manager=ui_manager,
                                         container=debug_window,
@@ -1322,28 +1307,6 @@ def debug_add_card_to_top_of_deck():
         text_box.append_html_text(f"DEBUG:カード「{card_name}」をプレイヤー{cp}のデッキの一番上に追加したのじゃ。\n")
     else:
         raise ValueError(f"Card not found: {card_name}")
-
-def debug_add_1_hp_to_player_1():
-    global global_vars_shcg
-    if global_vars_shcg.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
-    prev_hp = global_vars_shcg.hp[1]
-    global_vars_shcg.hp[1] = min(global_vars_shcg.hp[1] + 1, global_vars_shcg.max_hp[1])
-    delta = global_vars_shcg.hp[1] - prev_hp
-    global_vars_shcg.draw_player_hp_ui()
-    text_box.append_html_text(f"DEBUG:プレイヤー1の体力を{delta}回復したのじゃ。\n")
-
-def debug_add_1_hp_to_player_2():
-    global global_vars_shcg
-    if global_vars_shcg.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
-    prev_hp = global_vars_shcg.hp[2]
-    global_vars_shcg.hp[2] = min(global_vars_shcg.hp[2] + 1, global_vars_shcg.max_hp[2])
-    delta = global_vars_shcg.hp[2] - prev_hp
-    global_vars_shcg.draw_player_hp_ui()
-    text_box.append_html_text(f"DEBUG:プレイヤー2の体力を{delta}回復したのじゃ。\n")
 
 def debug_add_foxtail_to_current_player():
     global global_vars_shcg

@@ -206,7 +206,8 @@ def _copy_card(card: cards.Card) -> cards.Card:
     # Common attributes copied for all card types
     common_attrs = [
         'name', 'cost', 'original_cost', 'type', 'unique_id', 'is_generated',
-        'void_id', 'description', 'effect_description', 'request_card_selection_on_play', 'request_effect_choose_option',
+        'void_id', 'description', 'effect_description', 'request_card_selection_on_play', 'request_multi_card_selection_on_play', 
+        'request_effect_choose_option',
     ]
     for attr in common_attrs:
         if hasattr(card, attr):

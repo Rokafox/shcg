@@ -1003,14 +1003,18 @@ class ExampleCard(Follower):
     """
     def __init__(self):
         super().__init__(name="Example Card", cost=1, attack=1, hp=1, can_enhance=True)
-        self.effect_description = "場に出す時、相手の場のフォロワーを2体まで選ぶ。それらを破壊する。" \
+        self.effect_description = "場に出す時、相手の場のフォロワーを選ぶ、それを1ダメージ。さらに、相手の場のフォロワーを2体まで選ぶ。それらを破壊する。" \
         "進化後、下記の効果から1つ選ぶ。・フォロワーすべてに5ダメージ・相手リーダーに3ダメージ"
+        self.request_card_selection_on_play = "field_opponent"
         self.request_multi_card_selection_on_play = ("field_opponent", 2)
         self.request_effect_choose_option_e = ["Followers 5 damage", "Leader 3 damage"]
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                         selected_card_for_effect: Card | None, effect_choice: str | None,
                         selected_cards_for_multi_effect: list[Card] | None = None):
+        if selected_card_for_effect:
+            if isinstance(selected_card_for_effect, Follower) and selected_card_for_effect in game_state.fields[game_state.opponent]:
+                selected_card_for_effect.take_damage(1, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
         if selected_cards_for_multi_effect:
             for target in selected_cards_for_multi_effect:
                 if isinstance(target, Follower) and target in game_state.fields[game_state.opponent]:

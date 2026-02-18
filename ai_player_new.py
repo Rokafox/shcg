@@ -250,8 +250,10 @@ class GameSimulator:
 
     @staticmethod
     def play_card(state: GameStateSnapshot, player: int, card: cards.Card,
-                  target: Optional[cards.Card] = None, effect_choice: str | None = None) -> bool:
-        """Play a card from hand. Returns True if successful."""
+                  target = None, effect_choice: str | None = None) -> bool:
+        """Play a card from hand. Returns True if successful.
+        target can be: Card (single selection), list[Card] (multi selection), or None.
+        """
         if len(state.fields[player]) >= MAX_FIELD_SIZE and card.type != 'spell':
             return False
         if state.foxtail[player] < card.cost:
@@ -262,7 +264,11 @@ class GameSimulator:
         state.foxtail[player] -= card.cost
         state.hands[player].remove(card)
 
-        card.on_play_effect(state, False, False, None, target, effect_choice)
+        if card.request_multi_card_selection_on_play[0]:
+            card.on_play_effect(state, False, False, None, None, effect_choice,
+                               selected_cards_for_multi_effect=target)
+        else:
+            card.on_play_effect(state, False, False, None, target, effect_choice)
 
         if isinstance(card, cards.Follower):
             state.fields[player].append(card)
@@ -437,6 +443,29 @@ class MoveGenerator:
                 valid_followers = [c for c in state.hands[player] if c.type == 'follower' and c.cost <= len([x for x in state.hands[player] if x.type == 'follower'])]
                 if valid_followers:
                     o1_possible_values = valid_followers
+
+            # Handle multi-card selection on play (up to N targets)
+            if card.request_multi_card_selection_on_play[0]:
+                sel_type, max_count = card.request_multi_card_selection_on_play
+                multi_targets = []
+                if sel_type == "field":
+                    multi_targets = [f for f in state.fields[player] if isinstance(f, cards.Follower)]
+                elif sel_type == "field_opponent":
+                    multi_targets = [f for f in state.fields[3 - player] if isinstance(f, cards.Follower)]
+                elif sel_type == "field_both":
+                    multi_targets = [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
+                elif sel_type == "field_c":
+                    multi_targets = list(state.fields[player])
+                elif sel_type == "field_opponent_c":
+                    multi_targets = list(state.fields[3 - player])
+                elif sel_type == "field_both_c":
+                    multi_targets = list(state.fields[player] + state.fields[3 - player])
+                if multi_targets:
+                    combos = []
+                    for count in range(1, min(max_count, len(multi_targets)) + 1):
+                        for combo in itertools.combinations(multi_targets, count):
+                            combos.append(list(combo))
+                    o1_possible_values = combos
 
             # Handle effect choice options
             if card.request_effect_choose_option:
@@ -862,16 +891,29 @@ class MinimaxAI:
             else:
                 actual_card = _find_card_by_id(state.hands[player], card.unique_id)
             if actual_card is None:
-                raise CardNotFoundError(f"Card to play not found in hand: {card} with void_id {card.void_id} and unique_id {card.unique_id}") 
+                raise CardNotFoundError(f"Card to play not found in hand: {card} with void_id {card.void_id} and unique_id {card.unique_id}")
 
             actual_target = None
             if target is not None:
-                if target.is_generated:
-                    actual_target = _find_card_in_zones_by_void_id(state, target.void_id, player)
+                if isinstance(target, list):
+                    # Multi-target selection
+                    actual_target = []
+                    for t in target:
+                        if t.is_generated:
+                            at = _find_card_in_zones_by_void_id(state, t.void_id, player)
+                        else:
+                            at = _find_card_in_zones(state, t.unique_id, player)
+                        if at is None:
+                            raise CardNotFoundError(f"Multi-target for card play not found: {t}")
+                        actual_target.append(at)
                 else:
-                    actual_target = _find_card_in_zones(state, target.unique_id, player)
-                if actual_target is None:
-                    raise CardNotFoundError(f"Target for card play not found: {target}")
+                    # Single target selection
+                    if target.is_generated:
+                        actual_target = _find_card_in_zones_by_void_id(state, target.void_id, player)
+                    else:
+                        actual_target = _find_card_in_zones(state, target.unique_id, player)
+                    if actual_target is None:
+                        raise CardNotFoundError(f"Target for card play not found: {target}")
 
             return GameSimulator.play_card(state, player, actual_card, actual_target, effect_choice)
 
@@ -997,12 +1039,25 @@ class MinimaxAIPlayer:
 
             actual_target = None
             if target_template is not None:
-                if target_template.is_generated:
-                    actual_target = _find_card_in_zones_by_void_id(game_state, target_template.void_id, player)
+                if isinstance(target_template, list):
+                    # Multi-target selection
+                    actual_target = []
+                    for t in target_template:
+                        if t.is_generated:
+                            at = _find_card_in_zones_by_void_id(game_state, t.void_id, player)
+                        else:
+                            at = _find_card_in_zones(game_state, t.unique_id, player)
+                        if at is None:
+                            raise CardNotFoundError(f"Multi-target for card play not found: {t}")
+                        actual_target.append(at)
                 else:
-                    actual_target = _find_card_in_zones(game_state, target_template.unique_id, player)
-                if actual_target is None:
-                    raise CardNotFoundError("Target for card play not found")
+                    # Single target selection
+                    if target_template.is_generated:
+                        actual_target = _find_card_in_zones_by_void_id(game_state, target_template.void_id, player)
+                    else:
+                        actual_target = _find_card_in_zones(game_state, target_template.unique_id, player)
+                    if actual_target is None:
+                        raise CardNotFoundError("Target for card play not found")
 
             game_state.play_card(player, actual_card, ui_draw, ui_set_text, additional_target=actual_target, is_ai_player=True,
                                  effect_choice=effect_choice)

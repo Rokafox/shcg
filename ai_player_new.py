@@ -218,7 +218,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
     if isinstance(card, cards.Follower):
         follower_attrs = [
             'description_e', 'attack', 'hp', 'max_hp', 'original_attack', 'original_max_hp', 'can_enhance', 'is_enhanced',
-            'summoned_this_turn', 'enhanced_this_turn', 'request_card_selection_on_enhance',
+            'summoned_this_turn', 'enhanced_this_turn', 'request_card_selection_on_enhance', 'request_effect_choose_option_e',
             'attack_ability', 'how_many_attacks_max_of_turn', 'how_many_attacks_done_of_turn',
             'can_attack_this_turn', 'ability_rush', 'ability_super_rush', 'ability_protect', 'ability_drain',
             'ability_lethal'

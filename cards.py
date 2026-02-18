@@ -983,6 +983,32 @@ class お爺さんとお婆さん(Follower):
             self.mv(game_state.fields[self_owner], mode="to_hand", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=self_owner)
 
 
+class ExampleCard(Follower):
+    """
+    This is an example card used for testing.
+    """
+    def __init__(self):
+        super().__init__(name="Example Card", cost=1, attack=1, hp=1, can_enhance=True)
+        self.effect_description = "進化後、下記の効果から1つ選ぶ。・フォロワーすべてに5ダメージ・相手リーダーに3ダメージ"
+        self.request_effect_choose_option_e = ["Followers 5 damage", "Leader 3 damage"]
+
+    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                            selected_card_for_effect: Card | None, effect_choice: str | None):
+        self.on_enhance_effect_default()
+        if effect_choice == "Followers 5 damage":
+            for p in [1, 2]:
+                for c in game_state.fields[p].copy():
+                    if isinstance(c, Follower) and c != self:
+                        c.take_damage(5, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+            print("Example Card's effect: All followers take 5 damage.")
+        elif effect_choice == "Leader 3 damage":
+            opponent = game_state.opponent
+            game_state.player_take_damage(opponent, 3, draw_ui, set_text)
+            print("Example Card's effect: Opponent leader takes 3 damage.")
+        else:
+            raise ValueError("Invalid effect choice for Example Card.")
+
+
 # ==============================
 # Spells
 # ==============================
@@ -1314,7 +1340,8 @@ all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ,
                 不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪, 唯我の一刀, 侮蔑の絶傑ガルミーユ,
                 神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣, オウルキャット, 円卓の騎士ガウェイン, 天界への階段,
                 スターフェニックス, 白翼の守護神アイテール, 祈りの燭台, 神秘の指輪, キラキラヒーラー, ミスティアストロジスト,
-                水竜神の巫女, 黄金都市の姫リテュエル, 癒しの奏者アンリエット, フレイルナイト, 円卓会議, お爺さんとお婆さん]
+                水竜神の巫女, 黄金都市の姫リテュエル, 癒しの奏者アンリエット, フレイルナイト, 円卓会議, お爺さんとお婆さん,
+                ExampleCard]
 
 # sort with follower spell amulet order, then by cost ascending, then by name alphabetical
 _type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}

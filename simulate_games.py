@@ -234,7 +234,7 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
         return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)
 
     elif action_type == 'enhance':
-        follower, extra_target = action[1], action[2]
+        follower, extra_target, effect_choice = action[1], action[2], action[3]
         if follower.is_generated:
             actual_follower = next(
                 (f for f in state.fields[player]
@@ -259,7 +259,8 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
             if actual_target is None:
                 raise CardNotFoundError(f"Extra target for enhance not found: {extra_target}")
 
-        return GameSimulator.enhance_follower(state, player, actual_follower, actual_target)
+        return GameSimulator.enhance_follower(state, player, actual_follower, actual_target,
+                                              effect_choice=effect_choice)
 
     elif action_type == 'draw':
         return GameSimulator.draw_card(state, player)

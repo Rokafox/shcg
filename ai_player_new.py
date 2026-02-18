@@ -219,7 +219,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
     if isinstance(card, cards.Follower):
         follower_attrs = [
             'description_e', 'attack', 'hp', 'max_hp', 'original_attack', 'original_max_hp', 'can_enhance', 'is_enhanced',
-            'summoned_this_turn', 'enhanced_this_turn', 'request_card_selection_on_enhance', 'request_effect_choose_option_e',
+            'summoned_this_turn', 'enhanced_this_turn', 'request_card_selection_on_enhance', 'request_multi_card_selection_on_enhance', 'request_effect_choose_option_e',
             'attack_ability', 'how_many_attacks_max_of_turn', 'how_many_attacks_done_of_turn',
             'can_attack_this_turn', 'ability_rush', 'ability_super_rush', 'ability_protect', 'ability_drain',
             'ability_lethal'
@@ -332,7 +332,8 @@ class GameSimulator:
     @staticmethod
     def enhance_follower(state: GameStateSnapshot, player: int,
                          follower: cards.Follower, extra_target: Optional[cards.Card] = None,
-                         effect_choice: str | None = None) -> bool:
+                         effect_choice: str | None = None,
+                         multi_targets: list[cards.Card] | None = None) -> bool:
         """Enhance a follower. Returns True if successful."""
         if state.enhance_used_this_turn[player] >= state.max_enhance_allowed_per_turn[player]:
             return False
@@ -346,7 +347,11 @@ class GameSimulator:
         state.foxtail[player] -= 1
         state.enhance_used_this_turn[player] += 1
 
-        if follower.request_card_selection_on_enhance:
+        if follower.request_multi_card_selection_on_enhance[0]:
+            follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_target,
+                                       effect_choice=effect_choice,
+                                       selected_cards_for_multi_effect=multi_targets)
+        elif follower.request_card_selection_on_enhance:
             follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_target,
                                        effect_choice=effect_choice)
         else:
@@ -519,8 +524,8 @@ class MoveGenerator:
         return attacks
 
     @staticmethod
-    def get_enhanceable_followers(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Follower, cards.Follower | None, str | None]]:
-        """Get all followers that can be enhanced, with optional effect choice."""
+    def get_enhanceable_followers(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Follower, cards.Follower | None, str | None, list[cards.Card] | None]]:
+        """Get all followers that can be enhanced, with optional effect choice and multi targets."""
         if state.enhance_used_this_turn[player] >= state.max_enhance_allowed_per_turn[player]:
             return []
         if state.foxtail[player] < 1:
@@ -529,7 +534,7 @@ class MoveGenerator:
         enhanceable = []
         for follower in state.fields[player]:
             if follower.type == 'follower' and hasattr(follower, 'can_enhance') and follower.can_enhance:
-                # Build list of (target) options
+                # Build list of single target options
                 target_options = []
                 if follower.request_card_selection_on_enhance == "field_opponent":
                     targets = [f for f in state.fields[3 - player] if f.type == 'follower']
@@ -558,13 +563,36 @@ class MoveGenerator:
                 else:
                     target_options = [None]
 
+                # Build list of multi-card target options
+                multi_target_options = [None]
+                if follower.request_multi_card_selection_on_enhance[0]:
+                    sel_type, max_count = follower.request_multi_card_selection_on_enhance
+                    multi_targets = []
+                    if sel_type == "field":
+                        multi_targets = [f for f in state.fields[player] if isinstance(f, cards.Follower)]
+                    elif sel_type == "field_opponent":
+                        multi_targets = [f for f in state.fields[3 - player] if isinstance(f, cards.Follower)]
+                    elif sel_type == "field_both":
+                        multi_targets = [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
+                    elif sel_type == "field_c":
+                        multi_targets = list(state.fields[player])
+                    elif sel_type == "field_opponent_c":
+                        multi_targets = list(state.fields[3 - player])
+                    elif sel_type == "field_both_c":
+                        multi_targets = list(state.fields[player] + state.fields[3 - player])
+                    if multi_targets:
+                        combos = []
+                        for count in range(1, min(max_count, len(multi_targets)) + 1):
+                            for combo in itertools.combinations(multi_targets, count):
+                                combos.append(list(combo))
+                        multi_target_options = combos
+
                 # Build list of effect choice options
                 effect_options = follower.request_effect_choose_option_e if follower.request_effect_choose_option_e else [None]
 
-                # Cartesian product of targets and effect choices
-                for target in target_options:
-                    for effect_choice in effect_options:
-                        enhanceable.append((follower, target, effect_choice))
+                # Cartesian product of targets, effect choices, and multi targets
+                for target, effect_choice, multi_target in itertools.product(target_options, effect_options, multi_target_options):
+                    enhanceable.append((follower, target, effect_choice, multi_target))
         return enhanceable
 
     @staticmethod
@@ -877,8 +905,8 @@ class MinimaxAI:
             actions.append(('attack', attacker, target))
 
         # Enhance
-        for follower, target, effect_choice in MoveGenerator.get_enhanceable_followers(state, player):
-            actions.append(('enhance', follower, target, effect_choice))
+        for follower, target, effect_choice, multi_targets in MoveGenerator.get_enhanceable_followers(state, player):
+            actions.append(('enhance', follower, target, effect_choice, multi_targets))
 
         # Draw
         if MoveGenerator.can_draw_card(state, player):
@@ -954,6 +982,7 @@ class MinimaxAI:
 
         elif action_type == 'enhance':
             follower, extra_target, effect_choice = action[1], action[2], action[3]
+            multi_targets_template = action[4] if len(action) > 4 else None
             if follower.is_generated:
                 actual_follower = next(
                     (f for f in state.fields[player]
@@ -978,8 +1007,22 @@ class MinimaxAI:
                 if actual_target is None:
                     raise CardNotFoundError(f"Extra target for card enhance not found: {extra_target}")
 
+            # Resolve multi targets
+            actual_multi_targets = None
+            if multi_targets_template is not None:
+                actual_multi_targets = []
+                for t in multi_targets_template:
+                    if t.is_generated:
+                        at = _find_card_in_zones_by_void_id(state, t.void_id, player)
+                    else:
+                        at = _find_card_in_zones(state, t.unique_id, player)
+                    if at is None:
+                        raise CardNotFoundError(f"Multi-target for card enhance not found: {t}")
+                    actual_multi_targets.append(at)
+
             return GameSimulator.enhance_follower(state, player, actual_follower, actual_target,
-                                                  effect_choice=effect_choice)
+                                                  effect_choice=effect_choice,
+                                                  multi_targets=actual_multi_targets)
 
         elif action_type == 'draw':
             return GameSimulator.draw_card(state, player)
@@ -1115,6 +1158,7 @@ class MinimaxAIPlayer:
 
         elif action_type == 'enhance':
             follower_template, target_template, effect_choice = action[1], action[2], action[3]
+            multi_targets_template = action[4] if len(action) > 4 else None
 
             if follower_template.is_generated:
                 actual_follower = next(
@@ -1140,8 +1184,22 @@ class MinimaxAIPlayer:
                 if actual_target is None:
                     raise CardNotFoundError("Target for enhance not found")
 
+            # Resolve multi targets
+            actual_multi_targets = None
+            if multi_targets_template is not None:
+                actual_multi_targets = []
+                for t in multi_targets_template:
+                    if t.is_generated:
+                        at = _find_card_in_zones_by_void_id(game_state, t.void_id, player)
+                    else:
+                        at = _find_card_in_zones(game_state, t.unique_id, player)
+                    if at is None:
+                        raise CardNotFoundError(f"Multi-target for card enhance not found: {t}")
+                    actual_multi_targets.append(at)
+
             game_state.on_card_enhanced(player, actual_follower, actual_target, is_ai_player=True,
-                                        ui_set_text=ui_set_text, ui_draw=ui_draw, effect_choice=effect_choice)
+                                        ui_set_text=ui_set_text, ui_draw=ui_draw, effect_choice=effect_choice,
+                                        additional_multi_targets=actual_multi_targets)
 
             return [('enhance', actual_follower)]
 

@@ -80,8 +80,9 @@ class SHCGGameState:
             self.draw_hand_ui(player)
             self.draw_deck_ui(player)
 
-    def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, additional_target: cards.Card | None,
-                  is_ai_player: bool, effect_choice: str | None):
+    def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, additional_target,
+                  is_ai_player: bool, effect_choice: str | None,
+                  additional_multi_targets: list[cards.Card] | None = None):
         global text_box
         if len(self.fields[player]) > 4 and card.type != 'spell':
             return
@@ -91,13 +92,22 @@ class SHCGGameState:
         self.hands[player].remove(card)
         if ui_set_text:
             text_box.append_html_text(f"プレイヤー{player}が{card}をプレイしたぞ！\n")
+
+        target = None
+        multi_targets = None
+
         if card.request_card_selection_on_play:
             target = additional_target
             if ui_set_text and target is not None:
                 prefix = "AI" if is_ai_player else ""
                 text_box.append_html_text(f"{prefix}プレイヤー{player}が{card}をプレイする時に{target}を選択したのじゃ。\n")
-        else:
-            target = None
+
+        if card.request_multi_card_selection_on_play[0]:
+            multi_targets = additional_multi_targets
+            if ui_set_text and multi_targets:
+                prefix = "AI" if is_ai_player else ""
+                targets_str = ", ".join(str(t) for t in multi_targets)
+                text_box.append_html_text(f"{prefix}プレイヤー{player}が{card}をプレイする時に{targets_str}を複数選択したのじゃ。\n")
 
         if card.request_effect_choose_option:
             if effect_choice is None or effect_choice not in card.request_effect_choose_option:
@@ -109,10 +119,17 @@ class SHCGGameState:
         else:
             effect_choice = None
 
-        card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
-                                the_actual_textbox=text_box,
-                                selected_card_for_effect=target,
-                                effect_choice=effect_choice)
+        if card.request_multi_card_selection_on_play[0]:
+            card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
+                                    the_actual_textbox=text_box,
+                                    selected_card_for_effect=target,
+                                    effect_choice=effect_choice,
+                                    selected_cards_for_multi_effect=multi_targets)
+        else:
+            card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
+                                    the_actual_textbox=text_box,
+                                    selected_card_for_effect=target,
+                                    effect_choice=effect_choice)
         if isinstance(card, cards.Follower):
             self.fields[player].append(card)
             card.on_summon_effect()
@@ -526,17 +543,27 @@ end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 
 
 card_selection_window = None
 card_selection_list = None
+multi_card_selection_list = None
 effect_selection_list = None
 card_selection_confirm_button = None
 card_selection_cancel_button = None
 pending_selection_action = None  # dict with pending play/enhance action info
-_card_selection_option_map: dict[str, cards.Card] = {}  # display string -> card object
+_card_selection_option_map: dict[str, cards.Card] = {}  # display string -> card object (single select)
+_multi_card_selection_option_map: dict[str, cards.Card] = {}  # display string -> card object (multi select)
 
 
-def _build_card_selection_options(selection_type: str, pending_info: dict) -> list[str]:
-    """Build display strings for the card selection list and populate the option map."""
+def _build_card_selection_options(selection_type: str, pending_info: dict,
+                                   target_map: dict[str, cards.Card] | None = None) -> list[str]:
+    """Build display strings for the card selection list and populate the option map.
+    If target_map is provided, populate that dict. Otherwise populate _card_selection_option_map.
+    """
     global _card_selection_option_map
-    _card_selection_option_map = {}
+    if target_map is not None:
+        target_map.clear()
+        om = target_map
+    else:
+        _card_selection_option_map = {}
+        om = _card_selection_option_map
 
     cp = global_vars_shcg.current_player
     op = 3 - cp
@@ -550,26 +577,26 @@ def _build_card_selection_options(selection_type: str, pending_info: dict) -> li
             if isinstance(c, cards.Follower):
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
-                _card_selection_option_map[display] = c
+                om[display] = c
 
     elif selection_type == "field_opponent":
         for i, c in enumerate(global_vars_shcg.fields[op]):
             if isinstance(c, cards.Follower):
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
-                _card_selection_option_map[display] = c
+                om[display] = c
 
     elif selection_type == "field_both":
         for i, c in enumerate(global_vars_shcg.fields[cp]):
             if isinstance(c, cards.Follower):
                 display = f"CP {i + 1} {str(c)}"
                 options.append(display)
-                _card_selection_option_map[display] = c
+                om[display] = c
         for i, c in enumerate(global_vars_shcg.fields[op]):
             if isinstance(c, cards.Follower):
                 display = f"OP {i + 1} {str(c)}"
                 options.append(display)
-                _card_selection_option_map[display] = c
+                om[display] = c
 
     elif selection_type == "hand":
         for i, c in enumerate(global_vars_shcg.hands[cp]):
@@ -577,7 +604,7 @@ def _build_card_selection_options(selection_type: str, pending_info: dict) -> li
                 continue
             display = f"{i + 1} {str(c)}"
             options.append(display)
-            _card_selection_option_map[display] = c
+            om[display] = c
 
     elif selection_type == "hand_spell":
         for i, c in enumerate(global_vars_shcg.hands[cp]):
@@ -586,7 +613,7 @@ def _build_card_selection_options(selection_type: str, pending_info: dict) -> li
             if isinstance(c, cards.Spell):
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
-                _card_selection_option_map[display] = c
+                om[display] = c
 
     elif selection_type == "hand_follower_aiteru":
         hand_after = [c for c in global_vars_shcg.hands[cp] if c is not played_card]
@@ -595,22 +622,44 @@ def _build_card_selection_options(selection_type: str, pending_info: dict) -> li
             if c.type == 'follower' and c.cost <= num_followers:
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
-                _card_selection_option_map[display] = c
+                om[display] = c
+
+    elif selection_type == "field_c":
+        for i, c in enumerate(global_vars_shcg.fields[cp]):
+            display = f"{i + 1} {str(c)}"
+            options.append(display)
+            om[display] = c
+
+    elif selection_type == "field_opponent_c":
+        for i, c in enumerate(global_vars_shcg.fields[op]):
+            display = f"{i + 1} {str(c)}"
+            options.append(display)
+            om[display] = c
+
+    elif selection_type == "field_both_c":
+        for i, c in enumerate(global_vars_shcg.fields[cp]):
+            display = f"CP {i + 1} {str(c)}"
+            options.append(display)
+            om[display] = c
+        for i, c in enumerate(global_vars_shcg.fields[op]):
+            display = f"OP {i + 1} {str(c)}"
+            options.append(display)
+            om[display] = c
 
     elif selection_type == "hand_opponent":
         for i, c in enumerate(global_vars_shcg.hands[op]):
             display = f"{i + 1} {str(c)}"
             options.append(display)
-            _card_selection_option_map[display] = c
+            om[display] = c
 
     return options
 
 
 def build_card_selection_window(pending_info: dict):
     """Open a window for the player to select a target card and/or effect choice."""
-    global card_selection_window, card_selection_list, effect_selection_list
+    global card_selection_window, card_selection_list, multi_card_selection_list, effect_selection_list
     global card_selection_confirm_button, card_selection_cancel_button
-    global pending_selection_action
+    global pending_selection_action, _multi_card_selection_option_map
 
     pending_selection_action = pending_info
 
@@ -618,18 +667,27 @@ def build_card_selection_window(pending_info: dict):
         card_selection_window.kill()
 
     card_sel_type = pending_info.get('needs_card_selection', '')
+    multi_sel = pending_info.get('needs_multi_card_selection', ('', 0))
     effect_options = pending_info.get('needs_effect_choice', [])
 
-    # Compute card options
-    card_options = []
+    # Compute single-select card options (populates _card_selection_option_map)
+    single_card_options = []
     if card_sel_type:
-        card_options = _build_card_selection_options(card_sel_type, pending_info)
+        single_card_options = _build_card_selection_options(card_sel_type, pending_info)
+
+    # Compute multi-select card options (populates _multi_card_selection_option_map)
+    multi_card_options = []
+    if multi_sel[0]:
+        multi_card_options = _build_card_selection_options(multi_sel[0], pending_info,
+                                                           target_map=_multi_card_selection_option_map)
 
     # Compute window height dynamically
     y_offset = 10
     win_height = 80  # base for buttons + padding
-    if card_options:
-        win_height += 30 + min(len(card_options) * 25, 200) + 10
+    if single_card_options:
+        win_height += 30 + min(len(single_card_options) * 25, 200) + 10
+    if multi_card_options:
+        win_height += 30 + min(len(multi_card_options) * 25, 200) + 10
     if effect_options:
         win_height += 30 + min(len(effect_options) * 25, 100) + 10
     win_height = max(win_height, 180)
@@ -647,9 +705,11 @@ def build_card_selection_window(pending_info: dict):
     )
 
     card_selection_list = None
+    multi_card_selection_list = None
     effect_selection_list = None
 
-    if card_options:
+    # Single-select list
+    if single_card_options:
         pygame_gui.elements.UILabel(
             pygame.Rect((10, y_offset), (380, 25)),
             "ターゲットを選択：",
@@ -657,13 +717,33 @@ def build_card_selection_window(pending_info: dict):
             container=card_selection_window
         )
         y_offset += 30
-        list_height = min(len(card_options) * 25, 200)
+        list_height = min(len(single_card_options) * 25, 200)
         card_selection_list = pygame_gui.elements.UISelectionList(
             pygame.Rect((10, y_offset), (380, list_height)),
-            card_options,
+            single_card_options,
             ui_manager,
             container=card_selection_window,
             allow_multi_select=False
+        )
+        y_offset += list_height + 10
+
+    # Multi-select list
+    if multi_card_options:
+        max_count = multi_sel[1]
+        pygame_gui.elements.UILabel(
+            pygame.Rect((10, y_offset), (380, 25)),
+            f"複数ターゲットを選択（最大{max_count}体）：",
+            ui_manager,
+            container=card_selection_window
+        )
+        y_offset += 30
+        list_height = min(len(multi_card_options) * 25, 200)
+        multi_card_selection_list = pygame_gui.elements.UISelectionList(
+            pygame.Rect((10, y_offset), (380, list_height)),
+            multi_card_options,
+            ui_manager,
+            container=card_selection_window,
+            allow_multi_select=True
         )
         y_offset += list_height + 10
 
@@ -714,34 +794,48 @@ def _execute_pending_selection():
     card = info['card']
 
     selected_target = None
+    selected_multi_targets = None
     selected_effect = None
 
     card_required = bool(info.get('needs_card_selection'))
+    multi_sel = info.get('needs_multi_card_selection', ('', 0))
+    multi_card_required = bool(multi_sel[0])
     effect_required = bool(info.get('needs_effect_choice'))
-    card_ok = not card_required
+    single_ok = not card_required
+    multi_ok = not multi_card_required
     effect_ok = not effect_required
 
-    # Read card selection
+    # Read single card selection
     if card_required and card_selection_list:
         selected_str = card_selection_list.get_single_selection()
-        # selected_str = card_selection_list.get_multi_selection
         if selected_str and selected_str in _card_selection_option_map:
             selected_target = _card_selection_option_map[selected_str]
-        card_ok = selected_target is not None
+        single_ok = selected_target is not None
+
+    # Read multi-card selection (independent from single)
+    if multi_card_required and multi_card_selection_list:
+        max_count = multi_sel[1]
+        selected_strs = multi_card_selection_list.get_multi_selection()
+        if selected_strs and 0 < len(selected_strs) <= max_count:
+            selected_multi_targets = [_multi_card_selection_option_map[s] for s in selected_strs if s in _multi_card_selection_option_map]
+            multi_ok = len(selected_multi_targets) > 0
+        else:
+            multi_ok = False
 
     # Read effect choice
     if effect_required and effect_selection_list:
         selected_effect = effect_selection_list.get_single_selection()
         effect_ok = selected_effect is not None
 
-    can_proceed = card_ok and effect_ok
+    can_proceed = single_ok and multi_ok and effect_ok
 
     if can_proceed:
     # Execute action
         if action_type == 'play':
             global_vars_shcg.play_card(player, card, ui_draw=True, ui_set_text=True,
                                     additional_target=selected_target,
-                                    is_ai_player=False, effect_choice=selected_effect)
+                                    is_ai_player=False, effect_choice=selected_effect,
+                                    additional_multi_targets=selected_multi_targets)
         elif action_type == 'enhance':
             global_vars_shcg.on_card_enhanced(player, card_to_enhance=card,
                                             additional_target=selected_target,
@@ -758,13 +852,14 @@ def _execute_pending_selection():
 def _cancel_pending_selection():
     """Cancel any pending selection and close the window."""
     global pending_selection_action, card_selection_window
-    global card_selection_list, effect_selection_list
+    global card_selection_list, multi_card_selection_list, effect_selection_list
     global card_selection_confirm_button, card_selection_cancel_button
     pending_selection_action = None
     if card_selection_window:
         card_selection_window.kill()
     card_selection_window = None
     card_selection_list = None
+    multi_card_selection_list = None
     effect_selection_list = None
     card_selection_confirm_button = None
     card_selection_cancel_button = None
@@ -1468,25 +1563,32 @@ if __name__ == "__main__":
                         if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in global_vars_field_slots[cp]]):
                             if the_selected_card:
                                 needs_card_sel = the_selected_card.request_card_selection_on_play
+                                needs_multi_card_sel = the_selected_card.request_multi_card_selection_on_play
                                 needs_effect_sel = the_selected_card.request_effect_choose_option
-                                if needs_card_sel or needs_effect_sel:
-                                    # Check if card selection has valid targets; skip if empty
-                                    has_valid_targets = True
+                                if needs_card_sel or needs_multi_card_sel[0] or needs_effect_sel:
+                                    # Check if any selection type has valid targets
+                                    has_any_valid = False
+                                    dummy_info = {'type': 'play', 'card': the_selected_card, 'player': cp}
                                     if needs_card_sel:
-                                        test_options = _build_card_selection_options(needs_card_sel, {
-                                            'type': 'play', 'card': the_selected_card, 'player': cp})
-                                        if not test_options:
-                                            has_valid_targets = False
-                                    if has_valid_targets:
+                                        if _build_card_selection_options(needs_card_sel, dummy_info):
+                                            has_any_valid = True
+                                    if needs_multi_card_sel[0]:
+                                        tmp_map = {}
+                                        if _build_card_selection_options(needs_multi_card_sel[0], dummy_info, target_map=tmp_map):
+                                            has_any_valid = True
+                                    if needs_effect_sel:
+                                        has_any_valid = True
+                                    if has_any_valid:
                                         build_card_selection_window({
                                             'type': 'play',
                                             'player': cp,
                                             'card': the_selected_card,
                                             'needs_card_selection': needs_card_sel,
+                                            'needs_multi_card_selection': needs_multi_card_sel,
                                             'needs_effect_choice': needs_effect_sel,
                                         })
                                     else:
-                                        # No valid targets, play with None target
+                                        # No valid targets at all, play with None target
                                         global_vars_shcg.play_card(cp, the_selected_card, ui_draw=True, ui_set_text=True,
                                                                    additional_target=None,
                                                                    is_ai_player=False, effect_choice=None)

@@ -250,10 +250,10 @@ class GameSimulator:
 
     @staticmethod
     def play_card(state: GameStateSnapshot, player: int, card: cards.Card,
-                  target: Optional[cards.Card] = None, effect_choice: str | None = None,
+                  targets: Optional[List[cards.Card]] = None, effect_choice: str | None = None,
                   multi_targets: Optional[List[cards.Card]] = None) -> bool:
         """Play a card from hand. Returns True if successful.
-        target: single card selection (Card or None).
+        targets: list of selected cards (one per step in request_card_selection_on_play), or None.
         multi_targets: multi card selection (list[Card] or None).
         Both can co-exist on the same card.
         """
@@ -268,10 +268,10 @@ class GameSimulator:
         state.hands[player].remove(card)
 
         if card.request_multi_card_selection_on_play[0]:
-            card.on_play_effect(state, False, False, None, target, effect_choice,
+            card.on_play_effect(state, False, False, None, targets, effect_choice,
                                selected_cards_for_multi_effect=multi_targets)
         else:
-            card.on_play_effect(state, False, False, None, target, effect_choice)
+            card.on_play_effect(state, False, False, None, targets, effect_choice)
 
         if isinstance(card, cards.Follower):
             state.fields[player].append(card)
@@ -331,10 +331,12 @@ class GameSimulator:
 
     @staticmethod
     def enhance_follower(state: GameStateSnapshot, player: int,
-                         follower: cards.Follower, extra_target: Optional[cards.Card] = None,
+                         follower: cards.Follower, extra_targets: Optional[List[cards.Card]] = None,
                          effect_choice: str | None = None,
                          multi_targets: list[cards.Card] | None = None) -> bool:
-        """Enhance a follower. Returns True if successful."""
+        """Enhance a follower. Returns True if successful.
+        extra_targets: list of selected cards (one per step in request_card_selection_on_enhance), or None.
+        """
         if state.enhance_used_this_turn[player] >= state.max_enhance_allowed_per_turn[player]:
             return False
         if state.foxtail[player] < 1:
@@ -348,11 +350,11 @@ class GameSimulator:
         state.enhance_used_this_turn[player] += 1
 
         if follower.request_multi_card_selection_on_enhance[0]:
-            follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_target,
+            follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_targets,
                                        effect_choice=effect_choice,
                                        selected_cards_for_multi_effect=multi_targets)
         elif follower.request_card_selection_on_enhance:
-            follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_target,
+            follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_targets,
                                        effect_choice=effect_choice)
         else:
             follower.on_enhance_effect(state, False, False, None, None, effect_choice=effect_choice)
@@ -400,12 +402,37 @@ class MoveGenerator:
     """
 
     @staticmethod
+    def _get_targets_for_selection_type(sel_type: str, state: GameStateSnapshot, player: int) -> list:
+        """Get list of valid targets for a given selection type."""
+        if sel_type == "field":
+            return [f for f in state.fields[player] if isinstance(f, cards.Follower)]
+        elif sel_type == "field_opponent":
+            return [f for f in state.fields[3 - player] if isinstance(f, cards.Follower)]
+        elif sel_type == "field_both":
+            return [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
+        elif sel_type == "hand":
+            return list(state.hands[player])
+        elif sel_type == "hand_spell":
+            return [c for c in state.hands[player] if isinstance(c, cards.Spell)]
+        elif sel_type == "hand_follower_aiteru":
+            return [c for c in state.hands[player] if c.type == 'follower' and c.cost <= len([x for x in state.hands[player] if x.type == 'follower'])]
+        elif sel_type == "hand_opponent":
+            return list(state.hands[3 - player])
+        elif sel_type == "field_c":
+            return list(state.fields[player])
+        elif sel_type == "field_opponent_c":
+            return list(state.fields[3 - player])
+        elif sel_type == "field_both_c":
+            return list(state.fields[player] + state.fields[3 - player])
+        return []
+
+    @staticmethod
     def get_playable_cards(state: GameStateSnapshot, player: int) -> List[Tuple]:
         """
         Get all playable cards with their targets and effect choice, if any.
-        Returns list of (card, single_target, effect_choice, multi_targets) tuples.
-        single_target and multi_targets are independent and can co-exist.
-        WARNING: Can only target followers on the field for now.
+        Returns list of (card, targets_list, effect_choice, multi_targets) tuples.
+        targets_list is a list of selected cards (one per step) or None.
+        multi_targets is independent and can co-exist.
         """
         playable = []
         hand = state.hands[player]
@@ -417,60 +444,28 @@ class MoveGenerator:
                 continue
             if card.type != 'spell' and field_count >= MAX_FIELD_SIZE:
                 continue
-            # o0: card, o1: single target, o2: effect choice, o3: multi targets
+            # o0: card, o1: targets list, o2: effect choice, o3: multi targets
             o0 = card
-            o1_possible_values = [None]  # single selection targets
+            o1_possible_values = [None]  # list-of-targets selection combos
             o2_possible_values = [None]  # effect choices
             o3_possible_values = [None]  # multi selection target combos
 
-            # Handle single-card targeting
-            # if select, no option to not select as part of game mechanics
-            if card.request_card_selection_on_play == "field":
-                targets = [f for f in state.fields[player] if isinstance(f, cards.Follower)]
-                if targets:
-                    o1_possible_values = targets
+            # Handle card selection list (each element is one selection step)
+            if card.request_card_selection_on_play:
+                step_options = []
+                for sel_type in card.request_card_selection_on_play:
+                    targets = MoveGenerator._get_targets_for_selection_type(sel_type, state, player)
+                    if targets:
+                        step_options.append(targets)
+                    else:
+                        step_options.append([None])
+                # Cartesian product of all steps: each combo is a tuple of one target per step
+                o1_possible_values = [list(combo) for combo in itertools.product(*step_options)]
 
-            elif card.request_card_selection_on_play == "field_opponent":
-                targets = [f for f in state.fields[3 - player] if isinstance(f, cards.Follower)]
-                if targets:
-                    o1_possible_values = targets
-
-            elif card.request_card_selection_on_play == "field_both":
-                targets = [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
-                if targets:
-                    o1_possible_values = targets
-
-            elif card.request_card_selection_on_play == "hand":
-                targets = state.hands[player]
-                if targets:
-                    o1_possible_values = targets
-
-            elif card.request_card_selection_on_play == "hand_spell":
-                targets = [c for c in state.hands[player] if isinstance(c, cards.Spell)]
-                if targets:
-                    o1_possible_values = targets
-
-            elif card.request_card_selection_on_play == "hand_follower_aiteru":
-                valid_followers = [c for c in state.hands[player] if c.type == 'follower' and c.cost <= len([x for x in state.hands[player] if x.type == 'follower'])]
-                if valid_followers:
-                    o1_possible_values = valid_followers
-
-            # Handle multi-card selection on play (up to N targets, independent from single)
+            # Handle multi-card selection on play (up to N targets, independent from per-step)
             if card.request_multi_card_selection_on_play[0]:
                 sel_type, max_count = card.request_multi_card_selection_on_play
-                multi_targets = []
-                if sel_type == "field":
-                    multi_targets = [f for f in state.fields[player] if isinstance(f, cards.Follower)]
-                elif sel_type == "field_opponent":
-                    multi_targets = [f for f in state.fields[3 - player] if isinstance(f, cards.Follower)]
-                elif sel_type == "field_both":
-                    multi_targets = [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
-                elif sel_type == "field_c":
-                    multi_targets = list(state.fields[player])
-                elif sel_type == "field_opponent_c":
-                    multi_targets = list(state.fields[3 - player])
-                elif sel_type == "field_both_c":
-                    multi_targets = list(state.fields[player] + state.fields[3 - player])
+                multi_targets = MoveGenerator._get_targets_for_selection_type(sel_type, state, player)
                 if multi_targets:
                     combos = []
                     for count in range(1, min(max_count, len(multi_targets)) + 1):
@@ -482,9 +477,9 @@ class MoveGenerator:
             if card.request_effect_choose_option:
                 o2_possible_values = card.request_effect_choose_option
 
-            # Combine: cartesian product of single targets, effect choices, and multi targets
-            for single_target, effect_choice, multi_target in itertools.product(o1_possible_values, o2_possible_values, o3_possible_values):
-                playable.append((o0, single_target, effect_choice, multi_target))
+            # Combine: cartesian product of targets list, effect choices, and multi targets
+            for targets_list, effect_choice, multi_target in itertools.product(o1_possible_values, o2_possible_values, o3_possible_values):
+                playable.append((o0, targets_list, effect_choice, multi_target))
 
         return playable
 
@@ -524,8 +519,9 @@ class MoveGenerator:
         return attacks
 
     @staticmethod
-    def get_enhanceable_followers(state: GameStateSnapshot, player: int) -> List[Tuple[cards.Follower, cards.Follower | None, str | None, list[cards.Card] | None]]:
-        """Get all followers that can be enhanced, with optional effect choice and multi targets."""
+    def get_enhanceable_followers(state: GameStateSnapshot, player: int) -> List[Tuple]:
+        """Get all followers that can be enhanced, with optional targets list, effect choice and multi targets.
+        Returns list of (follower, targets_list, effect_choice, multi_targets) tuples."""
         if state.enhance_used_this_turn[player] >= state.max_enhance_allowed_per_turn[player]:
             return []
         if state.foxtail[player] < 1:
@@ -534,52 +530,23 @@ class MoveGenerator:
         enhanceable = []
         for follower in state.fields[player]:
             if follower.type == 'follower' and hasattr(follower, 'can_enhance') and follower.can_enhance:
-                # Build list of single target options
-                target_options = []
-                if follower.request_card_selection_on_enhance == "field_opponent":
-                    targets = [f for f in state.fields[3 - player] if f.type == 'follower']
-                    if targets:
-                        target_options = targets
-                    else:
-                        target_options = [None]
-                elif follower.request_card_selection_on_enhance == "field":
-                    targets = [f for f in state.fields[player] if f.type == 'follower']
-                    if targets:
-                        target_options = targets
-                    else:
-                        target_options = [None]
-                elif follower.request_card_selection_on_enhance == "field_both":
-                    targets = [f for f in state.fields[player] + state.fields[3 - player] if f.type == 'follower']
-                    if targets:
-                        target_options = targets
-                    else:
-                        target_options = [None]
-                elif follower.request_card_selection_on_enhance == "hand_opponent":
-                    targets = [c for c in state.hands[3 - player]]
-                    if targets:
-                        target_options = targets
-                    else:
-                        target_options = [None]
-                else:
-                    target_options = [None]
+                # Build targets list options (per-step selection, now a list)
+                target_list_options = [None]
+                if follower.request_card_selection_on_enhance:
+                    step_options = []
+                    for sel_type in follower.request_card_selection_on_enhance:
+                        targets = MoveGenerator._get_targets_for_selection_type(sel_type, state, player)
+                        if targets:
+                            step_options.append(targets)
+                        else:
+                            step_options.append([None])
+                    target_list_options = [list(combo) for combo in itertools.product(*step_options)]
 
                 # Build list of multi-card target options
                 multi_target_options = [None]
                 if follower.request_multi_card_selection_on_enhance[0]:
                     sel_type, max_count = follower.request_multi_card_selection_on_enhance
-                    multi_targets = []
-                    if sel_type == "field":
-                        multi_targets = [f for f in state.fields[player] if isinstance(f, cards.Follower)]
-                    elif sel_type == "field_opponent":
-                        multi_targets = [f for f in state.fields[3 - player] if isinstance(f, cards.Follower)]
-                    elif sel_type == "field_both":
-                        multi_targets = [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
-                    elif sel_type == "field_c":
-                        multi_targets = list(state.fields[player])
-                    elif sel_type == "field_opponent_c":
-                        multi_targets = list(state.fields[3 - player])
-                    elif sel_type == "field_both_c":
-                        multi_targets = list(state.fields[player] + state.fields[3 - player])
+                    multi_targets = MoveGenerator._get_targets_for_selection_type(sel_type, state, player)
                     if multi_targets:
                         combos = []
                         for count in range(1, min(max_count, len(multi_targets)) + 1):
@@ -590,9 +557,9 @@ class MoveGenerator:
                 # Build list of effect choice options
                 effect_options = follower.request_effect_choose_option_e if follower.request_effect_choose_option_e else [None]
 
-                # Cartesian product of targets, effect choices, and multi targets
-                for target, effect_choice, multi_target in itertools.product(target_options, effect_options, multi_target_options):
-                    enhanceable.append((follower, target, effect_choice, multi_target))
+                # Cartesian product of targets list, effect choices, and multi targets
+                for targets_list, effect_choice, multi_target in itertools.product(target_list_options, effect_options, multi_target_options):
+                    enhanceable.append((follower, targets_list, effect_choice, multi_target))
         return enhanceable
 
     @staticmethod
@@ -919,7 +886,7 @@ class MinimaxAI:
         action_type = action[0]
 
         if action_type == 'play':
-            card, target, effect_choice = action[1], action[2], action[3]
+            card, targets_template, effect_choice = action[1], action[2], action[3]
             multi_targets_template = action[4] if len(action) > 4 else None
             if card.is_generated:
                 actual_card = _find_card_by_void_id(state.hands[player], card.void_id)
@@ -928,15 +895,23 @@ class MinimaxAI:
             if actual_card is None:
                 raise CardNotFoundError(f"Card to play not found in hand: {card} with void_id {card.void_id} and unique_id {card.unique_id}")
 
-            # Resolve single target
-            actual_target = None
-            if target is not None:
-                if target.is_generated:
-                    actual_target = _find_card_in_zones_by_void_id(state, target.void_id, player)
-                else:
-                    actual_target = _find_card_in_zones(state, target.unique_id, player)
-                if actual_target is None:
-                    raise CardNotFoundError(f"Target for card play not found: {target}")
+            # Resolve targets list (one per selection step)
+            actual_targets = None
+            if targets_template is not None:
+                actual_targets = []
+                for t in targets_template:
+                    if t is None:
+                        actual_targets.append(None)
+                    elif t.is_generated:
+                        at = _find_card_in_zones_by_void_id(state, t.void_id, player)
+                        if at is None:
+                            raise CardNotFoundError(f"Target for card play not found: {t}")
+                        actual_targets.append(at)
+                    else:
+                        at = _find_card_in_zones(state, t.unique_id, player)
+                        if at is None:
+                            raise CardNotFoundError(f"Target for card play not found: {t}")
+                        actual_targets.append(at)
 
             # Resolve multi targets
             actual_multi_targets = None
@@ -951,7 +926,7 @@ class MinimaxAI:
                         raise CardNotFoundError(f"Multi-target for card play not found: {t}")
                     actual_multi_targets.append(at)
 
-            return GameSimulator.play_card(state, player, actual_card, actual_target, effect_choice,
+            return GameSimulator.play_card(state, player, actual_card, actual_targets, effect_choice,
                                            multi_targets=actual_multi_targets)
 
         elif action_type == 'attack':
@@ -981,7 +956,7 @@ class MinimaxAI:
             return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)
 
         elif action_type == 'enhance':
-            follower, extra_target, effect_choice = action[1], action[2], action[3]
+            follower, targets_template, effect_choice = action[1], action[2], action[3]
             multi_targets_template = action[4] if len(action) > 4 else None
             if follower.is_generated:
                 actual_follower = next(
@@ -998,14 +973,23 @@ class MinimaxAI:
             if actual_follower is None:
                 raise CardNotFoundError(f"Follower to enhance not found on field: {follower}")
 
-            actual_target = None
-            if extra_target is not None:
-                if extra_target.is_generated:
-                    actual_target = _find_card_in_zones_by_void_id(state, extra_target.void_id, player)
-                else:
-                    actual_target = _find_card_in_zones(state, extra_target.unique_id, player)
-                if actual_target is None:
-                    raise CardNotFoundError(f"Extra target for card enhance not found: {extra_target}")
+            # Resolve targets list (one per selection step)
+            actual_targets = None
+            if targets_template is not None:
+                actual_targets = []
+                for t in targets_template:
+                    if t is None:
+                        actual_targets.append(None)
+                    elif t.is_generated:
+                        at = _find_card_in_zones_by_void_id(state, t.void_id, player)
+                        if at is None:
+                            raise CardNotFoundError(f"Target for card enhance not found: {t}")
+                        actual_targets.append(at)
+                    else:
+                        at = _find_card_in_zones(state, t.unique_id, player)
+                        if at is None:
+                            raise CardNotFoundError(f"Target for card enhance not found: {t}")
+                        actual_targets.append(at)
 
             # Resolve multi targets
             actual_multi_targets = None
@@ -1020,7 +1004,7 @@ class MinimaxAI:
                         raise CardNotFoundError(f"Multi-target for card enhance not found: {t}")
                     actual_multi_targets.append(at)
 
-            return GameSimulator.enhance_follower(state, player, actual_follower, actual_target,
+            return GameSimulator.enhance_follower(state, player, actual_follower, actual_targets,
                                                   effect_choice=effect_choice,
                                                   multi_targets=actual_multi_targets)
 
@@ -1080,7 +1064,7 @@ class MinimaxAIPlayer:
             return []
 
         elif action_type == 'play':
-            card_template, target_template, effect_choice = action[1], action[2], action[3]
+            card_template, targets_template, effect_choice = action[1], action[2], action[3]
             multi_targets_template = action[4] if len(action) > 4 else None
 
             if card_template.is_generated:
@@ -1090,15 +1074,23 @@ class MinimaxAIPlayer:
             if actual_card is None:
                 raise CardNotFoundError("Card to play not found in hand")
 
-            # Resolve single target
-            actual_target = None
-            if target_template is not None:
-                if target_template.is_generated:
-                    actual_target = _find_card_in_zones_by_void_id(game_state, target_template.void_id, player)
-                else:
-                    actual_target = _find_card_in_zones(game_state, target_template.unique_id, player)
-                if actual_target is None:
-                    raise CardNotFoundError("Target for card play not found")
+            # Resolve targets list (one per selection step)
+            actual_targets = None
+            if targets_template is not None:
+                actual_targets = []
+                for t in targets_template:
+                    if t is None:
+                        actual_targets.append(None)
+                    elif t.is_generated:
+                        at = _find_card_in_zones_by_void_id(game_state, t.void_id, player)
+                        if at is None:
+                            raise CardNotFoundError("Target for card play not found")
+                        actual_targets.append(at)
+                    else:
+                        at = _find_card_in_zones(game_state, t.unique_id, player)
+                        if at is None:
+                            raise CardNotFoundError("Target for card play not found")
+                        actual_targets.append(at)
 
             # Resolve multi targets
             actual_multi_targets = None
@@ -1113,7 +1105,7 @@ class MinimaxAIPlayer:
                         raise CardNotFoundError(f"Multi-target for card play not found: {t}")
                     actual_multi_targets.append(at)
 
-            game_state.play_card(player, actual_card, ui_draw, ui_set_text, additional_target=actual_target, is_ai_player=True,
+            game_state.play_card(player, actual_card, ui_draw, ui_set_text, additional_targets=actual_targets, is_ai_player=True,
                                  effect_choice=effect_choice, additional_multi_targets=actual_multi_targets)
             return [('play', actual_card)]
 
@@ -1157,7 +1149,7 @@ class MinimaxAIPlayer:
             return [('attack', actual_attacker, actual_target)]
 
         elif action_type == 'enhance':
-            follower_template, target_template, effect_choice = action[1], action[2], action[3]
+            follower_template, targets_template, effect_choice = action[1], action[2], action[3]
             multi_targets_template = action[4] if len(action) > 4 else None
 
             if follower_template.is_generated:
@@ -1175,14 +1167,23 @@ class MinimaxAIPlayer:
             if actual_follower is None:
                 raise CardNotFoundError(f"Follower to enhance not found on field: {actual_follower}")
 
-            actual_target = None
-            if target_template is not None:
-                if target_template.is_generated:
-                    actual_target = _find_card_in_zones_by_void_id(game_state, target_template.void_id, player)
-                else:
-                    actual_target = _find_card_in_zones(game_state, target_template.unique_id, player)
-                if actual_target is None:
-                    raise CardNotFoundError("Target for enhance not found")
+            # Resolve targets list (one per selection step)
+            actual_targets = None
+            if targets_template is not None:
+                actual_targets = []
+                for t in targets_template:
+                    if t is None:
+                        actual_targets.append(None)
+                    elif t.is_generated:
+                        at = _find_card_in_zones_by_void_id(game_state, t.void_id, player)
+                        if at is None:
+                            raise CardNotFoundError("Target for enhance not found")
+                        actual_targets.append(at)
+                    else:
+                        at = _find_card_in_zones(game_state, t.unique_id, player)
+                        if at is None:
+                            raise CardNotFoundError("Target for enhance not found")
+                        actual_targets.append(at)
 
             # Resolve multi targets
             actual_multi_targets = None
@@ -1197,7 +1198,7 @@ class MinimaxAIPlayer:
                         raise CardNotFoundError(f"Multi-target for card enhance not found: {t}")
                     actual_multi_targets.append(at)
 
-            game_state.on_card_enhanced(player, actual_follower, actual_target, is_ai_player=True,
+            game_state.on_card_enhanced(player, actual_follower, actual_targets, is_ai_player=True,
                                         ui_set_text=ui_set_text, ui_draw=ui_draw, effect_choice=effect_choice,
                                         additional_multi_targets=actual_multi_targets)
 

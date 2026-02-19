@@ -188,7 +188,7 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
     action_type = action[0]
 
     if action_type == 'play':
-        card, target, effect_choice = action[1], action[2], action[3]
+        card, targets_template, effect_choice = action[1], action[2], action[3]
         multi_targets_template = action[4] if len(action) > 4 else None
         if card.is_generated:
             actual_card = _find_card_by_void_id(state.hands[player], card.void_id)
@@ -197,15 +197,23 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
         if actual_card is None:
             raise CardNotFoundError(f"Card to play not found in hand: {card}")
 
-        # Resolve single target
-        actual_target = None
-        if target is not None:
-            if target.is_generated:
-                actual_target = _find_card_in_zones_by_void_id(state, target.void_id, player)
-            else:
-                actual_target = _find_card_in_zones(state, target.unique_id, player)
-            if actual_target is None:
-                raise CardNotFoundError(f"Target for card play not found: {target}")
+        # Resolve targets list (one per selection step)
+        actual_targets = None
+        if targets_template is not None:
+            actual_targets = []
+            for t in targets_template:
+                if t is None:
+                    actual_targets.append(None)
+                elif t.is_generated:
+                    at = _find_card_in_zones_by_void_id(state, t.void_id, player)
+                    if at is None:
+                        raise CardNotFoundError(f"Target for card play not found: {t}")
+                    actual_targets.append(at)
+                else:
+                    at = _find_card_in_zones(state, t.unique_id, player)
+                    if at is None:
+                        raise CardNotFoundError(f"Target for card play not found: {t}")
+                    actual_targets.append(at)
 
         # Resolve multi targets
         actual_multi_targets = None
@@ -220,7 +228,7 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
                     raise CardNotFoundError(f"Multi-target for card play not found: {t}")
                 actual_multi_targets.append(at)
 
-        return GameSimulator.play_card(state, player, actual_card, actual_target, effect_choice,
+        return GameSimulator.play_card(state, player, actual_card, actual_targets, effect_choice,
                                        multi_targets=actual_multi_targets)
 
     elif action_type == 'attack':
@@ -250,7 +258,7 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
         return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)
 
     elif action_type == 'enhance':
-        follower, extra_target, effect_choice = action[1], action[2], action[3]
+        follower, targets_template, effect_choice = action[1], action[2], action[3]
         multi_targets_template = action[4] if len(action) > 4 else None
         if follower.is_generated:
             actual_follower = next(
@@ -267,14 +275,23 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
         if actual_follower is None:
             raise CardNotFoundError(f"Follower to enhance not found on field: {follower}")
 
-        actual_target = None
-        if extra_target is not None:
-            if extra_target.is_generated:
-                actual_target = _find_card_in_zones_by_void_id(state, extra_target.void_id, player)
-            else:
-                actual_target = _find_card_in_zones(state, extra_target.unique_id, player)
-            if actual_target is None:
-                raise CardNotFoundError(f"Extra target for enhance not found: {extra_target}")
+        # Resolve targets list (one per selection step)
+        actual_targets = None
+        if targets_template is not None:
+            actual_targets = []
+            for t in targets_template:
+                if t is None:
+                    actual_targets.append(None)
+                elif t.is_generated:
+                    at = _find_card_in_zones_by_void_id(state, t.void_id, player)
+                    if at is None:
+                        raise CardNotFoundError(f"Target for card enhance not found: {t}")
+                    actual_targets.append(at)
+                else:
+                    at = _find_card_in_zones(state, t.unique_id, player)
+                    if at is None:
+                        raise CardNotFoundError(f"Target for card enhance not found: {t}")
+                    actual_targets.append(at)
 
         # Resolve multi targets
         actual_multi_targets = None
@@ -289,7 +306,7 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
                     raise CardNotFoundError(f"Multi-target for card enhance not found: {t}")
                 actual_multi_targets.append(at)
 
-        return GameSimulator.enhance_follower(state, player, actual_follower, actual_target,
+        return GameSimulator.enhance_follower(state, player, actual_follower, actual_targets,
                                               effect_choice=effect_choice,
                                               multi_targets=actual_multi_targets)
 

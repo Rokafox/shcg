@@ -6,8 +6,8 @@ if TYPE_CHECKING:
     from super_hard_card_game import SHCGGameState
 
 
-# NOTE: every time modifying a card class and its subclass, remember to also modify ai_player_new.py's copy_card() function accordingly.
-# Also, modify ai_player_new.py's _hash_game_state() function to include any new attributes that affect game state.
+# NOTE: every time modifying a card class and its subclass, remember to also modify ai_player_new.py's
+# _copy_card(), _serialize_card(), and _deserialize_card() functions accordingly.
 
 class Card:
     def __init__(self, name, cost, card_type):
@@ -1418,3 +1418,8 @@ def _card_sort_key(card_cls: type[Card]) -> tuple[int, int, str]:
     return (_type_priority[card.type], card.cost, card.name)
 
 all_card_types.sort(key=_card_sort_key)
+
+# Mapping from class name (e.g., "ゴブリン") to class, for deserialization
+card_class_by_name: dict[str, type[Card]] = {}
+for _cls in all_card_types + debug_card_types:
+    card_class_by_name[_cls.__name__] = _cls

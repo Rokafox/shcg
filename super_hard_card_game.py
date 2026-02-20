@@ -8,6 +8,7 @@ import random
 import ai_player_new
 import shcg_ui_deck_builder
 import shcg_ui_zone_viewer
+import shcg_ui_debug
 import shcg_error
 
 
@@ -229,6 +230,44 @@ class SHCGGameState:
         if amount > 0 and ui_draw:
             self.draw_player_hp_ui()
 
+
+    def serialize_to_string(self) -> str:
+        """Serialize the game state to a JSON string. Can be restored with load_from_string."""
+        snap = ai_player_new.GameStateSnapshot.from_game_state(self)
+        return snap.serialize_to_string()
+
+    def load_from_string(self, s: str):
+        """Restore the game state from a JSON string produced by serialize_to_string.
+        UI must be redrawn after calling this method.
+        """
+        snap = ai_player_new.GameStateSnapshot.load_from_string(s)
+        self.current_player = snap.current_player
+        self.turn = snap.turn
+        self.concluded = snap.concluded
+        self.hp = snap.hp
+        self.max_hp = snap.max_hp
+        self.foxtail = snap.foxtail
+        self.enhance_used_this_turn = snap.enhance_used_this_turn
+        self.max_enhance_allowed_per_turn = snap.max_enhance_allowed_per_turn
+        self.amount_card_generated_from_void = snap.amount_card_generated_from_void
+        self.decks = snap.decks
+        self.hands = snap.hands
+        self.fields = snap.fields
+        self.hidden_cards = snap.hidden_cards
+        self.graveyard = snap.graveyard
+        self.banished = snap.banished
+
+    def redraw_all_ui(self):
+        """Redraw all UI elements to reflect current game state."""
+        self.draw_player_hp_ui()
+        self.draw_tail_ui(1)
+        self.draw_tail_ui(2)
+        self.draw_hand_ui(1)
+        self.draw_hand_ui(2)
+        self.draw_deck_ui(1)
+        self.draw_deck_ui(2)
+        self.draw_field_ui(1)
+        self.draw_field_ui(2)
 
     def end_turn(self, ui_draw, ui_set_text):
         for c in self.fields[self.current_player].copy():
@@ -553,6 +592,12 @@ end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 
                                     text='End Turn',
                                     manager=ui_manager,)
 
+reset_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 355), (260, 50)),
+                                    text='Reset Turn',
+                                    manager=ui_manager,)
+
+# State saved at the start of each turn, used by Reset Turn
+_turn_start_state_string: str | None = None
 
 
 # =====================================
@@ -1101,6 +1146,7 @@ def build_component_tooltips():
     """
     settings_button.set_tooltip("Open settings window.", delay=0.1, wrap_width=300)
     end_turn_button.set_tooltip("End your turn and pass to opponent.", delay=0.1, wrap_width=300)
+    reset_turn_button.set_tooltip("Reset your turn to undo all actions taken this turn.", delay=0.1, wrap_width=300)
     new_game_button.set_tooltip("Start a new game.", delay=0.1, wrap_width=300)
     deck_builder_button.set_tooltip("Open deck builder to create custom decks.", delay=0.1, wrap_width=300)
 
@@ -1379,160 +1425,16 @@ def start_new_game():
     text_box.append_html_text(f"ニューゲームを開始したぞ！プレイヤー2のターンなのじゃ。\n")
     text_box.append_html_text(f"ターン{global_vars_shcg.turn}\n")
     global_vars_minimax_ai_manager.ai_clear_pending_actions()
-
-
-# =====================================
-# Debug Window & Functions
-# =====================================
-
-
-def build_debug_window():
-    """
-    A dropdown and button
-    Add any card to current player's top of deck for testing
-    """
-    global debug_window, debug_card_selection_dropdown, debug_add_card_button
-    global debug_add_foxtail_player_1_button
-    global debug_add_player_1_hp_button, debug_reduce_player_1_hp_button
-    global debug_rid_of_all_hand_button
-
-    try:
-        debug_window.kill()
-    except Exception as e:
-        pass
-
-    debug_window = pygame_gui.elements.UIWindow(pygame.Rect((600, 250), (280, 400)),
-                                        ui_manager,
-                                        window_display_title="Debug Window",
-                                        object_id="#debug_window",
-                                        resizable=False)
-    
-    debug_card_selection_label = pygame_gui.elements.UILabel(pygame.Rect((10, 10), (50, 35)),
-                                        "Card:",
-                                        ui_manager,
-                                        container=debug_window)
-    all_card_names = [card_type().name for card_type in cards.all_card_types + cards.debug_card_types]
-    debug_card_selection_dropdown = pygame_gui.elements.UIDropDownMenu(all_card_names,
-                                                        all_card_names[0],
-                                                        pygame.Rect((70, 10), (200, 35)),
-                                                        ui_manager,
-                                                        container=debug_window,)
-    debug_add_card_button = pygame_gui.elements.UIButton(
-                                        relative_rect=pygame.Rect((10, 55), (260, 50)),
-                                        text="Add to Top of Deck",
-                                        manager=ui_manager,
-                                        container=debug_window,
-                                        object_id="#debug_add_card_button",
-                                        command=debug_add_card_to_top_of_deck)
-    
-    debug_add_foxtail_player_1_button = pygame_gui.elements.UIButton(
-                                        relative_rect=pygame.Rect((10, 110), (260, 50)),
-                                        text="Add Foxtail to Current Player",
-                                        manager=ui_manager,
-                                        container=debug_window,
-                                        object_id="#debug_add_foxtail_player_1_button",
-                                        command=debug_add_foxtail_to_current_player)
-
-    debug_add_player_1_hp_button = pygame_gui.elements.UIButton(
-                                        relative_rect=pygame.Rect((10, 165), (125, 50)),
-                                        text="Add 1 HP",
-                                        manager=ui_manager,
-                                        container=debug_window,
-                                        object_id="#debug_add_player_1_hp_button",
-                                        command=debug_add_1_hp_to_current_player)
-    
-    debug_reduce_player_1_hp_button = pygame_gui.elements.UIButton(
-                                        relative_rect=pygame.Rect((145, 165), (125, 50)),
-                                        text="Reduce 1 HP",
-                                        manager=ui_manager,
-                                        container=debug_window,
-                                        object_id="#debug_reduce_player_1_hp_button",
-                                        command=debug_reduce_1_hp_from_current_player)
-
-    debug_rid_of_all_hand_button = pygame_gui.elements.UIButton(
-                                        relative_rect=pygame.Rect((10, 220), (260, 50)),
-                                        text="Get Rid of All Hand",
-                                        manager=ui_manager,
-                                        container=debug_window,
-                                        object_id="#debug_rid_of_all_hand_button",
-                                        command=get_rid_of_all_hand)
-
-
-debug_window = None
-debug_card_selection_dropdown = None
-debug_add_card_button = None
-
-def debug_add_card_to_top_of_deck():
-    global global_vars_shcg
-    if global_vars_shcg.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
-    card_to_add: cards.Card | None = None
-    card_name = debug_card_selection_dropdown.selected_option[0]
-    for card_type in cards.all_card_types:
-        if card_type().name == card_name:
-            card_to_add = card_type()
-            break
-    if card_to_add:
-        cp = global_vars_shcg.current_player
-        global_vars_shcg.decks[cp].append(card_to_add)
-        global_vars_shcg.draw_deck_ui(cp)
-        text_box.append_html_text(f"DEBUG:カード「{card_name}」をプレイヤー{cp}のデッキの一番上に追加したのじゃ。\n")
-    else:
-        raise ValueError(f"Card not found: {card_name}")
-
-def debug_add_foxtail_to_current_player():
-    global global_vars_shcg
-    if global_vars_shcg.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
-    cp = global_vars_shcg.current_player
-    if global_vars_shcg.foxtail[cp] < 9:
-        global_vars_shcg.foxtail[cp] += 1
-        global_vars_shcg.draw_tail_ui(cp)
-        text_box.append_html_text(f"DEBUG:プレイヤーに狐尾を1つ追加したのじゃ。\n")
-    else:
-        text_box.append_html_text(f"DEBUG:プレイヤーの狐尾は最大数に達しているのじゃ。\n")
-
-def debug_add_1_hp_to_current_player():
-    global global_vars_shcg
-    if global_vars_shcg.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
-    cp = global_vars_shcg.current_player
-    global_vars_shcg.hp[cp] = min(global_vars_shcg.hp[cp] + 1, global_vars_shcg.max_hp[cp])
-    global_vars_shcg.draw_player_hp_ui()
-    text_box.append_html_text(f"DEBUG:プレイヤー{cp}のHPを1追加したのじゃ。\n")
-
-def debug_reduce_1_hp_from_current_player():
-    global global_vars_shcg
-    if global_vars_shcg.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
-    cp = global_vars_shcg.current_player
-    global_vars_shcg.hp[cp] = max(global_vars_shcg.hp[cp] - 1, 1)
-    global_vars_shcg.draw_player_hp_ui()
-    text_box.append_html_text(f"DEBUG:プレイヤー{cp}のHPを1減らしたのじゃ。\n")
-
-def get_rid_of_all_hand():
-    global global_vars_shcg
-    cp = global_vars_shcg.current_player
-    global_vars_shcg.hands[cp] = []
-    global_vars_shcg.draw_hand_ui(cp)
-    text_box.append_html_text(f"DEBUG:プレイヤー{cp}の手札を全てなくしたのじゃ。\n")
-
+    # Save state at start of turn for Reset Turn
+    global _turn_start_state_string
+    _turn_start_state_string = global_vars_shcg.serialize_to_string()
 
 
 # top right
 debug_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1500, 10), (90, 35)),
                                     text='Debug',
                                     manager=ui_manager,
-                                    command=build_debug_window)
-
-
-# =====================================
-# End of Debug Window & Functions
-# =====================================
+                                    command=shcg_ui_debug.build_debug_window)
 
 
 # Graveyard / Banished / Deck buttons (same x as debug button)
@@ -1584,6 +1486,9 @@ shcg_ui_deck_builder.init(ui_manager, image_405_card_slot, draw_card)
 
 # Initialize zone viewer with dependencies
 shcg_ui_zone_viewer.init(ui_manager, draw_card, lambda: global_vars_shcg)
+
+# Initialize debug module with dependencies
+shcg_ui_debug.init(ui_manager, lambda: global_vars_shcg, lambda: text_box)
 
 start_new_game()
 
@@ -1821,6 +1726,12 @@ if __name__ == "__main__":
                     running = False
                 if event.ui_element == end_turn_button:
                     global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
+                    _turn_start_state_string = global_vars_shcg.serialize_to_string()
+                if event.ui_element == reset_turn_button:
+                    if _turn_start_state_string and not global_vars_shcg.concluded:
+                        global_vars_shcg.load_from_string(_turn_start_state_string)
+                        global_vars_shcg.redraw_all_ui()
+                        text_box.append_html_text(f"ターンをリセットしたのじゃ。\n")
                 if event.ui_element == deck_builder_button:
                     shcg_ui_deck_builder.build_deck_builder_window()
                 # Deck builder buttons
@@ -1898,6 +1809,7 @@ if __name__ == "__main__":
                     if not actions:
                         # AI has no more actions, end turn
                         global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
+                        _turn_start_state_string = global_vars_shcg.serialize_to_string()
 
         shcg_ui_zone_viewer.refresh()
         ui_manager_lower.update(time_delta)

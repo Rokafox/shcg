@@ -7,6 +7,7 @@
             "hovered_bg":"#C1E2B3",
             "disabled_bg":"#F0F0F0",
             "selected_bg":"#A3D9A5",
+            "active_bg": "#A3D9A5",
             "dark_bg":"#fefffe",
             "normal_text":"#000000",
             "hovered_text":"#FFFFFF",
@@ -46,6 +47,21 @@
             "normal_border": "#DDDDDD",
             "filled_bar":"#00A69C",
             "unfilled_bar":"#C1E2B3"
+        }
+    },
+    "file_dialog.#file_display_list.#file_list_item":
+    {
+        "colours":
+        {
+            "normal_bg": "#fefffe"
+        },
+        "misc":
+        {
+            "shape": "rectangle",
+            "border_width": "0",
+            "shadow_width": "0",
+            "text_horiz_alignment": "left",
+            "text_horiz_alignment_padding": "5"
         }
     }
 }

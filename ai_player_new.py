@@ -5,6 +5,7 @@ Since all information is open (hands, decks, fields), this is a perfect informat
 """
 import itertools
 import cards
+import shcg_error
 from typing import TYPE_CHECKING, List, Tuple, Any, Optional
 if TYPE_CHECKING:
     from super_hard_card_game import SHCGGameState
@@ -18,19 +19,7 @@ DEFAULT_HP_S = 26
 DEFAULT_MAX_ENHANCE_PER_TURN = 1
 
 # AI constants
-MAX_ACTION_SEQUENCES = 99999
-MAX_ACTIONS_PER_TURN = 100
 DEFAULT_AI_ACTION_DELAY_MS = 600
-
-
-class AIError(Exception):
-    """Base exception for AI-related errors."""
-    pass
-
-
-class CardNotFoundError(AIError):
-    """Raised when a card cannot be found in the expected location."""
-    pass
 
 
 def _find_card_by_id(card_list: List[cards.Card], unique_id) -> Optional[cards.Card]:
@@ -42,12 +31,15 @@ def _find_card_by_id(card_list: List[cards.Card], unique_id) -> Optional[cards.C
 
 
 def _find_card_in_zones(state, unique_id, player: int) -> Optional[cards.Card]:
-    """Find a card by unique_id across all zones (fields and hands) for both players.
-    Works with both GameStateSnapshot and SHCGGameState since they share the same structure.
+    """
+    Find a card by unique_id across all zones for both players.
     """
     all_cards = (
         state.fields[player] + state.fields[3 - player] +
-        state.hands[player] + state.hands[3 - player]
+        state.hands[player] + state.hands[3 - player] +
+        state.decks[player] + state.decks[3 - player] +
+        state.graveyard[player] + state.graveyard[3 - player] +
+        state.banished[player] + state.banished[3 - player]
     )
     return _find_card_by_id(all_cards, unique_id)
 
@@ -62,7 +54,10 @@ def _find_card_by_void_id(card_list: List[cards.Card], void_id) -> Optional[card
 def _find_card_in_zones_by_void_id(state, void_id, player: int) -> Optional[cards.Card]:
     all_cards = (
         state.fields[player] + state.fields[3 - player] +
-        state.hands[player] + state.hands[3 - player]
+        state.hands[player] + state.hands[3 - player] +
+        state.decks[player] + state.decks[3 - player] +
+        state.graveyard[player] + state.graveyard[3 - player] +
+        state.banished[player] + state.banished[3 - player]
     )
     return _find_card_by_void_id(all_cards, void_id)
 
@@ -213,7 +208,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
         if hasattr(card, attr):
             setattr(new_card, attr, getattr(card, attr))
         else:
-            raise AIError(f"Card {card} missing expected attribute {attr} during copy.")
+            raise shcg_error.TimeError(f"Card {card} missing expected attribute {attr} during copy.")
 
     # Follower-specific attributes
     if isinstance(card, cards.Follower):
@@ -228,7 +223,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
             if hasattr(card, attr):
                 setattr(new_card, attr, getattr(card, attr))
             else:
-                raise AIError(f"Follower {card} missing expected attribute {attr} during copy.")
+                raise shcg_error.TimeError(f"Follower {card} missing expected attribute {attr} during copy.")
 
     elif isinstance(card, cards.Amulet):
         amulet_attrs = [
@@ -238,7 +233,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
             if hasattr(card, attr):
                 setattr(new_card, attr, getattr(card, attr))
             else:
-                raise AIError(f"Amulet {card} missing expected attribute {attr} during copy.")
+                raise shcg_error.TimeError(f"Amulet {card} missing expected attribute {attr} during copy.")
 
     return new_card
 
@@ -250,8 +245,8 @@ class GameSimulator:
 
     @staticmethod
     def play_card(state: GameStateSnapshot, player: int, card: cards.Card,
-                  targets: Optional[List[cards.Card]] = None, effect_choice: str | None = None,
-                  multi_targets: Optional[List[cards.Card]] = None) -> bool:
+                  targets: list[cards.Card] | None = None, effect_choice: str | None = None,
+                  multi_targets: list[cards.Card] | None = None) -> bool:
         """Play a card from hand. Returns True if successful.
         targets: list of selected cards (one per step in request_card_selection_on_play), or None.
         multi_targets: multi card selection (list[Card] or None).
@@ -267,11 +262,7 @@ class GameSimulator:
         state.foxtail[player] -= card.cost
         state.hands[player].remove(card)
 
-        if card.request_multi_card_selection_on_play[0]:
-            card.on_play_effect(state, False, False, None, targets, effect_choice,
-                               selected_cards_for_multi_effect=multi_targets)
-        else:
-            card.on_play_effect(state, False, False, None, targets, effect_choice)
+        card.on_play_effect(state, False, False, None, targets, effect_choice, multi_targets)
 
         if isinstance(card, cards.Follower):
             state.fields[player].append(card)
@@ -291,17 +282,20 @@ class GameSimulator:
 
     @staticmethod
     def follower_attack(state: GameStateSnapshot, player: int,
-                        attacker: cards.Follower, target) -> bool:
+                        attacker: cards.Follower, target: cards.Follower | str) -> bool:
         """Execute an attack. Target can be a Follower or "leader". Returns True if successful."""
         if attacker.attack_ability <= 0 or not attacker.can_attack_this_turn:
             return False
         if attacker not in state.fields[player]:
             return False
+        protect_exists = any([c.ability_protect for c in state.fields[3 - player] if isinstance(c, cards.Follower)])
 
         opponent = 3 - player
 
         if isinstance(target, cards.Follower):
             if target not in state.fields[opponent]:
+                return False
+            if not target.ability_protect and protect_exists:
                 return False
 
             # Combat
@@ -314,12 +308,12 @@ class GameSimulator:
                 state.player_heal(player, target_hp_changed)
             # attacker.hp -= target.attack
             attacker.take_damage(target.attack, state, False, False, None, attacker=attacker, is_battle_damage=True)
-
-            # Remove dead followers handled in take_damage method
             attacker.after_attack_effect()
 
         elif target == "leader":
             if attacker.attack_ability < 2:
+                return False
+            if protect_exists:
                 return False
             state.player_take_damage(opponent, attacker.attack, ui_draw=False, ui_set_text=False, is_follower_attack=True)
             # drain ability
@@ -331,7 +325,7 @@ class GameSimulator:
 
     @staticmethod
     def enhance_follower(state: GameStateSnapshot, player: int,
-                         follower: cards.Follower, extra_targets: Optional[List[cards.Card]] = None,
+                         follower: cards.Follower, extra_targets: list[cards.Card] | None = None,
                          effect_choice: str | None = None,
                          multi_targets: list[cards.Card] | None = None) -> bool:
         """Enhance a follower. Returns True if successful.
@@ -349,15 +343,9 @@ class GameSimulator:
         state.foxtail[player] -= 1
         state.enhance_used_this_turn[player] += 1
 
-        if follower.request_multi_card_selection_on_enhance[0]:
-            follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_targets,
-                                       effect_choice=effect_choice,
-                                       selected_cards_for_multi_effect=multi_targets)
-        elif follower.request_card_selection_on_enhance:
-            follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_targets,
-                                       effect_choice=effect_choice)
-        else:
-            follower.on_enhance_effect(state, False, False, None, None, effect_choice=effect_choice)
+        follower.on_enhance_effect(state, False, False, None, selected_card_for_effect=extra_targets,
+                                    effect_choice=effect_choice,
+                                    selected_cards_for_multi_effect=multi_targets)
 
         return True
 
@@ -384,8 +372,8 @@ class GameSimulator:
         state.foxtail[state.current_player] = MAX_FOXTAIL
 
         # Apply start of turn effects to current player's followers
-        for card in state.fields[state.current_player]:
-            card.start_of_turn_on_field_effect(state.current_player)
+        for card in state.fields[state.current_player].copy():
+            card.start_of_turn_on_field_effect(state, False, False, None)
 
         state.enhance_used_this_turn = {1: 0, 2: 0}
         state.turn += 1
@@ -404,27 +392,29 @@ class MoveGenerator:
     @staticmethod
     def _get_targets_for_selection_type(sel_type: str, state: GameStateSnapshot, player: int) -> list:
         """Get list of valid targets for a given selection type."""
-        if sel_type == "field":
-            return [f for f in state.fields[player] if isinstance(f, cards.Follower)]
-        elif sel_type == "field_opponent":
-            return [f for f in state.fields[3 - player] if isinstance(f, cards.Follower)]
-        elif sel_type == "field_both":
-            return [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
-        elif sel_type == "hand":
-            return list(state.hands[player])
-        elif sel_type == "hand_spell":
-            return [c for c in state.hands[player] if isinstance(c, cards.Spell)]
-        elif sel_type == "hand_follower_aiteru":
-            return [c for c in state.hands[player] if c.type == 'follower' and c.cost <= len([x for x in state.hands[player] if x.type == 'follower'])]
-        elif sel_type == "hand_opponent":
-            return list(state.hands[3 - player])
-        elif sel_type == "field_c":
-            return list(state.fields[player])
-        elif sel_type == "field_opponent_c":
-            return list(state.fields[3 - player])
-        elif sel_type == "field_both_c":
-            return list(state.fields[player] + state.fields[3 - player])
-        return []
+        match sel_type:
+            case "field":
+                return [f for f in state.fields[player] if isinstance(f, cards.Follower)]
+            case "field_opponent":
+                return [f for f in state.fields[3 - player] if isinstance(f, cards.Follower)]
+            case "field_both":
+                return [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
+            case "hand":
+                return list(state.hands[player])
+            case "hand_spell":
+                return [c for c in state.hands[player] if isinstance(c, cards.Spell)]
+            case "hand_follower_aiteru":
+                return [c for c in state.hands[player] if c.type == 'follower' and c.cost <= len([x for x in state.hands[player] if x.type == 'follower'])]
+            case "hand_opponent":
+                return list(state.hands[3 - player])
+            case "field_c":
+                return list(state.fields[player])
+            case "field_opponent_c":
+                return list(state.fields[3 - player])
+            case "field_both_c":
+                return list(state.fields[player] + state.fields[3 - player])
+            case _:
+                raise shcg_error.TimeError(f"Unknown selection type: {sel_type}") 
 
     @staticmethod
     def get_playable_cards(state: GameStateSnapshot, player: int) -> List[Tuple]:
@@ -460,6 +450,8 @@ class MoveGenerator:
                     else:
                         step_options.append([None])
                 # Cartesian product of all steps: each combo is a tuple of one target per step
+                # example step_options = [[A, B], [C, D]] -> o1_possible_values = [[A, C], [A, D], [B, C], [B, D]]
+                # another_example: step_options = [[A, B, C, D, E], [None]] -> o1_possible_values = [[A, None], [B, None], [C, None], [D, None], [E, None]]
                 o1_possible_values = [list(combo) for combo in itertools.product(*step_options)]
 
             # Handle multi-card selection on play (up to N targets, independent from per-step)
@@ -468,6 +460,8 @@ class MoveGenerator:
                 multi_targets = MoveGenerator._get_targets_for_selection_type(sel_type, state, player)
                 if multi_targets:
                     combos = []
+                    # example: multi_targets = [A, B, C], max_count = 2 -> combos = [[A], [B], [C], [A, B], [A, C], [B, C]]
+                    # another_example: multi_targets = [A, B, C], max_count = 5 -> combos = [[A], [B], [C], [A, B], [A, C], [B, C], [A, B, C]] (since max_count > len(multi_targets), we can select all)
                     for count in range(1, min(max_count, len(multi_targets)) + 1):
                         for combo in itertools.combinations(multi_targets, count):
                             combos.append(list(combo))
@@ -646,11 +640,6 @@ class Evaluator:
         score += (len(state.hands[player]) - len(state.hands[opponent])) * Evaluator.HAND_SIZE_WEIGHT
         # Deck size
         score += (len(state.decks[player]) - len(state.decks[opponent])) * Evaluator.DECK_SIZE_WEIGHT
-        # hidden cards
-        if state.hidden_cards[player]:
-            for c in state.hidden_cards[player]:
-                if isinstance(c, cards.スターフェニックス):
-                    score += 4.0  # 2/2
         # graveyard - Star Phoenix can be summoned from graveyard
         if state.graveyard[player]:
             for c in state.graveyard[player]:
@@ -701,7 +690,7 @@ class MinimaxAI:
             test_state = state.copy()
             for action in actions:
                 if not self._apply_action(test_state, self.player_number, action):
-                    raise AIError("Invalid action sequence generated.")
+                    raise shcg_error.AIError("Invalid action sequence generated.")
 
             GameSimulator.end_turn(test_state)
             score = Evaluator.evaluate(test_state, self.player_number, only_care_about_winorlose=False) # Basic evaluation
@@ -718,7 +707,7 @@ class MinimaxAI:
                     opp_test_state = test_state.copy()
                     for opp_action in single_opp_seq:
                         if not self._apply_action(opp_test_state, test_state.current_player, opp_action):
-                            raise AIError("Invalid opponent action sequence generated.")
+                            raise shcg_error.AIError("Invalid opponent action sequence generated.")
 
                     # End opponent's turn
                     GameSimulator.end_turn(opp_test_state)
@@ -852,7 +841,7 @@ class MinimaxAI:
             if self._apply_action(current_state, player, action): # apply action
                 single_action_seq.append(action)
             else: # action not valid? Make no sense
-                raise AIError("Invalid action sequence generated.")
+                raise shcg_error.AIError("Invalid action sequence generated.")
 
         return bundle_of_all_action_sequences
 
@@ -893,7 +882,7 @@ class MinimaxAI:
             else:
                 actual_card = _find_card_by_id(state.hands[player], card.unique_id)
             if actual_card is None:
-                raise CardNotFoundError(f"Card to play not found in hand: {card} with void_id {card.void_id} and unique_id {card.unique_id}")
+                raise shcg_error.CardNotFoundError(f"Card to play not found in hand: {card} with void_id {card.void_id} and unique_id {card.unique_id}")
 
             # Resolve targets list (one per selection step)
             actual_targets = None
@@ -905,12 +894,12 @@ class MinimaxAI:
                     elif t.is_generated:
                         at = _find_card_in_zones_by_void_id(state, t.void_id, player)
                         if at is None:
-                            raise CardNotFoundError(f"Target for card play not found: {t}")
+                            raise shcg_error.CardNotFoundError(f"Target for card play not found: {t}")
                         actual_targets.append(at)
                     else:
                         at = _find_card_in_zones(state, t.unique_id, player)
                         if at is None:
-                            raise CardNotFoundError(f"Target for card play not found: {t}")
+                            raise shcg_error.CardNotFoundError(f"Target for card play not found: {t}")
                         actual_targets.append(at)
 
             # Resolve multi targets
@@ -923,7 +912,7 @@ class MinimaxAI:
                     else:
                         at = _find_card_in_zones(state, t.unique_id, player)
                     if at is None:
-                        raise CardNotFoundError(f"Multi-target for card play not found: {t}")
+                        raise shcg_error.CardNotFoundError(f"Multi-target for card play not found: {t}")
                     actual_multi_targets.append(at)
 
             return GameSimulator.play_card(state, player, actual_card, actual_targets, effect_choice,
@@ -944,14 +933,14 @@ class MinimaxAI:
                     None
                 )
             if actual_attacker is None:
-                raise CardNotFoundError(f"Attacker not found on field: {attacker}")
+                raise shcg_error.CardNotFoundError(f"Attacker not found on field: {attacker}")
 
             if target == "leader":
                 actual_target = "leader"
             else:
                 actual_target = _find_card_by_id(state.fields[3 - player], target.unique_id)
                 if actual_target is None:
-                    raise CardNotFoundError(f"Attack target not found on field: {target}")
+                    raise shcg_error.CardNotFoundError(f"Attack target not found on field: {target}")
 
             return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)
 
@@ -971,7 +960,7 @@ class MinimaxAI:
                     None
                 )
             if actual_follower is None:
-                raise CardNotFoundError(f"Follower to enhance not found on field: {follower}")
+                raise shcg_error.CardNotFoundError(f"Follower to enhance not found on field: {follower}")
 
             # Resolve targets list (one per selection step)
             actual_targets = None
@@ -983,12 +972,12 @@ class MinimaxAI:
                     elif t.is_generated:
                         at = _find_card_in_zones_by_void_id(state, t.void_id, player)
                         if at is None:
-                            raise CardNotFoundError(f"Target for card enhance not found: {t}")
+                            raise shcg_error.CardNotFoundError(f"Target for card enhance not found: {t}")
                         actual_targets.append(at)
                     else:
                         at = _find_card_in_zones(state, t.unique_id, player)
                         if at is None:
-                            raise CardNotFoundError(f"Target for card enhance not found: {t}")
+                            raise shcg_error.CardNotFoundError(f"Target for card enhance not found: {t}")
                         actual_targets.append(at)
 
             # Resolve multi targets
@@ -1001,7 +990,7 @@ class MinimaxAI:
                     else:
                         at = _find_card_in_zones(state, t.unique_id, player)
                     if at is None:
-                        raise CardNotFoundError(f"Multi-target for card enhance not found: {t}")
+                        raise shcg_error.CardNotFoundError(f"Multi-target for card enhance not found: {t}")
                     actual_multi_targets.append(at)
 
             return GameSimulator.enhance_follower(state, player, actual_follower, actual_targets,
@@ -1072,7 +1061,7 @@ class MinimaxAIPlayer:
             else:
                 actual_card = _find_card_by_id(game_state.hands[player], card_template.unique_id)
             if actual_card is None:
-                raise CardNotFoundError("Card to play not found in hand")
+                raise shcg_error.CardNotFoundError("Card to play not found in hand")
 
             # Resolve targets list (one per selection step)
             actual_targets = None
@@ -1084,12 +1073,12 @@ class MinimaxAIPlayer:
                     elif t.is_generated:
                         at = _find_card_in_zones_by_void_id(game_state, t.void_id, player)
                         if at is None:
-                            raise CardNotFoundError("Target for card play not found")
+                            raise shcg_error.CardNotFoundError("Target for card play not found")
                         actual_targets.append(at)
                     else:
                         at = _find_card_in_zones(game_state, t.unique_id, player)
                         if at is None:
-                            raise CardNotFoundError("Target for card play not found")
+                            raise shcg_error.CardNotFoundError("Target for card play not found")
                         actual_targets.append(at)
 
             # Resolve multi targets
@@ -1102,7 +1091,7 @@ class MinimaxAIPlayer:
                     else:
                         at = _find_card_in_zones(game_state, t.unique_id, player)
                     if at is None:
-                        raise CardNotFoundError(f"Multi-target for card play not found: {t}")
+                        raise shcg_error.CardNotFoundError(f"Multi-target for card play not found: {t}")
                     actual_multi_targets.append(at)
 
             game_state.play_card(player, actual_card, ui_draw, ui_set_text, additional_targets=actual_targets, is_ai_player=True,
@@ -1125,7 +1114,7 @@ class MinimaxAIPlayer:
                     None
                 )
             if actual_attacker is None:
-                raise CardNotFoundError("Attacker not found on field")
+                raise shcg_error.CardNotFoundError("Attacker not found on field")
 
             if target_template == "leader":
                 actual_target = "leader"
@@ -1143,7 +1132,7 @@ class MinimaxAIPlayer:
                         None
                     )
                 if actual_target is None:
-                    raise CardNotFoundError("Attack target not found on field")
+                    raise shcg_error.CardNotFoundError("Attack target not found on field")
 
             game_state.follower_attack(player, actual_attacker, actual_target, ui_draw, ui_set_text)
             return [('attack', actual_attacker, actual_target)]
@@ -1165,7 +1154,7 @@ class MinimaxAIPlayer:
                     None
                 )
             if actual_follower is None:
-                raise CardNotFoundError(f"Follower to enhance not found on field: {actual_follower}")
+                raise shcg_error.CardNotFoundError(f"Follower to enhance not found on field: {actual_follower}")
 
             # Resolve targets list (one per selection step)
             actual_targets = None
@@ -1177,12 +1166,12 @@ class MinimaxAIPlayer:
                     elif t.is_generated:
                         at = _find_card_in_zones_by_void_id(game_state, t.void_id, player)
                         if at is None:
-                            raise CardNotFoundError("Target for enhance not found")
+                            raise shcg_error.CardNotFoundError("Target for enhance not found")
                         actual_targets.append(at)
                     else:
                         at = _find_card_in_zones(game_state, t.unique_id, player)
                         if at is None:
-                            raise CardNotFoundError("Target for enhance not found")
+                            raise shcg_error.CardNotFoundError("Target for enhance not found")
                         actual_targets.append(at)
 
             # Resolve multi targets
@@ -1195,7 +1184,7 @@ class MinimaxAIPlayer:
                     else:
                         at = _find_card_in_zones(game_state, t.unique_id, player)
                     if at is None:
-                        raise CardNotFoundError(f"Multi-target for card enhance not found: {t}")
+                        raise shcg_error.CardNotFoundError(f"Multi-target for card enhance not found: {t}")
                     actual_multi_targets.append(at)
 
             game_state.on_card_enhanced(player, actual_follower, actual_targets, is_ai_player=True,

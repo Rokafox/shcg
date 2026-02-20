@@ -14,14 +14,13 @@ from ai_player_new import (
     GameSimulator,
     MinimaxAI,
     Evaluator,
-    AIError,
-    CardNotFoundError,
     MAX_FOXTAIL,
     _find_card_by_id,
     _find_card_by_void_id,
     _find_card_in_zones,
     _find_card_in_zones_by_void_id,
 )
+from shcg_error import AIError, CardNotFoundError
 
 DECKS_SAVE_FILE = "saved_decks.json"
 
@@ -453,8 +452,8 @@ def main():
     num_games = ask_int("Number of games per matchup", default=100)
     cuets_player = ask_int("CUETS for player turn", default=6)
     cuets_opp = ask_int("CUETS for opponent turn", default=3)
-    usm_player = ask_int("Unique States Max for player turn", default=300)
-    usm_opp = ask_int("Unique States Max for opponent turn", default=60)
+    usm_player = ask_int("Unique States Max for player turn", default=100)
+    usm_opp = ask_int("Unique States Max for opponent turn", default=20)
 
     # Generate matchups: all ordered pairs (i, j) where i != j
     matchups = []

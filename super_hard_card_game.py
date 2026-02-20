@@ -24,6 +24,7 @@ DEFAULT_HP_S = 26
 
 class SHCGGameState:
     def __init__(self, current_player):
+        # update load_from_string if you change the attributes here
         self.current_player = current_player  # 1 or 2
         self.turn = 1
         self.concluded = False

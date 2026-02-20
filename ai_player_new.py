@@ -8,6 +8,7 @@ import uuid
 import itertools
 import cards
 import shcg_error
+import random
 from typing import TYPE_CHECKING, List, Tuple, Any, Optional
 if TYPE_CHECKING:
     from super_hard_card_game import SHCGGameState
@@ -889,7 +890,6 @@ class MinimaxAI:
         Only terminal sequences are accepted (foxtail=0 or no more actions possible)
         Written and Verified by Rokafox on 2026/02/04
         """
-        import random
         bundle_of_all_action_sequences = []
         visited_states = set()
         continuous_visited_state_count = 0
@@ -900,7 +900,7 @@ class MinimaxAI:
             # do: generate single action sequences until requirement is met
             next_possible_actions: list[tuple] = self._get_all_actions(current_state, player)
 
-            if not next_possible_actions or current_state.foxtail[player] == 0: # if terminal state
+            if not next_possible_actions: # if terminal state
                 # hash, compare, if in visited_states, increase continuous_visited_state_count
                 # else reset continuous_visited_state_count
                 state_hash = current_state.serialize_to_string()
@@ -953,6 +953,14 @@ class MinimaxAI:
         # Draw
         if MoveGenerator.can_draw_card(state, player):
             actions.append(('draw',))
+
+        # Not Attack
+        # If there is only attack left in actions, it is a terminal state. The AI have a small chance to not attack. 
+        # Sometimes attack may not be the best move. Maybe 30%?
+        # Added on 2026-02-21 by Rokafox
+        if all([a[0] == 'attack' for a in actions]):
+            if random.random() < 0.3:
+                actions.clear()
 
         return actions
 

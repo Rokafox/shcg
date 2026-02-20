@@ -2,7 +2,9 @@ import os
 import json
 import more_itertools as mit
 import itertools
+import datetime
 import pygame, pygame_gui
+from pygame_gui.windows import UIFileDialog
 import cards
 import random
 import ai_player_new
@@ -597,6 +599,16 @@ reset_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320
                                     text='Reset Turn',
                                     manager=ui_manager,)
 
+save_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 410), (260, 50)),
+                                    text='Save Game State',
+                                    manager=ui_manager,)
+
+load_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 465), (260, 50)),
+                                    text='Load Game State',
+                                    manager=ui_manager,)
+
+load_game_file_dialog: UIFileDialog | None = None
+
 # State saved at the start of each turn, used by Reset Turn
 _turn_start_state_string: str | None = None
 
@@ -1150,6 +1162,8 @@ def build_component_tooltips():
     reset_turn_button.set_tooltip("Reset your turn to undo all actions taken this turn.", delay=0.1, wrap_width=300)
     new_game_button.set_tooltip("Start a new game.", delay=0.1, wrap_width=300)
     deck_builder_button.set_tooltip("Open deck builder to create custom decks.", delay=0.1, wrap_width=300)
+    save_game_button.set_tooltip("Save the current game state to a file.", delay=0.1, wrap_width=300)
+    load_game_button.set_tooltip("Load a game state from a file.", delay=0.1, wrap_width=300)
 
 
 build_component_tooltips()
@@ -1733,6 +1747,28 @@ if __name__ == "__main__":
                         global_vars_shcg.load_from_string(_turn_start_state_string)
                         global_vars_shcg.redraw_all_ui()
                         text_box.append_html_text(f"ターンをリセットしたのじゃ。\n")
+                if event.ui_element == save_game_button:
+                    save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_states")
+                    os.makedirs(save_dir, exist_ok=True)
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    save_path = os.path.join(save_dir, f"save_{timestamp}.json")
+                    state_string = global_vars_shcg.serialize_to_string()
+                    with open(save_path, "w", encoding="utf-8") as f:
+                        f.write(state_string)
+                    text_box.append_html_text(f"ゲーム状態を保存したのじゃ: {os.path.basename(save_path)}\n")
+                if event.ui_element == load_game_button:
+                    if load_game_file_dialog is None:
+                        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_states")
+                        os.makedirs(save_dir, exist_ok=True)
+                        load_game_file_dialog = UIFileDialog(
+                            pygame.Rect(160, 50, 440, 500),
+                            ui_manager,
+                            window_title='Load Game State...',
+                            initial_file_path=save_dir + '/',
+                            allow_existing_files_only=True,
+                            allowed_suffixes={".json"},
+                        )
+                        load_game_button.disable()
                 if event.ui_element == deck_builder_button:
                     shcg_ui_deck_builder.build_deck_builder_window()
                 # Deck builder buttons
@@ -1785,9 +1821,24 @@ if __name__ == "__main__":
                     shcg_ui_deck_builder.deck_builder_selected_decks[2] = settings_p2_deck_dropdown.selected_option[0]
                     shcg_ui_deck_builder.save_decks_to_file()
 
+            if event.type == pygame_gui.UI_FILE_DIALOG_PATH_PICKED:
+                if load_game_file_dialog and event.ui_element == load_game_file_dialog:
+                    try:
+                        with open(event.text, "r", encoding="utf-8") as f:
+                            state_string = f.read()
+                        global_vars_shcg.load_from_string(state_string)
+                        global_vars_shcg.redraw_all_ui()
+                        _turn_start_state_string = global_vars_shcg.serialize_to_string()
+                        text_box.append_html_text(f"ゲーム状態をロードしたのじゃ: {os.path.basename(event.text)}\n")
+                    except Exception as e:
+                        text_box.append_html_text(f"ロードに失敗したのじゃ: {e}\n")
+
             if event.type == pygame_gui.UI_WINDOW_CLOSE:
                 if card_selection_window and event.ui_element == card_selection_window:
                     _cancel_pending_selection()
+                if load_game_file_dialog and event.ui_element == load_game_file_dialog:
+                    load_game_button.enable()
+                    load_game_file_dialog = None
 
             ui_manager_lower.process_events(event)
             ui_manager.process_events(event)

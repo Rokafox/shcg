@@ -1,10 +1,13 @@
 """
 AI vs AI Game Simulation Script for Super Hard Card Game.
-Simulates multiple games between two AI players and reports win rates.
+Automatically loads all saved decks, includes random deck(s),
+simulates round-robin matchups, and generates a detailed report.
 """
 import random
 import json
 import os
+import sys
+from collections import defaultdict
 import cards
 from ai_player_new import (
     GameStateSnapshot,
@@ -68,14 +71,19 @@ def create_deck(recipe: dict[str, int] | None) -> list[cards.Card]:
     return create_random_deck()
 
 
-def create_game_state(
-    deck1_recipe: dict[str, int] | None = None,
-    deck2_recipe: dict[str, int] | None = None,
+def get_card_names_from_deck(deck: list[cards.Card]) -> set[str]:
+    """Get unique card type names from a deck."""
+    return set(card.name for card in deck)
+
+
+def create_game_state_with_decks(
+    deck1: list[cards.Card],
+    deck2: list[cards.Card],
 ) -> GameStateSnapshot:
-    """Create a new game state with specified or random decks."""
+    """Create a new game state with pre-built decks."""
     state = GameStateSnapshot()
-    state.decks[1] = create_deck(deck1_recipe)
-    state.decks[2] = create_deck(deck2_recipe)
+    state.decks[1] = deck1
+    state.decks[2] = deck2
     state.current_player = 2  # Player 2 goes first (as in the original game)
     return state
 
@@ -83,28 +91,25 @@ def create_game_state(
 def simulate_single_game(
     ai1: MinimaxAI,
     ai2: MinimaxAI,
-    deck1_recipe: dict[str, int] | None = None,
-    deck2_recipe: dict[str, int] | None = None,
+    deck1: list[cards.Card],
+    deck2: list[cards.Card],
     max_turns: int = 200,
-) -> int | None:
+) -> tuple[int | None, int]:
     """
-    Simulate a single game between two AIs.
+    Simulate a single game between two AIs with pre-built decks.
 
     Returns:
-        1 if player 1 wins, 2 if player 2 wins, None if draw
+        (winner, turn_count) where winner is 1, 2, or None (draw)
     """
-    state = create_game_state(deck1_recipe, deck2_recipe)
+    state = create_game_state_with_decks(deck1, deck2)
     ais = {1: ai1, 2: ai2}
 
     while not state.concluded and state.turn <= max_turns:
         current_player = state.current_player
         ai = ais[current_player]
 
-        # Get best actions for this turn
-        # We need to use a temporary wrapper to make the state compatible
         actions = get_ai_actions(ai, state)
 
-        # Apply all actions except end_turn
         for action in actions:
             if action[0] == 'end_turn':
                 break
@@ -115,7 +120,7 @@ def simulate_single_game(
         if not state.concluded:
             GameSimulator.end_turn(state)
 
-    return state.winner
+    return state.winner, state.turn
 
 
 def get_ai_actions(ai: MinimaxAI, state: GameStateSnapshot) -> list[tuple]:
@@ -316,61 +321,6 @@ def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
     return False
 
 
-def simulate_games(
-    num_games: int,
-    deck1_recipe: dict[str, int] | None = None,
-    deck2_recipe: dict[str, int] | None = None,
-    cuets_player_turn: int = 6,
-    cuets_opp_turn: int = 3,
-    usm_player_turn: int = 400,
-    usm_opp_turn: int = 80,
-) -> dict:
-    """
-    Simulate multiple games and return statistics.
-
-    Args:
-        num_games: Number of games to simulate
-        deck1_recipe: Deck recipe for player 1 (None = random each game)
-        deck2_recipe: Deck recipe for player 2 (None = random each game)
-        cuets_player_turn: CUETS (Continuous Unique End Turn States) for player's turn
-        cuets_opp_turn: CUETS for opponent's turn simulation
-
-    Returns:
-        Dictionary with win counts and rates
-    """
-    import sys
-
-    ai1 = MinimaxAI(player_number=1, cuets_player_turn=cuets_player_turn, cuets_opp_turn=cuets_opp_turn,
-                    unique_states_max_player_turn=usm_player_turn, unique_states_max_opp_turn=usm_opp_turn)
-    ai2 = MinimaxAI(player_number=2, cuets_player_turn=cuets_player_turn, cuets_opp_turn=cuets_opp_turn,
-                    unique_states_max_player_turn=usm_player_turn, unique_states_max_opp_turn=usm_opp_turn)
-
-    wins = {1: 0, 2: 0, None: 0}  # None = draw
-
-    last_progress = -1
-
-    for i in range(num_games):
-        # Print progress every 1%
-        progress = int((i + 1) / num_games * 100)
-        if progress > last_progress:
-            print(f"Progress: {progress}% ({i + 1}/{num_games} games)")
-            sys.stdout.flush()
-            last_progress = progress
-
-        winner = simulate_single_game(ai1, ai2, deck1_recipe, deck2_recipe)
-        wins[winner] += 1
-
-    return {
-        'total_games': num_games,
-        'player1_wins': wins[1],
-        'player2_wins': wins[2],
-        'draws': wins[None],
-        'player1_winrate': wins[1] / num_games * 100,
-        'player2_winrate': wins[2] / num_games * 100,
-        'draw_rate': wins[None] / num_games * 100,
-    }
-
-
 def ask_int(prompt: str, default: int | None = None) -> int:
     """Ask the user for an integer value."""
     while True:
@@ -384,34 +334,97 @@ def ask_int(prompt: str, default: int | None = None) -> int:
             print("Please enter a valid integer.")
 
 
-def ask_deck_selection(player: int, saved_decks: dict[str, dict[str, int]]) -> dict[str, int] | None:
-    """Ask the user to select a deck for a player. Returns recipe or None for random."""
-    deck_names = list(saved_decks.keys())
-    print(f"\nSelect deck for Player {player}:")
-    print("  0: Random")
-    for i, name in enumerate(deck_names, 1):
-        print(f"  {i}: {name}")
+def print_report(
+    deck_names: list[str],
+    deck_pool: dict[str, dict[str, int] | None],
+    matchup_results: dict[tuple[str, str], dict],
+    deck_stats: dict[str, dict[str, int]],
+    player_stats: dict[int | None, int],
+    card_stats: dict[str, dict[str, int]],
+    all_turns: list[int],
+    total_games: int,
+    num_games_per_matchup: int,
+):
+    """Print the full simulation report."""
+    sep = "=" * 60
+    thin_sep = "-" * 60
 
-    while True:
-        raw = input(f"Player {player} deck [0]: ").strip()
-        if raw == "":
-            choice = 0
-        else:
-            try:
-                choice = int(raw)
-            except ValueError:
-                print("Please enter a valid number.")
-                continue
+    print(f"\n{sep}")
+    print("              SIMULATION REPORT")
+    print(sep)
+    print(f"  Decks: {', '.join(deck_names)}")
+    print(f"  Matchups: {len(matchup_results)}")
+    print(f"  Games per matchup: {num_games_per_matchup}")
+    print(f"  Total games: {total_games}")
 
-        if choice == 0:
-            print(f"Player {player}: Random deck")
-            return None
-        elif 1 <= choice <= len(deck_names):
-            name = deck_names[choice - 1]
-            print(f"Player {player}: {name}")
-            return saved_decks[name]
-        else:
-            print(f"Please enter a number between 0 and {len(deck_names)}.")
+    # --- Matchup Results ---
+    print(f"\n{thin_sep}")
+    print(" MATCHUP RESULTS")
+    print(thin_sep)
+    for (d1, d2), stats in matchup_results.items():
+        w = stats['p1_wins']
+        l = stats['p2_wins']
+        d = stats['draws']
+        total = w + l + d
+        wr = w / total * 100 if total > 0 else 0
+        print(f"  {d1} (P1) vs {d2} (P2): {w}W / {l}L / {d}D  (P1 winrate: {wr:.1f}%)")
+
+    # --- Deck Winrate ---
+    print(f"\n{thin_sep}")
+    print(" DECK WINRATE")
+    print(thin_sep)
+    # Find longest deck name for alignment
+    max_name_len = max(len(name) for name in deck_names)
+    for name in deck_names:
+        s = deck_stats[name]
+        total = s['wins'] + s['losses'] + s['draws']
+        wr = s['wins'] / total * 100 if total > 0 else 0
+        label = name.ljust(max_name_len)
+        print(f"  {label}: {s['wins']}W / {s['losses']}L / {s['draws']}D  ({wr:.1f}%)")
+
+    # --- Player Position Winrate ---
+    print(f"\n{thin_sep}")
+    print(" PLAYER POSITION WINRATE")
+    print(thin_sep)
+    p1w = player_stats[1]
+    p2w = player_stats[2]
+    draws = player_stats[None]
+    print(f"  Player 1 (26HP, goes 2nd): {p1w} wins ({p1w / total_games * 100:.1f}%)")
+    print(f"  Player 2 (20HP, goes 1st): {p2w} wins ({p2w / total_games * 100:.1f}%)")
+    print(f"  Draws: {draws} ({draws / total_games * 100:.1f}%)")
+
+    # --- Card Winrate ---
+    print(f"\n{thin_sep}")
+    print(" CARD WINRATE (by deck inclusion)")
+    print(thin_sep)
+    # Sort by winrate descending, then by total games descending
+    sorted_cards = sorted(
+        card_stats.items(),
+        key=lambda x: (
+            x[1]['wins'] / max(x[1]['wins'] + x[1]['losses'] + x[1]['draws'], 1),
+            x[1]['wins'] + x[1]['losses'] + x[1]['draws'],
+        ),
+        reverse=True,
+    )
+    max_card_name_len = max(len(name) for name, _ in sorted_cards) if sorted_cards else 0
+    for card_name, s in sorted_cards:
+        total = s['wins'] + s['losses'] + s['draws']
+        wr = s['wins'] / total * 100 if total > 0 else 0
+        label = card_name.ljust(max_card_name_len)
+        print(f"  {label}: {s['wins']}W / {s['losses']}L / {s['draws']}D  ({wr:.1f}%)")
+
+    # --- Average Turn Count ---
+    print(f"\n{thin_sep}")
+    print(" AVERAGE TURN COUNT")
+    print(thin_sep)
+    avg = sum(all_turns) / len(all_turns) if all_turns else 0
+    print(f"  Overall: {avg:.1f} turns")
+    for (d1, d2), stats in matchup_results.items():
+        if stats['turns']:
+            mavg = sum(stats['turns']) / len(stats['turns'])
+            print(f"  {d1} vs {d2}: {mavg:.1f} turns")
+
+    print(sep)
 
 
 def main():
@@ -419,54 +432,152 @@ def main():
 
     # Load saved decks
     saved_decks = load_saved_decks()
+
+    # Build deck pool: name -> recipe (None = random)
+    deck_pool: dict[str, dict[str, int] | None] = {}
+
     if saved_decks:
-        print(f"Loaded {len(saved_decks)} saved deck(s) from {DECKS_SAVE_FILE}.")
+        for name, recipe in saved_decks.items():
+            deck_pool[name] = recipe
+        deck_pool["Random"] = None
+        print(f"Loaded {len(saved_decks)} saved deck(s). Added 1 Random deck.")
     else:
-        print(f"No saved decks found ({DECKS_SAVE_FILE} not found or empty). Using random decks.\n")
+        deck_pool["Random 1"] = None
+        deck_pool["Random 2"] = None
+        print("No saved decks found. Using 2 Random decks.")
 
-    # Deck selection
-    deck1_recipe = None
-    deck2_recipe = None
-
-    if saved_decks:
-        deck1_recipe = ask_deck_selection(1, saved_decks)
-        deck2_recipe = ask_deck_selection(2, saved_decks)
-
-    print()
+    deck_names = list(deck_pool.keys())
+    print(f"Decks: {', '.join(deck_names)}\n")
 
     # Simulation parameters
-    num_games = ask_int("Number of games to simulate", default=100)
+    num_games = ask_int("Number of games per matchup", default=100)
     cuets_player = ask_int("CUETS for player turn", default=6)
     cuets_opp = ask_int("CUETS for opponent turn", default=3)
     usm_player = ask_int("Unique States Max for player turn", default=300)
     usm_opp = ask_int("Unique States Max for opponent turn", default=60)
 
-    # Describe setup
-    deck1_label = "Random" if deck1_recipe is None else "Custom"
-    deck2_label = "Random" if deck2_recipe is None else "Custom"
-    print(f"\nSimulating {num_games} games...")
-    print(f"  Player 1 deck: {deck1_label}")
-    print(f"  Player 2 deck: {deck2_label}")
-    print(f"  CUETS: player={cuets_player}, opp={cuets_opp}")
-    print(f"  Unique States Max: player={usm_player}, opp={usm_opp}")
-    print("=" * 50)
+    # Generate matchups: all ordered pairs (i, j) where i != j
+    matchups = []
+    for i, name1 in enumerate(deck_names):
+        for j, name2 in enumerate(deck_names):
+            if i != j:
+                matchups.append((name1, name2))
 
-    results = simulate_games(
-        num_games,
-        deck1_recipe=deck1_recipe,
-        deck2_recipe=deck2_recipe,
+    total_games = len(matchups) * num_games
+
+    print(f"\nMatchups: {len(matchups)}")
+    for d1, d2 in matchups:
+        print(f"  {d1} (P1) vs {d2} (P2)")
+    print(f"Total games: {total_games}")
+    print("=" * 60)
+
+    # Create AIs
+    ai1 = MinimaxAI(
+        player_number=1,
         cuets_player_turn=cuets_player,
         cuets_opp_turn=cuets_opp,
-        usm_player_turn=usm_player,
-        usm_opp_turn=usm_opp,
+        unique_states_max_player_turn=usm_player,
+        unique_states_max_opp_turn=usm_opp,
+    )
+    ai2 = MinimaxAI(
+        player_number=2,
+        cuets_player_turn=cuets_player,
+        cuets_opp_turn=cuets_opp,
+        unique_states_max_player_turn=usm_player,
+        unique_states_max_opp_turn=usm_opp,
     )
 
-    print("=" * 50)
-    print("Results:")
-    print(f"  Total games: {results['total_games']}")
-    print(f"  Player 1 wins: {results['player1_wins']} ({results['player1_winrate']:.2f}%)")
-    print(f"  Player 2 wins: {results['player2_wins']} ({results['player2_winrate']:.2f}%)")
-    print(f"  Draws: {results['draws']} ({results['draw_rate']:.2f}%)")
+    # Tracking stats
+    matchup_results: dict[tuple[str, str], dict] = {}
+    deck_stats = {name: {'wins': 0, 'losses': 0, 'draws': 0} for name in deck_names}
+    player_stats: dict[int | None, int] = {1: 0, 2: 0, None: 0}
+    card_stats: dict[str, dict[str, int]] = defaultdict(lambda: {'wins': 0, 'losses': 0, 'draws': 0})
+    all_turns: list[int] = []
+
+    games_done = 0
+    last_progress = -1
+
+    for deck1_name, deck2_name in matchups:
+        deck1_recipe = deck_pool[deck1_name]
+        deck2_recipe = deck_pool[deck2_name]
+
+        m_stats = {'p1_wins': 0, 'p2_wins': 0, 'draws': 0, 'turns': []}
+
+        for _ in range(num_games):
+            # Build decks (random decks get fresh composition each game)
+            deck1 = create_deck(deck1_recipe)
+            deck2 = create_deck(deck2_recipe)
+            deck1_cards = get_card_names_from_deck(deck1)
+            deck2_cards = get_card_names_from_deck(deck2)
+
+            # Simulate game
+            winner, turn_count = simulate_single_game(ai1, ai2, deck1, deck2)
+
+            # Track turn count
+            all_turns.append(turn_count)
+            m_stats['turns'].append(turn_count)
+
+            # Track player position wins
+            player_stats[winner] += 1
+
+            # Track matchup results
+            if winner == 1:
+                m_stats['p1_wins'] += 1
+            elif winner == 2:
+                m_stats['p2_wins'] += 1
+            else:
+                m_stats['draws'] += 1
+
+            # Track deck winrate
+            if winner == 1:
+                deck_stats[deck1_name]['wins'] += 1
+                deck_stats[deck2_name]['losses'] += 1
+            elif winner == 2:
+                deck_stats[deck2_name]['wins'] += 1
+                deck_stats[deck1_name]['losses'] += 1
+            else:
+                deck_stats[deck1_name]['draws'] += 1
+                deck_stats[deck2_name]['draws'] += 1
+
+            # Track card winrate (each deck counted separately)
+            if winner == 1:
+                for card_name in deck1_cards:
+                    card_stats[card_name]['wins'] += 1
+                for card_name in deck2_cards:
+                    card_stats[card_name]['losses'] += 1
+            elif winner == 2:
+                for card_name in deck2_cards:
+                    card_stats[card_name]['wins'] += 1
+                for card_name in deck1_cards:
+                    card_stats[card_name]['losses'] += 1
+            else:
+                for card_name in deck1_cards:
+                    card_stats[card_name]['draws'] += 1
+                for card_name in deck2_cards:
+                    card_stats[card_name]['draws'] += 1
+
+            # Progress
+            games_done += 1
+            progress = int(games_done / total_games * 100)
+            if progress > last_progress:
+                print(f"Progress: {progress}% ({games_done}/{total_games} games)")
+                sys.stdout.flush()
+                last_progress = progress
+
+        matchup_results[(deck1_name, deck2_name)] = m_stats
+
+    # Print report
+    print_report(
+        deck_names,
+        deck_pool,
+        matchup_results,
+        deck_stats,
+        player_stats,
+        dict(card_stats),
+        all_turns,
+        total_games,
+        num_games,
+    )
 
 
 if __name__ == '__main__':

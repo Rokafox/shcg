@@ -3,6 +3,8 @@ Chess-like AI Player for Super Hard Card Game.
 Uses minimax with alpha-beta pruning to calculate optimal moves.
 Since all information is open (hands, decks, fields), this is a perfect information game.
 """
+import json
+import uuid
 import itertools
 import cards
 import shcg_error
@@ -69,8 +71,8 @@ class GameStateSnapshot:
     Does not include any UI elements.
     """
     def __init__(self):
-        # WARNING: Make sure to also modify from_game_state and copy methods when adding new attributes
-        # Also _state_hash
+        # WARNING: Make sure to also modify from_game_state, copy, and serialize_to_string/load_from_string
+        # methods when adding new attributes
         self.current_player: int = 2
         self.turn: int = 1
         self.concluded: bool = False
@@ -159,6 +161,62 @@ class GameStateSnapshot:
 
         return new_snap
 
+    def serialize_to_string(self) -> str:
+        """Serialize the entire game state to a JSON string. Can be restored with load_from_string."""
+        def serialize_zone(card_list):
+            return [_serialize_card(c) for c in card_list]
+
+        data = {
+            'current_player': self.current_player,
+            'turn': self.turn,
+            'concluded': self.concluded,
+            'winner': self.winner,
+            'hp': {str(k): v for k, v in self.hp.items()},
+            'max_hp': {str(k): v for k, v in self.max_hp.items()},
+            'foxtail': {str(k): v for k, v in self.foxtail.items()},
+            'enhance_used_this_turn': {str(k): v for k, v in self.enhance_used_this_turn.items()},
+            'max_enhance_allowed_per_turn': {str(k): v for k, v in self.max_enhance_allowed_per_turn.items()},
+            'amount_card_generated_from_void': {str(k): v for k, v in self.amount_card_generated_from_void.items()},
+            'decks': {str(k): serialize_zone(v) for k, v in self.decks.items()},
+            'hands': {str(k): serialize_zone(v) for k, v in self.hands.items()},
+            'fields': {str(k): serialize_zone(v) for k, v in self.fields.items()},
+            'hidden_cards': {str(k): serialize_zone(v) for k, v in self.hidden_cards.items()},
+            'graveyard': {str(k): serialize_zone(v) for k, v in self.graveyard.items()},
+            'banished': {str(k): serialize_zone(v) for k, v in self.banished.items()},
+        }
+        return json.dumps(data, ensure_ascii=False)
+
+    @staticmethod
+    def load_from_string(s: str) -> 'GameStateSnapshot':
+        """Restore a GameStateSnapshot from a JSON string produced by serialize_to_string."""
+        data = json.loads(s)
+
+        def deserialize_zone(card_dicts):
+            return [_deserialize_card(d) for d in card_dicts]
+
+        snap = GameStateSnapshot()
+        snap.current_player = data['current_player']
+        snap.turn = data['turn']
+        snap.concluded = data['concluded']
+        snap.winner = data['winner']
+        snap.hp = {int(k): v for k, v in data['hp'].items()}
+        snap.max_hp = {int(k): v for k, v in data['max_hp'].items()}
+        snap.foxtail = {int(k): v for k, v in data['foxtail'].items()}
+        snap.enhance_used_this_turn = {int(k): v for k, v in data['enhance_used_this_turn'].items()}
+        snap.max_enhance_allowed_per_turn = {int(k): v for k, v in data['max_enhance_allowed_per_turn'].items()}
+        snap.amount_card_generated_from_void = {int(k): v for k, v in data['amount_card_generated_from_void'].items()}
+
+        for player_str in ['1', '2']:
+            p = int(player_str)
+            snap.decks[p] = deserialize_zone(data['decks'][player_str])
+            snap.hands[p] = deserialize_zone(data['hands'][player_str])
+            snap.fields[p] = deserialize_zone(data['fields'][player_str])
+            snap.hidden_cards[p] = deserialize_zone(data['hidden_cards'][player_str])
+            snap.graveyard[p] = deserialize_zone(data['graveyard'][player_str])
+            snap.banished[p] = deserialize_zone(data['banished'][player_str])
+
+        return snap
+
     def player_take_damage(self, player: int, amount: int, *args, **_kwargs) -> bool:
         """Apply damage to a player. Returns True if player is defeated."""
         assert amount >= 0
@@ -236,6 +294,84 @@ def _copy_card(card: cards.Card) -> cards.Card:
                 raise shcg_error.TimeError(f"Amulet {card} missing expected attribute {attr} during copy.")
 
     return new_card
+
+
+def _serialize_card(card: cards.Card) -> dict:
+    """Serialize a card to a JSON-compatible dict."""
+    d = {
+        'cls': card.__class__.__name__,
+        'uid': str(card.unique_id),
+        'vid': str(card.void_id),
+        'gen': card.is_generated,
+        'cost': card.cost,
+        'ocost': card.original_cost,
+    }
+    if isinstance(card, cards.Follower):
+        d['t'] = 'follower'
+        d['atk'] = card.attack
+        d['hp'] = card.hp
+        d['mhp'] = card.max_hp
+        d['oatk'] = card.original_attack
+        d['omhp'] = card.original_max_hp
+        d['ce'] = card.can_enhance
+        d['ie'] = card.is_enhanced
+        d['st'] = card.summoned_this_turn
+        d['et'] = card.enhanced_this_turn
+        d['aa'] = card.attack_ability
+        d['hamt'] = card.how_many_attacks_max_of_turn
+        d['hadt'] = card.how_many_attacks_done_of_turn
+        d['cat'] = card.can_attack_this_turn
+        d['ar'] = card.ability_rush
+        d['asr'] = card.ability_super_rush
+        d['ap'] = card.ability_protect
+        d['ad'] = card.ability_drain
+        d['al'] = card.ability_lethal
+    elif isinstance(card, cards.Amulet):
+        d['t'] = 'amulet'
+        d['cnt'] = card.counter
+        d['cmax'] = card.counter_max
+    elif isinstance(card, cards.Spell):
+        d['t'] = 'spell'
+    return d
+
+
+def _deserialize_card(d: dict) -> cards.Card:
+    """Deserialize a card from a dict."""
+    cls_name = d['cls']
+    if cls_name not in cards.card_class_by_name:
+        raise ValueError(f"Unknown card class: {cls_name}")
+    card_cls = cards.card_class_by_name[cls_name]
+    card = card_cls()
+    card.unique_id = uuid.UUID(d['uid'])
+    card.void_id = uuid.UUID(d['vid'])
+    card.is_generated = d['gen']
+    card.cost = d['cost']
+    card.original_cost = d['ocost']
+
+    if isinstance(card, cards.Follower):
+        card.attack = d['atk']
+        card.hp = d['hp']
+        card.max_hp = d['mhp']
+        card.original_attack = d['oatk']
+        card.original_max_hp = d['omhp']
+        card.can_enhance = d['ce']
+        card.is_enhanced = d['ie']
+        card.summoned_this_turn = d['st']
+        card.enhanced_this_turn = d['et']
+        card.attack_ability = d['aa']
+        card.how_many_attacks_max_of_turn = d['hamt']
+        card.how_many_attacks_done_of_turn = d['hadt']
+        card.can_attack_this_turn = d['cat']
+        card.ability_rush = d['ar']
+        card.ability_super_rush = d['asr']
+        card.ability_protect = d['ap']
+        card.ability_drain = d['ad']
+        card.ability_lethal = d['al']
+    elif isinstance(card, cards.Amulet):
+        card.counter = d['cnt']
+        card.counter_max = d['cmax']
+
+    return card
 
 
 class GameSimulator:
@@ -743,56 +879,6 @@ class MinimaxAI:
         return best_actions
 
 
-    def _state_hash(self, state: GameStateSnapshot) -> str:
-        """
-        Create a hash of the game state for deduplication.
-        Written and Verified by Rokafox on 2026/02/04
-        """
-        parts = [
-            str(state.hp[1]), str(state.hp[2]),
-            str(state.max_hp[1]), str(state.max_hp[2]),
-            str(state.foxtail[1]), str(state.foxtail[2]),
-            str(state.enhance_used_this_turn[1]), str(state.enhance_used_this_turn[2]),
-            str(state.max_enhance_allowed_per_turn[1]), str(state.max_enhance_allowed_per_turn[2]),
-            str(state.amount_card_generated_from_void[1]), str(state.amount_card_generated_from_void[2]),
-            str(state.hidden_cards[1]), str(state.hidden_cards[2]),
-            str(len(state.graveyard[1])), str(len(state.graveyard[2])),
-            str(len(state.banished[1])), str(len(state.banished[2]))
-        ]
-
-        # Hash field states
-        for player in [1, 2]:
-            # follower cards
-            field_str_follower = []
-            for f in state.fields[player]:
-                if f.type == 'follower':
-                    field_str_follower.append(
-                        f"{f.name}:{f.attack}:{f.max_hp}:{f.hp}:{f.can_attack_this_turn}:"
-                        f"{f.attack_ability}:{f.can_enhance}:{f.is_enhanced}:"
-                        f"{f.how_many_attacks_max_of_turn}:{f.how_many_attacks_done_of_turn}:"
-                        f"{f.ability_rush}:{f.ability_super_rush}:"
-                        f"{f.ability_protect}:{f.ability_drain}:{f.ability_lethal}:"
-                        f"{f.original_attack}:{f.original_max_hp}"
-                    )
-            field_str_follower = ",".join(field_str_follower)
-            # amulet cards
-            field_str_amulet = ",".join(f"{f.name}:{f.counter}" for f in state.fields[player] if f.type == 'amulet')
-            # combine
-            parts.append(f"F{player}:" + field_str_follower)
-            parts.append(f"A{player}:" + field_str_amulet)
-
-        # hand states, name and cost
-        for player in [1, 2]:
-            hand_str = ",".join(f"{c.name}:{c.cost}" for c in state.hands[player])
-            parts.append(f"H{player}:" + hand_str)
-
-        # deck states, name and cost
-        for player in [1, 2]:
-            deck_str = ",".join(f"{c.name}:{c.cost}" for c in state.decks[player])
-            parts.append(f"D{player}:" + deck_str)
-
-        return "|".join(parts)
-
     def _generate_random_turn_sequences(self, state: GameStateSnapshot, player: int,
                                         min_continuous_visited_state_req: int, max_unique_states: int
                                         ) -> List[List[Tuple]]:
@@ -817,7 +903,7 @@ class MinimaxAI:
             if not next_possible_actions or current_state.foxtail[player] == 0: # if terminal state
                 # hash, compare, if in visited_states, increase continuous_visited_state_count
                 # else reset continuous_visited_state_count
-                state_hash = self._state_hash(current_state)
+                state_hash = current_state.serialize_to_string()
                 if state_hash in visited_states:
                     continuous_visited_state_count += 1
                 else:

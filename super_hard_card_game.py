@@ -130,8 +130,7 @@ class SHCGGameState:
                             selected_cards_for_multi_effect=multi_targets)
 
         if isinstance(card, cards.Follower):
-            self.fields[player].append(card)
-            card.on_summon_effect()
+            card.mv([card], "summon", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
         elif isinstance(card, cards.Spell):
             self.graveyard[player].append(card)
             # if has star pheonix in graveyard, summon it.
@@ -271,10 +270,13 @@ class SHCGGameState:
         self.draw_deck_ui(2)
         self.draw_field_ui(1)
         self.draw_field_ui(2)
+        self.draw_current_player_indicator()
 
     def end_turn(self, ui_draw, ui_set_text):
         for c in self.fields[self.current_player].copy():
             c.end_of_turn_on_field_effect(self, ui_draw, ui_set_text, text_box)
+            if "end_of_turn_destroy" in c.extra_effect_list and c in self.fields[self.current_player]:
+                c.mv(self.fields[self.current_player], "destroy", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=self.current_player)
         if self.concluded:
             # text_box.append_html_text("The game has concluded. Start a new game instead.\n")
             text_box.append_html_text("ゲームは終了したのじゃ。新しいゲームを始めようではないか。\n")
@@ -285,6 +287,10 @@ class SHCGGameState:
             card.start_of_turn_on_field_effect(self, ui_draw, ui_set_text, text_box)
         self.turn += 1
         self.enhance_used_this_turn = {1: 0, 2: 0}
+        if self.concluded:
+            # text_box.append_html_text("The game has concluded. Start a new game instead.\n")
+            text_box.append_html_text("ゲームは終了したのじゃ。新しいゲームを始めようではないか。\n")
+            return
         # If both players have no cards in deck, the game ends in a draw
         if self.decks[1] == [] and self.decks[2] == []:
             self.concluded = True
@@ -299,6 +305,7 @@ class SHCGGameState:
             self.draw_hand_ui(2)
             self.draw_deck_ui(1)
             self.draw_deck_ui(2)
+            self.draw_current_player_indicator()
         if ui_set_text:
             text_box.append_html_text(text_box_introduction_text)
             text_box.append_html_text(f"プレイヤー{self.current_player}のターンじゃ。\n")
@@ -330,14 +337,13 @@ class SHCGGameState:
             return
         global global_vars_tail_indicators, global_vars_tail_indicators_active
         foxtail_prev = self.foxtail[player]
-        if self.foxtail[player] + amount <= 9:
-            self.foxtail[player] += amount
-        for i in range(foxtail_prev, self.foxtail[player]):
-            global_vars_tail_indicators[player][i].set_image(image_others["foxtail"])
-            global_vars_tail_indicators_active[player].append(global_vars_tail_indicators[player][i])
-        else:
-            self.foxtail[player] = 9
-            self.draw_tail_ui(1)
+        self.foxtail[player] = min(9, self.foxtail[player] + amount)
+
+        if ui_draw:
+            for i in range(foxtail_prev, self.foxtail[player]):
+                global_vars_tail_indicators[player][i].set_image(image_others["foxtail"])
+                global_vars_tail_indicators_active[player].append(global_vars_tail_indicators[player][i])
+
 
     def on_card_enhanced(self, player, card_to_enhance: cards.Follower, additional_targets: list[cards.Card] | None, is_ai_player: bool, ui_set_text,
                          ui_draw, effect_choice: str | None = None,
@@ -473,7 +479,7 @@ class SHCGGameState:
         # player 1
         hp_text_1 = str(self.hp[1])
         image_with_hp_1 = image_others["405"].copy()
-        hp_render_1 = font_bold.render(hp_text_1, True, (0, 255, 0))
+        hp_render_1 = font_bold.render(hp_text_1, True, deep_dark_blue)
         
         # transform size of image_with_hp_1 to fit the player_1_hp_slot
         x = player_1_hp_slot.get_relative_rect().width
@@ -486,7 +492,7 @@ class SHCGGameState:
         # player 2
         hp_text_2 = str(self.hp[2])
         image_with_hp_2 = image_others["405"].copy()
-        hp_render_2 = font_bold.render(hp_text_2, True, (0, 255, 0))
+        hp_render_2 = font_bold.render(hp_text_2, True, deep_dark_blue)
         
         # transform size of image_with_hp_2 to fit the player_2_hp_slot
         x = player_2_hp_slot.get_relative_rect().width
@@ -495,6 +501,35 @@ class SHCGGameState:
         text_rect_2 = hp_render_2.get_rect(center=(x//2, y//2))
         image_with_hp_2.blit(hp_render_2, text_rect_2)
         player_2_hp_slot.set_image(image_with_hp_2)
+
+    def draw_current_player_indicator(self):
+        # draw an indicator on the current player's leader image slot
+        # deep dark blue border with width 5
+        for player in [1, 2]:
+            if player == self.current_player:
+                border_width = 5
+            else:
+                border_width = 0
+
+            slot = global_vars_leader_slots[player][0]
+            slot_width = slot.get_relative_rect().width
+            slot_height = slot.get_relative_rect().height
+
+            leader_img_key = str(player)
+            if leader_img_key in image_leader:
+                leader_image = image_leader[leader_img_key]
+            else:
+                leader_image = image_others["404coyote"]
+
+            image_with_indicator = pygame.transform.scale(leader_image, (slot_width, slot_height))
+            if border_width > 0:
+                pygame.draw.rect(
+                    image_with_indicator,
+                    deep_dark_blue,
+                    pygame.Rect(0, 0, slot_width, slot_height),
+                    border_width,
+                )
+            slot.set_image(image_with_indicator)
 
 
 # =====================================
@@ -679,6 +714,15 @@ def _build_card_selection_options(selection_type: str, pending_info: dict,
             display = f"{i + 1} {str(c)}"
             options.append(display)
             om[display] = c
+
+    elif selection_type == "hand_follower":
+        for i, c in enumerate(global_vars_shcg.hands[cp]):
+            if action_type == 'play' and c is played_card:
+                continue
+            if isinstance(c, cards.Follower):
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                om[display] = c
 
     elif selection_type == "hand_spell":
         for i, c in enumerate(global_vars_shcg.hands[cp]):
@@ -1424,6 +1468,7 @@ def start_new_game():
 
     # draw UI
     global_vars_shcg.draw_player_hp_ui()
+    global_vars_shcg.draw_current_player_indicator()
     global_vars_shcg.draw_tail_ui(1)
     global_vars_shcg.draw_tail_ui(2)
     # draw hand
@@ -1437,7 +1482,7 @@ def start_new_game():
     global_vars_shcg.draw_field_ui(2)
     # text_box.append_html_text(f"Player {global_vars_shcg.current_player}'s turn. \n")
     # text_box.append_html_text(f"Turn {global_vars_shcg.turn}. \n")
-    text_box.append_html_text(f"ニューゲームを開始したぞ！プレイヤー2のターンなのじゃ。\n")
+    text_box.append_html_text(f"プレイヤー{global_vars_shcg.current_player}のターンなのじゃ。\n")
     text_box.append_html_text(f"ターン{global_vars_shcg.turn}\n")
     global_vars_minimax_ai_manager.ai_clear_pending_actions()
     # Save state at start of turn for Reset Turn
@@ -1755,13 +1800,13 @@ if __name__ == "__main__":
                     state_string = global_vars_shcg.serialize_to_string()
                     with open(save_path, "w", encoding="utf-8") as f:
                         f.write(state_string)
-                    text_box.append_html_text(f"ゲーム状態を保存したのじゃ: {os.path.basename(save_path)}\n")
+                    text_box.append_html_text(f"保存:{os.path.basename(save_path)}\n")
                 if event.ui_element == load_game_button:
                     if load_game_file_dialog is None:
                         save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_states")
                         os.makedirs(save_dir, exist_ok=True)
                         load_game_file_dialog = UIFileDialog(
-                            pygame.Rect(160, 50, 440, 500),
+                            pygame.Rect(400, 150, 700, 600),
                             ui_manager,
                             window_title='Load Game State...',
                             initial_file_path=save_dir + '/',
@@ -1829,7 +1874,10 @@ if __name__ == "__main__":
                         global_vars_shcg.load_from_string(state_string)
                         global_vars_shcg.redraw_all_ui()
                         _turn_start_state_string = global_vars_shcg.serialize_to_string()
-                        text_box.append_html_text(f"ゲーム状態をロードしたのじゃ: {os.path.basename(event.text)}\n")
+                        text_box.set_text(text_box_introduction_text)
+                        text_box.append_html_text(f"ロード:{os.path.basename(event.text)}\n")
+                        text_box.append_html_text(f"プレイヤー{global_vars_shcg.current_player}のターンなのじゃ。\n")
+                        text_box.append_html_text(f"ターン{global_vars_shcg.turn}\n")
                     except Exception as e:
                         text_box.append_html_text(f"ロードに失敗したのじゃ: {e}\n")
 

@@ -3,6 +3,7 @@ Chess-like AI Player for Super Hard Card Game.
 Uses minimax with alpha-beta pruning to calculate optimal moves.
 Since all information is open (hands, decks, fields), this is a perfect information game.
 """
+import datetime
 import json
 import uuid
 import itertools
@@ -250,6 +251,12 @@ class GameStateSnapshot:
                 drawn_card = self.decks[player].pop()
                 self.hands[player].append(drawn_card)
 
+    def add_foxtail(self, player, amount, *args, **_kwargs):
+        # add amount of foxtail for player (capped at MAX_FOXTAIL)
+        assert amount >= 0
+        if amount == 0 or self.foxtail[player] >= MAX_FOXTAIL:
+            return
+        self.foxtail[player] = min(MAX_FOXTAIL, self.foxtail[player] + amount)
 
 
 def _copy_card(card: cards.Card) -> cards.Card:
@@ -261,7 +268,7 @@ def _copy_card(card: cards.Card) -> cards.Card:
     common_attrs = [
         'name', 'cost', 'original_cost', 'type', 'unique_id', 'is_generated',
         'void_id', 'description', 'effect_description', 'request_card_selection_on_play', 'request_multi_card_selection_on_play', 
-        'request_effect_choose_option',
+        'request_effect_choose_option', 'extra_effect_list'
     ]
     for attr in common_attrs:
         if hasattr(card, attr):
@@ -306,6 +313,7 @@ def _serialize_card(card: cards.Card) -> dict:
         'gen': card.is_generated,
         'cost': card.cost,
         'ocost': card.original_cost,
+        'exl': card.extra_effect_list
     }
     if isinstance(card, cards.Follower):
         d['t'] = 'follower'
@@ -348,6 +356,7 @@ def _deserialize_card(d: dict) -> cards.Card:
     card.is_generated = d['gen']
     card.cost = d['cost']
     card.original_cost = d['ocost']
+    card.extra_effect_list = d['exl']
 
     if isinstance(card, cards.Follower):
         card.attack = d['atk']
@@ -402,8 +411,7 @@ class GameSimulator:
         card.on_play_effect(state, False, False, None, targets, effect_choice, multi_targets)
 
         if isinstance(card, cards.Follower):
-            state.fields[player].append(card)
-            card.on_summon_effect()
+            card.mv([card], "summon", state, draw_ui=False, set_text=False, the_actual_textbox=None, player=player)
         elif isinstance(card, cards.Amulet):
             state.fields[player].append(card)
         elif isinstance(card, cards.Spell):
@@ -504,6 +512,8 @@ class GameSimulator:
         """End the current turn and start the opponent's turn."""
         for c in state.fields[state.current_player].copy():
             c.end_of_turn_on_field_effect(state, False, False, None)
+            if "end_of_turn_destroy" in c.extra_effect_list and c in state.fields[state.current_player]:  # check if still on field after end of turn effect
+                c.mv(state.fields[state.current_player], "destroy", state, False, False, None, player=state.current_player)
 
         state.current_player = state.opponent
         state.foxtail[state.current_player] = MAX_FOXTAIL
@@ -538,6 +548,8 @@ class MoveGenerator:
                 return [f for f in state.fields[player] + state.fields[3 - player] if isinstance(f, cards.Follower)]
             case "hand":
                 return list(state.hands[player])
+            case "hand_follower":
+                return [c for c in state.hands[player] if isinstance(c, cards.Follower)]
             case "hand_spell":
                 return [c for c in state.hands[player] if isinstance(c, cards.Spell)]
             case "hand_follower_aiteru":
@@ -976,6 +988,11 @@ class MinimaxAI:
             else:
                 actual_card = _find_card_by_id(state.hands[player], card.unique_id)
             if actual_card is None:
+                # state_string = state.serialize_to_string()
+                # save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                # with open(save_path, "w", encoding="utf-8") as f:
+                #     f.write(state_string)
+                # print(f"Play, {card}, {targets_template}, {effect_choice}, {multi_targets_template}")
                 raise shcg_error.CardNotFoundError(f"Card to play not found in hand: {card} with void_id {card.void_id} and unique_id {card.unique_id}")
 
             # Resolve targets list (one per selection step)
@@ -1034,6 +1051,11 @@ class MinimaxAI:
             else:
                 actual_target = _find_card_by_id(state.fields[3 - player], target.unique_id)
                 if actual_target is None:
+                    # state_string = state.serialize_to_string()
+                    # save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    # with open(save_path, "w", encoding="utf-8") as f:
+                    #     f.write(state_string)
+                    # print(f"Attack, {attacker}, {target}")
                     raise shcg_error.CardNotFoundError(f"Attack target not found on field: {target}")
 
             return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)
@@ -1054,6 +1076,11 @@ class MinimaxAI:
                     None
                 )
             if actual_follower is None:
+                # state_string = state.serialize_to_string()
+                # save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                # with open(save_path, "w", encoding="utf-8") as f:
+                #     f.write(state_string)
+                # print(f"Enhance, {follower}, {targets_template}, {effect_choice}, {multi_targets_template}")
                 raise shcg_error.CardNotFoundError(f"Follower to enhance not found on field: {follower}")
 
             # Resolve targets list (one per selection step)

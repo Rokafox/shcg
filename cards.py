@@ -1155,6 +1155,7 @@ class セラフィックレオガルエル(Follower):
         self.effect_description = "場に出すとき、自分の場のフォロワー1体を選ぶ。それは手札に戻す。進化するとき、同じ効果。"
         self.request_card_selection_on_play = ["field"]
         self.request_card_selection_on_enhance = ["field"]
+        self.ability_rush = True
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                         selected_card_for_effect: list[Card] | None, effect_choice: str | None, selected_cards_for_multi_effect: list[Card] | None = None):
@@ -1297,7 +1298,7 @@ class ブロッサムウルフスレイド(Follower):
     """
     def __init__(self):
         super().__init__(name="ブロッサムウルフ・スレイド", cost=2, attack=3, hp=3, can_enhance=True)
-        self.effect_description = "これが手札に戻ったとき、これを除く自分の手札のコスト2以下のフォロワーをすべて場に出す。" \
+        self.effect_description = "これが手札に戻ったとき、これを除く自分の手札のコスト2以下のフォロワーをできるだけ場に出す。" \
         "進化する時、手札のフォロワー2体まで選び、それのコスト-1する。これを手札に戻す。"
         self.request_multi_card_selection_on_enhance = ("hand_follower", 2)
 
@@ -1663,32 +1664,32 @@ class 祈りの燭台(Amulet):
                 the_actual_textbox.append_html_text(f"祈りの燭台の効果で、プレイヤー{player_owning_this}は{num_followers_in_hand}回復したのじゃ。\n")
 
 
-# class 茨の森(Amulet):
-#     """
-#     """
-#     def __init__(self):
-#         super().__init__(name="茨の森", cost=3)
-#         self.effect_description = "エンドフェイズ開始時、カウンターは1減らす。カウンターがなくなったとき、それを破壊する。" \
-#         "これがある限り、自分のフォロワーが召喚されたとき、それは突進を持つ。攻撃するとき、フォロワーへ攻撃したら、ダメージ計算後、それに2ダメージ。"
-#         self.counter_name = "茨の森カウンター"
-#         self.counter_max = 3
-#         self.counter = self.counter_max
+class 茨の森(Amulet):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="茨の森", cost=3)
+        self.effect_description = "エンドフェイズ開始時、カウンターは1減らす。カウンターがなくなったとき、それを破壊する。" \
+        "これがある限り、自分のフォロワーが召喚されたとき、それは突進を持つ。攻撃するとき、フォロワーへ攻撃したら、ダメージ計算後、それに2ダメージ。"
+        self.counter_name = "茨の森カウンター"
+        self.counter_max = 3
+        self.counter = self.counter_max
 
-#     def end_of_turn_on_field_effect(self, game_state, draw_ui, set_text, the_actual_textbox):
-#         player_owning_this = game_state.current_player
-#         if self.decrease_counter(1):
-#             self.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, player_owning_this)
+    def end_of_turn_on_field_effect(self, game_state, draw_ui, set_text, the_actual_textbox):
+        player_owning_this = game_state.current_player
+        if self.decrease_counter(1):
+            self.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, player_owning_this)
 
-#     def effect_when_other_follower_summon(self, target_follower, game_state, draw_ui, set_text, the_actual_textbox, target_follower_is_own):
-#         if not target_follower_is_own:
-#             return
-#         if target_follower.attack_ability < 1:
-#             target_follower.advance_attack_ability()
-#             if target_follower.how_many_attacks_done_of_turn < target_follower.how_many_attacks_max_of_turn:
-#                 target_follower.can_attack_this_turn = True
-#         target_follower.ability_rush = True
-#         if "battle_damage_f_extra:2" not in target_follower.extra_effect_list:
-#             target_follower.extra_effect_list.append("battle_damage_f_extra:2")
+    def effect_when_other_follower_summon(self, target_follower, game_state, draw_ui, set_text, the_actual_textbox, target_follower_is_own):
+        if not target_follower_is_own:
+            return
+        if target_follower.attack_ability < 1:
+            target_follower.advance_attack_ability()
+            if target_follower.how_many_attacks_done_of_turn < target_follower.how_many_attacks_max_of_turn:
+                target_follower.can_attack_this_turn = True
+        target_follower.ability_rush = True
+        if "battle_damage_f_extra:2" not in target_follower.extra_effect_list:
+            target_follower.extra_effect_list.append("battle_damage_f_extra:2")
 
 
 class お菓子の家(Amulet):
@@ -1777,8 +1778,7 @@ all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ,
                 神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣, オウルキャット, 円卓の騎士ガウェイン, 天界への階段,
                 スターフェニックス, 白翼の守護神アイテール, 祈りの燭台, 神秘の指輪, キラキラヒーラー, ミスティアストロジスト,
                 水竜神の巫女, 黄金都市の姫リテュエル, 癒しの奏者アンリエット, フレイルナイト, 円卓会議, お爺さんとお婆さん,
-                # 茨の森, お菓子の家, 大魔法の妖精リラ, ホーリーファルコン, セラフィックレオガルエル, 鳥飼いの使徒,
-                お菓子の家, 大魔法の妖精リラ, ホーリーファルコン, セラフィックレオガルエル, 鳥飼いの使徒,
+                茨の森, お菓子の家, 大魔法の妖精リラ, ホーリーファルコン, セラフィックレオガルエル, 鳥飼いの使徒,
                 暗黒の御使い, 無謀なる戦, 若き鬼狩人モモ, 赤ずきんメイジー, ガーベラベアー, ブロッサムウルフスレイド
                 ]
 

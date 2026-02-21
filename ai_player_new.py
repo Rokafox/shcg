@@ -267,12 +267,20 @@ def _copy_card(card: cards.Card) -> cards.Card:
     # Common attributes copied for all card types
     common_attrs = [
         'name', 'cost', 'original_cost', 'type', 'unique_id', 'is_generated',
-        'void_id', 'description', 'effect_description', 'request_card_selection_on_play', 'request_multi_card_selection_on_play', 
+        'void_id', 'description', 'effect_description', 'request_card_selection_on_play', 'request_multi_card_selection_on_play',
         'request_effect_choose_option', 'extra_effect_list'
     ]
+    # Mutable list attributes that may be modified during simulation (e.g., extra_effect_list
+    # is appended to by 茨の森's effect_when_other_follower_summon). These must be shallow-copied
+    # to avoid shared references between the original and the copy corrupting the base state
+    # across simulation rounds.
+    list_attrs = {'request_card_selection_on_play', 'request_effect_choose_option', 'extra_effect_list'}
     for attr in common_attrs:
         if hasattr(card, attr):
-            setattr(new_card, attr, getattr(card, attr))
+            val = getattr(card, attr)
+            if attr in list_attrs:
+                val = list(val)
+            setattr(new_card, attr, val)
         else:
             raise shcg_error.TimeError(f"Card {card} missing expected attribute {attr} during copy.")
 
@@ -285,9 +293,13 @@ def _copy_card(card: cards.Card) -> cards.Card:
             'can_attack_this_turn', 'ability_rush', 'ability_super_rush', 'ability_protect', 'ability_drain',
             'ability_lethal'
         ]
+        follower_list_attrs = {'request_card_selection_on_enhance', 'request_effect_choose_option_e'}
         for attr in follower_attrs:
             if hasattr(card, attr):
-                setattr(new_card, attr, getattr(card, attr))
+                val = getattr(card, attr)
+                if attr in follower_list_attrs:
+                    val = list(val)
+                setattr(new_card, attr, val)
             else:
                 raise shcg_error.TimeError(f"Follower {card} missing expected attribute {attr} during copy.")
 

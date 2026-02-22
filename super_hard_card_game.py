@@ -12,10 +12,19 @@ import shcg_ui_deck_builder
 import shcg_ui_zone_viewer
 import shcg_ui_debug
 import shcg_error
-
+import ml_scoring
 
 pygame.init()
 clock = pygame.time.Clock()
+
+# Load ML model at startup
+_ml_model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml", "model.pt")
+ml_evaluator: ml_scoring.MLEvaluator | None = None
+try:
+    ml_evaluator = ml_scoring.MLEvaluator(_ml_model_path)
+    print(f"ML model loaded from {_ml_model_path}")
+except Exception as e:
+    print(f"Failed to load ML model: {e}")
 
 # ====================================
 # Game State
@@ -640,6 +649,10 @@ save_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320,
 
 load_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 465), (260, 50)),
                                     text='Load Game State',
+                                    manager=ui_manager,)
+
+analyze_state_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 520), (260, 50)),
+                                    text='Analyze State',
                                     manager=ui_manager,)
 
 load_game_file_dialog: UIFileDialog | None = None
@@ -1814,6 +1827,19 @@ if __name__ == "__main__":
                             allowed_suffixes={".json"},
                         )
                         load_game_button.disable()
+                if event.ui_element == analyze_state_button:
+                    if ml_evaluator is None:
+                        text_box.append_html_text("MLモデルが読み込まれていないのじゃ。\n")
+                    else:
+                        snap = ai_player_new.GameStateSnapshot.from_game_state(global_vars_shcg)
+                        score = ml_evaluator.evaluate(snap, global_vars_shcg.current_player, only_care_about_winorlose=False)
+                        if score == float('inf'):
+                            text_box.append_html_text(f"勝率: 勝利確定\n")
+                        elif score == float('-inf'):
+                            text_box.append_html_text(f"勝率: 敗北確定\n")
+                        else:
+                            winrate = score / 200.0 * 100.0
+                            text_box.append_html_text(f"プレイヤー{global_vars_shcg.current_player}の勝率: {winrate:.1f}%\n")
                 if event.ui_element == deck_builder_button:
                     shcg_ui_deck_builder.build_deck_builder_window()
                 # Deck builder buttons

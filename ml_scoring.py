@@ -50,22 +50,30 @@ EMPTY_CARD_ID = 0
 # Layout constants
 _FIELD_SLOTS = MAX_FIELD_SIZE  # 5 per player
 _HAND_SLOTS = MAX_HAND_SIZE    # 9 per player
-NUM_CARD_SLOTS = (_FIELD_SLOTS + _HAND_SLOTS) * 2  # 28 total
+_GRAVEYARD_SLOTS = 15          # per player (card IDs only)
+_BANISHED_SLOTS = 10           # per player (card IDs only)
+_DECK_SLOTS = 20               # per player (card IDs only)
 
-# Per-slot numeric features (field followers/amulets)
-_FIELD_NUMERIC_PER_SLOT = 16  # see _encode_field_slot
-_HAND_NUMERIC_PER_SLOT = 2   # is_occupied, cost
-_GLOBAL_NUMERIC = 14
+# Total card ID slots: field + hand (with numeric) + graveyard + banished + deck (IDs only)
+NUM_CARD_SLOTS = (
+    (_FIELD_SLOTS + _HAND_SLOTS) * 2               # 28 (field + hand, both players)
+    + (_GRAVEYARD_SLOTS + _BANISHED_SLOTS + _DECK_SLOTS) * 2  # 90 (gy + banish + deck, both players)
+)  # 118 total
+
+# Per-slot numeric features
+_FIELD_NUMERIC_PER_SLOT = 22  # see _encode_field_slot
+_HAND_NUMERIC_PER_SLOT = 12   # see _encode_hand_slot
+_GLOBAL_NUMERIC = 22
 
 NUM_NUMERIC_FEATURES = (
     _GLOBAL_NUMERIC
     + _FIELD_SLOTS * 2 * _FIELD_NUMERIC_PER_SLOT
     + _HAND_SLOTS * 2 * _HAND_NUMERIC_PER_SLOT
-)
+)  # 22 + 220 + 216 = 458
 
 
 def _encode_field_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
-    """Encode a single field slot. Returns (card_id, numeric_features)."""
+    """Encode a single field slot. Returns (card_id, numeric_features[22])."""
     if card is None:
         return EMPTY_CARD_ID, [0.0] * _FIELD_NUMERIC_PER_SLOT
 
@@ -73,37 +81,53 @@ def _encode_field_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
 
     if isinstance(card, cards.Follower):
         numeric = [
-            1.0,                                    # is_occupied
-            1.0,                                    # is_follower
-            0.0,                                    # is_amulet
-            card.attack / 30.0,                     # attack: 0 - 30+
-            card.hp / 30.0,                         # hp: 0 - 30+
-            card.max_hp / 30.0,                     # max_hp: 0 - 30+
-            card.original_cost / 10.0,              # original_cost
-            card.cost / 10.0,                        # cost
-            float(card.ability_protect),             # protect
-            float(card.ability_drain),               # drain
-            float(card.ability_lethal),              # lethal
-            float(card.ability_rush),                # rush
-            float(card.ability_super_rush),          # super_rush
-            float(card.can_attack_this_turn),        # can_attack
-            card.attack_ability / 2.0,               # attack_ability
-            float(card.is_enhanced),                 # is_enhanced
+            1.0,                                        # 0  is_occupied
+            1.0,                                        # 1  is_follower
+            0.0,                                        # 2  is_amulet
+            card.attack / 30.0,                         # 3  attack
+            card.hp / 30.0,                             # 4  hp
+            card.max_hp / 30.0,                         # 5  max_hp
+            card.original_cost / 10.0,                  # 6  original_cost
+            card.cost / 10.0,                           # 7  cost
+            float(card.ability_protect),                # 8  protect
+            float(card.ability_drain),                  # 9  drain
+            float(card.ability_lethal),                 # 10 lethal
+            float(card.ability_rush),                   # 11 rush
+            float(card.ability_super_rush),             # 12 super_rush
+            float(card.can_attack_this_turn),           # 13 can_attack
+            card.attack_ability / 2.0,                  # 14 attack_ability (0/1/2)
+            float(card.is_enhanced),                    # 15 is_enhanced
+            float(card.summoned_this_turn),             # 16 summoned_this_turn
+            float(card.can_enhance),                    # 17 can_enhance
+            card.how_many_attacks_max_of_turn / 3.0,    # 18 attacks_max_per_turn
+            card.how_many_attacks_done_of_turn / 3.0,   # 19 attacks_done_this_turn
+            0.0,                                        # 20 amulet_counter (N/A)
+            0.0,                                        # 21 amulet_counter_max (N/A)
         ]
     elif isinstance(card, cards.Amulet):
         numeric = [
-            1.0,                                    # is_occupied
-            0.0,                                    # is_follower
-            1.0,                                    # is_amulet
-            0.0,                                    # attack (N/A)
-            0.0,                                    # hp (N/A)
-            0.0,                                    # max_hp (N/A)
-            card.original_cost / 10.0,              # original_cost
-            card.cost / 10.0,                        # cost
-            0.0, 0.0, 0.0, 0.0, 0.0,               # abilities (N/A)
-            0.0,                                    # can_attack (N/A)
-            0.0,                                    # attack_ability (N/A)
-            0.0,                                    # is_enhanced (N/A)
+            1.0,                                        # 0  is_occupied
+            0.0,                                        # 1  is_follower
+            1.0,                                        # 2  is_amulet
+            0.0,                                        # 3  attack (N/A)
+            0.0,                                        # 4  hp (N/A)
+            0.0,                                        # 5  max_hp (N/A)
+            card.original_cost / 10.0,                  # 6  original_cost
+            card.cost / 10.0,                           # 7  cost
+            0.0,                                        # 8  protect (N/A)
+            0.0,                                        # 9  drain (N/A)
+            0.0,                                        # 10 lethal (N/A)
+            0.0,                                        # 11 rush (N/A)
+            0.0,                                        # 12 super_rush (N/A)
+            0.0,                                        # 13 can_attack (N/A)
+            0.0,                                        # 14 attack_ability (N/A)
+            0.0,                                        # 15 is_enhanced (N/A)
+            0.0,                                        # 16 summoned_this_turn (N/A)
+            0.0,                                        # 17 can_enhance (N/A)
+            0.0,                                        # 18 attacks_max (N/A)
+            0.0,                                        # 19 attacks_done (N/A)
+            card.counter / 10.0,                        # 20 amulet_counter
+            card.counter_max / 10.0,                    # 21 amulet_counter_max
         ]
     else:
         return EMPTY_CARD_ID, [0.0] * _FIELD_NUMERIC_PER_SLOT
@@ -112,16 +136,44 @@ def _encode_field_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
 
 
 def _encode_hand_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
-    """Encode a single hand slot. Returns (card_id, numeric_features)."""
+    """Encode a single hand slot. Returns (card_id, numeric_features[12])."""
     if card is None:
         return EMPTY_CARD_ID, [0.0] * _HAND_NUMERIC_PER_SLOT
 
     card_id = CARD_NAME_TO_ID.get(card.__class__.__name__, EMPTY_CARD_ID)
+
+    is_follower = isinstance(card, cards.Follower)
+    is_amulet = isinstance(card, cards.Amulet)
+    is_spell = isinstance(card, cards.Spell)
+
     numeric = [
-        1.0,                # is_occupied
-        card.cost / 10.0,   # cost
+        1.0,                                            # 0  is_occupied
+        float(is_follower),                             # 1  is_follower
+        float(is_amulet),                               # 2  is_amulet
+        float(is_spell),                                # 3  is_spell
+        card.cost / 10.0,                               # 4  cost
+        card.original_cost / 10.0,                      # 5  original_cost
+        card.attack / 30.0 if is_follower else 0.0,     # 6  attack (followers only)
+        card.hp / 30.0 if is_follower else 0.0,         # 7  hp (followers only)
+        float(card.can_enhance) if is_follower else 0.0,  # 8  can_enhance
+        float(card.ability_protect) if is_follower else 0.0,  # 9  protect
+        float(card.ability_drain) if is_follower else 0.0,    # 10 drain
+        float(card.ability_lethal) if is_follower else 0.0,   # 11 lethal
     ]
     return card_id, numeric
+
+
+def _encode_zone_card_ids(
+    zone: list[cards.Card], max_slots: int
+) -> list[int]:
+    """Encode card IDs for a zone (graveyard/banished/deck). No numeric features."""
+    ids: list[int] = []
+    for i in range(max_slots):
+        if i < len(zone):
+            ids.append(CARD_NAME_TO_ID.get(zone[i].__class__.__name__, EMPTY_CARD_ID))
+        else:
+            ids.append(EMPTY_CARD_ID)
+    return ids
 
 
 def extract_features(
@@ -131,29 +183,37 @@ def extract_features(
     Extract features from a game state, from `player`'s perspective.
 
     Returns:
-        card_ids:  list of int,   length NUM_CARD_SLOTS  (28)
-        numeric:   list of float, length NUM_NUMERIC_FEATURES
+        card_ids:  list of int,   length NUM_CARD_SLOTS  (118)
+        numeric:   list of float, length NUM_NUMERIC_FEATURES (458)
     """
     opponent = 3 - player
     card_ids: list[int] = []
     numeric: list[float] = []
 
-    # --- Global features (14) ---
+    # --- Global features (22) ---
     numeric.extend([
-        snapshot.turn / 30.0,
-        snapshot.hp[player] / 30.0,
-        snapshot.hp[opponent] / 30.0,
-        snapshot.max_hp[player] / 30.0,
-        snapshot.max_hp[opponent] / 30.0,
-        snapshot.foxtail[player] / 9.0,
-        snapshot.foxtail[opponent] / 9.0,
-        len(snapshot.hands[player]) / 9.0,
-        len(snapshot.hands[opponent]) / 9.0,
-        len(snapshot.decks[player]) / 40.0,
-        len(snapshot.decks[opponent]) / 40.0,
-        len(snapshot.graveyard[player]) / 40.0,
-        len(snapshot.graveyard[opponent]) / 40.0,
-        len(snapshot.fields[player]) / 5.0,
+        snapshot.turn / 30.0,                                           # 0  turn
+        snapshot.hp[player] / 30.0,                                     # 1  own hp
+        snapshot.hp[opponent] / 30.0,                                   # 2  opp hp
+        snapshot.max_hp[player] / 30.0,                                 # 3  own max_hp
+        snapshot.max_hp[opponent] / 30.0,                               # 4  opp max_hp
+        snapshot.foxtail[player] / 9.0,                                 # 5  own foxtail
+        snapshot.foxtail[opponent] / 9.0,                               # 6  opp foxtail
+        len(snapshot.hands[player]) / 9.0,                              # 7  own hand size
+        len(snapshot.hands[opponent]) / 9.0,                            # 8  opp hand size
+        len(snapshot.decks[player]) / 40.0,                             # 9  own deck size
+        len(snapshot.decks[opponent]) / 40.0,                           # 10 opp deck size
+        len(snapshot.graveyard[player]) / 40.0,                         # 11 own graveyard size
+        len(snapshot.graveyard[opponent]) / 40.0,                       # 12 opp graveyard size
+        len(snapshot.fields[player]) / 5.0,                             # 13 own field count
+        len(snapshot.fields[opponent]) / 5.0,                           # 14 opp field count (was missing)
+        len(snapshot.banished[player]) / 40.0,                          # 15 own banished count
+        len(snapshot.banished[opponent]) / 40.0,                        # 16 opp banished count
+        float(snapshot.current_player == player),                       # 17 is it our turn?
+        snapshot.enhance_used_this_turn[player] / 3.0,                  # 18 own enhance used
+        snapshot.enhance_used_this_turn[opponent] / 3.0,                # 19 opp enhance used
+        snapshot.max_enhance_allowed_per_turn[player] / 3.0,            # 20 own max enhance/turn
+        snapshot.amount_card_generated_from_void[player] / 10.0,        # 21 own cards generated
     ])
 
     # --- Field features (player then opponent, 5 slots each) ---
@@ -173,6 +233,18 @@ def extract_features(
             cid, nums = _encode_hand_slot(card)
             card_ids.append(cid)
             numeric.extend(nums)
+
+    # --- Graveyard card IDs (player then opponent, 15 slots each) ---
+    for p in [player, opponent]:
+        card_ids.extend(_encode_zone_card_ids(snapshot.graveyard[p], _GRAVEYARD_SLOTS))
+
+    # --- Banished card IDs (player then opponent, 10 slots each) ---
+    for p in [player, opponent]:
+        card_ids.extend(_encode_zone_card_ids(snapshot.banished[p], _BANISHED_SLOTS))
+
+    # --- Deck card IDs (player then opponent, 20 slots each) ---
+    for p in [player, opponent]:
+        card_ids.extend(_encode_zone_card_ids(snapshot.decks[p], _DECK_SLOTS))
 
     return card_ids, numeric
 
@@ -195,7 +267,7 @@ def _import_torch():
 
 def create_model(num_card_types: int = NUM_CARD_TYPES,
                  embedding_dim: int = 16,
-                 hidden_dim: int = 128):
+                 hidden_dim: int = 256):
     """Create and return a ScoringModel instance."""
     torch, nn = _import_torch()
 
@@ -218,16 +290,20 @@ def create_model(num_card_types: int = NUM_CARD_TYPES,
             self.network = nn.Sequential(
                 nn.Linear(input_dim, hidden_dim),
                 nn.ReLU(),
+                nn.Dropout(0.1),
                 nn.Linear(hidden_dim, hidden_dim // 2),
                 nn.ReLU(),
-                nn.Linear(hidden_dim // 2, 1),
+                nn.Dropout(0.1),
+                nn.Linear(hidden_dim // 2, hidden_dim // 4),
+                nn.ReLU(),
+                nn.Linear(hidden_dim // 4, 1),
                 nn.Sigmoid(),
             )
 
         def forward(self, card_ids_tensor, numeric_tensor):
-            emb = self.embedding(card_ids_tensor)                 # (B, 28, E)
-            emb_flat = emb.view(emb.size(0), -1)                 # (B, 28*E)
-            x = torch.cat([emb_flat, numeric_tensor], dim=1)      # (B, 28*E + N)
+            emb = self.embedding(card_ids_tensor)                 # (B, 118, E)
+            emb_flat = emb.view(emb.size(0), -1)                 # (B, 118*E)
+            x = torch.cat([emb_flat, numeric_tensor], dim=1)      # (B, 118*E + N)
             return self.network(x)                                 # (B, 1)
 
     return ScoringModel()

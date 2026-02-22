@@ -405,21 +405,22 @@ def _collect_single_game(
 
         # actions = get_ai_actions(ai, state)
         actions = get_random_ai_actions(ai, state)
+        for p in [1, 2]:
+            cids, nums = extract_features(state, p)
+            snapshots.append((p, cids, nums))
+
         for action in actions:
             if action[0] == 'end_turn':
                 break
             apply_action(state, current_player, action)
+            for p in [1, 2]:
+                cids, nums = extract_features(state, p)
+                snapshots.append((p, cids, nums))
             if state.concluded:
                 break
 
         if not state.concluded:
             GameSimulator.end_turn(state)
-
-        # Snapshot AFTER end_turn (start of next player's turn)
-        # Record from BOTH players' perspectives for balanced training
-        for p in [1, 2]:
-            cids, nums = extract_features(state, p)
-            snapshots.append((p, cids, nums))
 
     # Label all snapshots with outcome
     winner = state.winner
@@ -789,8 +790,8 @@ def main():
     train_parser = subparsers.add_parser("train", help="Train the model")
     train_parser.add_argument("--data", type=str, default="./ml/ml_training_data.jsonl",
                                help="Training data path (default: ./ml/ml_training_data.jsonl)")
-    train_parser.add_argument("--model", type=str, default="./ml/ml_model.pt",
-                               help="Model save path (default: ./ml/ml_model.pt)")
+    train_parser.add_argument("--model", type=str, default="./ml/model.pt",
+                               help="Model save path (default: ./ml/model.pt)")
     train_parser.add_argument("--epochs", type=int, default=50,
                                help="Training epochs (default: 50)")
     train_parser.add_argument("--batch-size", type=int, default=64,
@@ -803,8 +804,8 @@ def main():
 
     # info
     info_parser = subparsers.add_parser("info", help="Show model info")
-    info_parser.add_argument("--model", type=str, default="./ml/ml_model.pt",
-                              help="Model path (default: ./ml/ml_model.pt)")
+    info_parser.add_argument("--model", type=str, default="./ml/model.pt",
+                              help="Model path (default: ./ml/model.pt)")
 
     args = parser.parse_args()
 

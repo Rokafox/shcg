@@ -53,7 +53,7 @@ _HAND_SLOTS = MAX_HAND_SIZE    # 9 per player
 NUM_CARD_SLOTS = (_FIELD_SLOTS + _HAND_SLOTS) * 2  # 28 total
 
 # Per-slot numeric features (field followers/amulets)
-_FIELD_NUMERIC_PER_SLOT = 15  # see _encode_field_slot
+_FIELD_NUMERIC_PER_SLOT = 16  # see _encode_field_slot
 _HAND_NUMERIC_PER_SLOT = 2   # is_occupied, cost
 _GLOBAL_NUMERIC = 14
 
@@ -76,9 +76,10 @@ def _encode_field_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
             1.0,                                    # is_occupied
             1.0,                                    # is_follower
             0.0,                                    # is_amulet
-            card.attack / 10.0,                     # attack
-            card.hp / 10.0,                         # hp
-            card.max_hp / 10.0,                     # max_hp
+            card.attack / 30.0,                     # attack: 0 - 30+
+            card.hp / 30.0,                         # hp: 0 - 30+
+            card.max_hp / 30.0,                     # max_hp: 0 - 30+
+            card.original_cost / 10.0,              # original_cost
             card.cost / 10.0,                        # cost
             float(card.ability_protect),             # protect
             float(card.ability_drain),               # drain
@@ -97,6 +98,7 @@ def _encode_field_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
             0.0,                                    # attack (N/A)
             0.0,                                    # hp (N/A)
             0.0,                                    # max_hp (N/A)
+            card.original_cost / 10.0,              # original_cost
             card.cost / 10.0,                        # cost
             0.0, 0.0, 0.0, 0.0, 0.0,               # abilities (N/A)
             0.0,                                    # can_attack (N/A)
@@ -138,7 +140,7 @@ def extract_features(
 
     # --- Global features (14) ---
     numeric.extend([
-        snapshot.turn / 20.0,
+        snapshot.turn / 30.0,
         snapshot.hp[player] / 30.0,
         snapshot.hp[opponent] / 30.0,
         snapshot.max_hp[player] / 30.0,
@@ -238,8 +240,8 @@ def create_model(num_card_types: int = NUM_CARD_TYPES,
 def _collect_single_game(
     deck1_recipe: Optional[dict[str, int]],
     deck2_recipe: Optional[dict[str, int]],
-    ai_cuets: int = 3,
-    ai_max_states: int = 50,
+    ai_cuets: int = 2,
+    ai_max_states: int = 4,
     max_turns: int = 200,
 ) -> list[dict]:
     """
@@ -262,16 +264,16 @@ def _collect_single_game(
     ai1 = MinimaxAI(
         player_number=1,
         cuets_player_turn=ai_cuets,
-        cuets_opp_turn=ai_cuets,
+        cuets_opp_turn=ai_cuets // 2,
         unique_states_max_player_turn=ai_max_states,
-        unique_states_max_opp_turn=ai_max_states,
+        unique_states_max_opp_turn=ai_max_states // 2
     )
     ai2 = MinimaxAI(
         player_number=2,
         cuets_player_turn=ai_cuets,
-        cuets_opp_turn=ai_cuets,
+        cuets_opp_turn=ai_cuets // 2,
         unique_states_max_player_turn=ai_max_states,
-        unique_states_max_opp_turn=ai_max_states,
+        unique_states_max_opp_turn=ai_max_states // 2
     )
 
     ais = {1: ai1, 2: ai2}
@@ -320,8 +322,8 @@ def _collect_single_game(
 def collect_training_data(
     num_games: int,
     output_path: str,
-    ai_cuets: int = 3,
-    ai_max_states: int = 50,
+    ai_cuets: int = 2,
+    ai_max_states: int = 4,
     max_turns: int = 200,
 ):
     """
@@ -608,23 +610,23 @@ def main():
 
     # collect
     collect_parser = subparsers.add_parser("collect", help="Collect training data")
-    collect_parser.add_argument("--games", type=int, default=100,
-                                help="Number of games to simulate (default: 100)")
-    collect_parser.add_argument("--output", type=str, default="ml_training_data.jsonl",
-                                help="Output file path (default: ml_training_data.jsonl)")
-    collect_parser.add_argument("--ai-cuets", type=int, default=3,
-                                help="AI CUETS parameter (default: 3)")
-    collect_parser.add_argument("--ai-max-states", type=int, default=50,
-                                help="AI max unique states (default: 50)")
+    collect_parser.add_argument("--games", type=int, default=3000,
+                                help="Number of games to simulate (default: 3000)")
+    collect_parser.add_argument("--output", type=str, default="./ml/ml_training_data.jsonl",
+                                help="Output file path (default: ./ml/ml_training_data.jsonl)")
+    collect_parser.add_argument("--ai-cuets", type=int, default=2,
+                                help="AI CUETS parameter (default: 2)")
+    collect_parser.add_argument("--ai-max-states", type=int, default=4,
+                                help="AI max unique states (default: 4)")
     collect_parser.add_argument("--max-turns", type=int, default=200,
                                 help="Max turns per game (default: 200)")
 
     # train
     train_parser = subparsers.add_parser("train", help="Train the model")
-    train_parser.add_argument("--data", type=str, default="ml_training_data.jsonl",
-                               help="Training data path (default: ml_training_data.jsonl)")
-    train_parser.add_argument("--model", type=str, default="ml_model.pt",
-                               help="Model save path (default: ml_model.pt)")
+    train_parser.add_argument("--data", type=str, default="./ml/ml_training_data.jsonl",
+                               help="Training data path (default: ./ml/ml_training_data.jsonl)")
+    train_parser.add_argument("--model", type=str, default="./ml/ml_model.pt",
+                               help="Model save path (default: ./ml/ml_model.pt)")
     train_parser.add_argument("--epochs", type=int, default=50,
                                help="Training epochs (default: 50)")
     train_parser.add_argument("--batch-size", type=int, default=64,
@@ -634,8 +636,8 @@ def main():
 
     # info
     info_parser = subparsers.add_parser("info", help="Show model info")
-    info_parser.add_argument("--model", type=str, default="ml_model.pt",
-                              help="Model path (default: ml_model.pt)")
+    info_parser.add_argument("--model", type=str, default="./ml/ml_model.pt",
+                              help="Model path (default: ./ml/ml_model.pt)")
 
     args = parser.parse_args()
 

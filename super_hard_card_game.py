@@ -1831,15 +1831,19 @@ if __name__ == "__main__":
                     if ml_evaluator is None:
                         text_box.append_html_text("MLモデルが読み込まれていないのじゃ。\n")
                     else:
-                        snap = ai_player_new.GameStateSnapshot.from_game_state(global_vars_shcg)
-                        score = ml_evaluator.evaluate(snap, global_vars_shcg.current_player, only_care_about_winorlose=False)
-                        if score == float('inf'):
-                            text_box.append_html_text(f"勝率: 勝利確定\n")
-                        elif score == float('-inf'):
-                            text_box.append_html_text(f"勝率: 敗北確定\n")
+                        # the model is trained to analyze end turn states, which means 9 foxtail
+                        if global_vars_shcg.foxtail[global_vars_shcg.current_player] != 9:
+                            text_box.append_html_text("現在の状態は分析に適していないのじゃ。分析は、9狐尾状態を想定しているのじゃ。\n")
                         else:
-                            winrate = score / 200.0 * 100.0
-                            text_box.append_html_text(f"プレイヤー{global_vars_shcg.current_player}の勝率: {winrate:.1f}%\n")
+                            snap = ai_player_new.GameStateSnapshot.from_game_state(global_vars_shcg)
+                            score = ml_evaluator.evaluate(snap, global_vars_shcg.current_player, only_care_about_winorlose=False)
+                            if score == float('inf'):
+                                text_box.append_html_text(f"勝率: 勝利確定\n")
+                            elif score == float('-inf'):
+                                text_box.append_html_text(f"勝率: 敗北確定\n")
+                            else:
+                                winrate = score / 200.0 * 100.0
+                                text_box.append_html_text(f"プレイヤー{global_vars_shcg.current_player}の勝率: {winrate:.1f}%\n")
                 if event.ui_element == deck_builder_button:
                     shcg_ui_deck_builder.build_deck_builder_window()
                 # Deck builder buttons

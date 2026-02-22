@@ -104,6 +104,7 @@ def _encode_field_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
             card.how_many_attacks_done_of_turn / 3.0,   # 19 attacks_done_this_turn
             0.0,                                        # 20 amulet_counter (N/A)
             0.0,                                        # 21 amulet_counter_max (N/A)
+            len(card.extra_effect_list) / 5.0,          # 22 extra_effect_count (normalized to max 5)
         ]
     elif isinstance(card, cards.Amulet):
         numeric = [
@@ -129,15 +130,17 @@ def _encode_field_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
             0.0,                                        # 19 attacks_done (N/A)
             card.counter / 10.0,                        # 20 amulet_counter
             card.counter_max / 10.0,                    # 21 amulet_counter_max
+            len(card.extra_effect_list) / 5.0,          # 22 extra_effect_count (normalized to max 5)
         ]
     else:
-        return EMPTY_CARD_ID, [0.0] * _FIELD_NUMERIC_PER_SLOT
+        raise Exception(f"Unexpected card type on field: {card.__class__.__name__}")
+        # return EMPTY_CARD_ID, [0.0] * _FIELD_NUMERIC_PER_SLOT
 
     return card_id, numeric
 
 
 def _encode_hand_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
-    """Encode a single hand slot. Returns (card_id, numeric_features[12])."""
+    """Encode a single hand slot. Returns (card_id, numeric_features)."""
     if card is None:
         return EMPTY_CARD_ID, [0.0] * _HAND_NUMERIC_PER_SLOT
 
@@ -160,6 +163,7 @@ def _encode_hand_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
         float(card.ability_protect) if is_follower else 0.0,  # 9  protect
         float(card.ability_drain) if is_follower else 0.0,    # 10 drain
         float(card.ability_lethal) if is_follower else 0.0,   # 11 lethal
+        len(card.extra_effect_list) / 5.0,                     # 12 extra_effect_count (normalized to max 5)
     ]
     return card_id, numeric
 
@@ -193,28 +197,29 @@ def extract_features(
 
     # --- Global features (22) ---
     numeric.extend([
-        snapshot.turn / 30.0,                                           # 0  turn
-        snapshot.hp[player] / 30.0,                                     # 1  own hp
-        snapshot.hp[opponent] / 30.0,                                   # 2  opp hp
-        snapshot.max_hp[player] / 30.0,                                 # 3  own max_hp
-        snapshot.max_hp[opponent] / 30.0,                               # 4  opp max_hp
-        snapshot.foxtail[player] / 9.0,                                 # 5  own foxtail
-        snapshot.foxtail[opponent] / 9.0,                               # 6  opp foxtail
-        len(snapshot.hands[player]) / 9.0,                              # 7  own hand size
-        len(snapshot.hands[opponent]) / 9.0,                            # 8  opp hand size
-        len(snapshot.decks[player]) / 40.0,                             # 9  own deck size
-        len(snapshot.decks[opponent]) / 40.0,                           # 10 opp deck size
-        len(snapshot.graveyard[player]) / 40.0,                         # 11 own graveyard size
-        len(snapshot.graveyard[opponent]) / 40.0,                       # 12 opp graveyard size
-        len(snapshot.fields[player]) / 5.0,                             # 13 own field count
-        len(snapshot.fields[opponent]) / 5.0,                           # 14 opp field count (was missing)
-        len(snapshot.banished[player]) / 40.0,                          # 15 own banished count
-        len(snapshot.banished[opponent]) / 40.0,                        # 16 opp banished count
-        float(snapshot.current_player == player),                       # 17 is it our turn?
-        snapshot.enhance_used_this_turn[player] / 3.0,                  # 18 own enhance used
-        snapshot.enhance_used_this_turn[opponent] / 3.0,                # 19 opp enhance used
-        snapshot.max_enhance_allowed_per_turn[player] / 3.0,            # 20 own max enhance/turn
-        snapshot.amount_card_generated_from_void[player] / 10.0,        # 21 own cards generated
+        snapshot.turn / 30.0,                                    
+        snapshot.hp[player] / 30.0,                               
+        snapshot.hp[opponent] / 30.0,                               
+        snapshot.max_hp[player] / 30.0,                             
+        snapshot.max_hp[opponent] / 30.0,                             
+        # snapshot.foxtail[player] / 9.0,                              
+        # snapshot.foxtail[opponent] / 9.0,                            
+        # no need for foxtail features as in end state, it is always 0 and 9 respectively
+        len(snapshot.hands[player]) / 9.0,                            
+        len(snapshot.hands[opponent]) / 9.0,                           
+        len(snapshot.decks[player]) / 40.0,                            
+        len(snapshot.decks[opponent]) / 40.0,                           
+        len(snapshot.graveyard[player]) / 40.0,                        
+        len(snapshot.graveyard[opponent]) / 40.0,                       
+        len(snapshot.fields[player]) / 5.0,                             
+        len(snapshot.fields[opponent]) / 5.0,                           
+        len(snapshot.banished[player]) / 40.0,                         
+        len(snapshot.banished[opponent]) / 40.0,                        
+        float(snapshot.current_player == player),                       
+        snapshot.enhance_used_this_turn[player] / 3.0,                  
+        snapshot.enhance_used_this_turn[opponent] / 3.0,                
+        snapshot.max_enhance_allowed_per_turn[player] / 3.0,            
+        snapshot.amount_card_generated_from_void[player] / 10.0,        
     ])
 
     # --- Field features (player then opponent, 5 slots each) ---
@@ -235,15 +240,15 @@ def extract_features(
             card_ids.append(cid)
             numeric.extend(nums)
 
-    # --- Graveyard card IDs (player then opponent, 15 slots each) ---
+    # --- Graveyard card IDs (player then opponent, 60 slots each) ---
     for p in [player, opponent]:
         card_ids.extend(_encode_zone_card_ids(snapshot.graveyard[p], _GRAVEYARD_SLOTS))
 
-    # --- Banished card IDs (player then opponent, 10 slots each) ---
+    # --- Banished card IDs (player then opponent, 60 slots each) ---
     for p in [player, opponent]:
         card_ids.extend(_encode_zone_card_ids(snapshot.banished[p], _BANISHED_SLOTS))
 
-    # --- Deck card IDs (player then opponent, 20 slots each) ---
+    # --- Deck card IDs (player then opponent, 60 slots each) ---
     for p in [player, opponent]:
         card_ids.extend(_encode_zone_card_ids(snapshot.decks[p], _DECK_SLOTS))
 
@@ -318,7 +323,7 @@ def create_model(num_card_types: int = NUM_CARD_TYPES,
 
     class ScoringModel(nn.Module):
         """
-        Predicts win probability from game state features.
+        Predicts win probability from end game state.
 
         Input:
             card_ids:  (batch, NUM_CARD_SLOTS)   - integer card type indices
@@ -407,22 +412,20 @@ def _collect_single_game(
 
         # actions = get_ai_actions(ai, state)
         actions = get_random_ai_actions(ai, state)
-        for p in [1, 2]:
-            cids, nums = extract_features(state, p)
-            snapshots.append((p, cids, nums))
 
         for action in actions:
             if action[0] == 'end_turn':
                 break
             apply_action(state, current_player, action)
-            for p in [1, 2]:
-                cids, nums = extract_features(state, p)
-                snapshots.append((p, cids, nums))
             if state.concluded:
                 break
 
         if not state.concluded:
             GameSimulator.end_turn(state)
+
+        for p in [1, 2]:
+            cids, nums = extract_features(state, p)
+            snapshots.append((p, cids, nums))
 
     # Label all snapshots with outcome
     winner = state.winner
@@ -852,7 +855,7 @@ def test_model(
     data_path: str,
     model_path: str,
     batch_size: int = 256,
-    validation_split: float = 0.1,
+    validation_split: float = 0.5,
     device: str = "auto",
 ):
     """
@@ -1090,8 +1093,8 @@ def main():
 
     # collect
     collect_parser = subparsers.add_parser("collect", help="Collect training data")
-    collect_parser.add_argument("--games", type=int, default=1800,
-                                help="Number of games to simulate (default: 1800)")
+    collect_parser.add_argument("--games", type=int, default=10000,
+                                help="Number of games to simulate (default: 10000)")
     collect_parser.add_argument("--output", type=str, default="./ml/ml_training_data.jsonl",
                                 help="Output file path (default: ./ml/ml_training_data.jsonl)")
     collect_parser.add_argument("--ai-cuets", type=int, default=4,
@@ -1128,8 +1131,8 @@ def main():
                              help="Data path (default: ./ml/ml_training_data.jsonl)")
     test_parser.add_argument("--model", type=str, default="./ml/model.pt",
                              help="Model path (default: ./ml/model.pt)")
-    test_parser.add_argument("--validation-split", type=float, default=0.1,
-                             help="Held-out subset ratio using train/validation split logic (default: 0.1)")
+    test_parser.add_argument("--validation-split", type=float, default=0.5,
+                             help="Held-out subset ratio using train/validation split logic (default: 0.5)")
     test_parser.add_argument("--batch-size", type=int, default=256,
                              help="Batch size for evaluation (default: 256)")
     test_parser.add_argument("--device", type=str, default="auto",

@@ -7,7 +7,6 @@ replacing the hand-crafted Evaluator.evaluate() heuristic.
 Usage:
     python ml_scoring.py collect [--games N] [--output PATH]
     python ml_scoring.py train [--data PATH] [--model PATH] [--epochs N] [--device auto|cpu|cuda]
-    python ml_scoring.py train_r [--data PATH] [--base-model PATH] [--model PATH] [--epochs N] [--device auto|cpu|cuda]
     python ml_scoring.py test [--data PATH] [--model PATH] [--validation-split F] [--device auto|cpu|cuda]
     python ml_scoring.py info [--model PATH]
 
@@ -62,19 +61,19 @@ NUM_CARD_SLOTS = (
 )  # 388 total
 
 # Per-slot numeric features
-_FIELD_NUMERIC_PER_SLOT = 22  # see _encode_field_slot
-_HAND_NUMERIC_PER_SLOT = 12   # see _encode_hand_slot
-_GLOBAL_NUMERIC = 22
+_FIELD_NUMERIC_PER_SLOT = 23  # see _encode_field_slot
+_HAND_NUMERIC_PER_SLOT = 13   # see _encode_hand_slot
+_GLOBAL_NUMERIC = 20
 
 NUM_NUMERIC_FEATURES = (
     _GLOBAL_NUMERIC
     + _FIELD_SLOTS * 2 * _FIELD_NUMERIC_PER_SLOT
     + _HAND_SLOTS * 2 * _HAND_NUMERIC_PER_SLOT
-)  # 22 + 220 + 216 = 458
+)  # 20 + 230 + 234 = 484
 
 
 def _encode_field_slot(card: Optional[cards.Card]) -> tuple[int, list[float]]:
-    """Encode a single field slot. Returns (card_id, numeric_features[22])."""
+    """Encode a single field slot. Returns (card_id, numeric_features[23])."""
     if card is None:
         return EMPTY_CARD_ID, [0.0] * _FIELD_NUMERIC_PER_SLOT
 
@@ -188,14 +187,14 @@ def extract_features(
     Extract features from a game state, from `player`'s perspective.
 
     Returns:
-        card_ids:  list of int,   length NUM_CARD_SLOTS  (118)
-        numeric:   list of float, length NUM_NUMERIC_FEATURES (458)
+        card_ids:  list of int,   length NUM_CARD_SLOTS  (388)
+        numeric:   list of float, length NUM_NUMERIC_FEATURES (484)
     """
     opponent = 3 - player
     card_ids: list[int] = []
     numeric: list[float] = []
 
-    # --- Global features (22) ---
+    # --- Global features (20) ---
     numeric.extend([
         snapshot.turn / 30.0,                                    
         snapshot.hp[player] / 30.0,                               
@@ -663,194 +662,6 @@ def train_model(
     print(f"Best validation loss: {best_val_loss:.4f}")
 
 
-def train_model_resume(
-    data_path: str,
-    base_model_path: str,
-    model_save_path: str,
-    epochs: int = 50,
-    batch_size: int = 64,
-    lr: float = 0.001,
-    validation_split: float = 0.1,
-    device: str = "auto",
-):
-    """
-    Continue training from an existing model checkpoint.
-
-    Loads weights from base_model_path, trains on data_path, and saves
-    the updated checkpoint to model_save_path.
-    """
-    torch, nn = _import_torch()
-
-    # Load data
-    print(f"Loading data from {data_path}...")
-    card_ids_list = []
-    numeric_list = []
-    labels_list = []
-
-    with open(data_path, "r", encoding="utf-8") as f:
-        for line in f:
-            sample = json.loads(line)
-            card_ids_list.append(sample["card_ids"])
-            numeric_list.append(sample["numeric"])
-            labels_list.append(sample["label"])
-
-    if card_ids_list:
-        sample_card_slots = len(card_ids_list[0])
-        sample_numeric_features = len(numeric_list[0])
-        if sample_card_slots != NUM_CARD_SLOTS:
-            raise ValueError(
-                f"Dataset card_ids length mismatch: got {sample_card_slots}, expected {NUM_CARD_SLOTS}. "
-                "Your data was likely collected with older slot constants. Re-run collect."
-            )
-        if sample_numeric_features != NUM_NUMERIC_FEATURES:
-            raise ValueError(
-                f"Dataset numeric length mismatch: got {sample_numeric_features}, expected {NUM_NUMERIC_FEATURES}. "
-                "Re-run collect with the current feature extractor."
-            )
-
-    n = len(labels_list)
-    print(f"Loaded {n} samples")
-
-    if n == 0:
-        print("No data to train on.")
-        return
-
-    # Convert to tensors
-    card_ids_tensor = torch.tensor(card_ids_list, dtype=torch.long)
-    numeric_tensor = torch.tensor(numeric_list, dtype=torch.float32)
-    labels_tensor = torch.tensor(labels_list, dtype=torch.float32).unsqueeze(1)
-
-    # Train/val split
-    indices = list(range(n))
-    random.shuffle(indices)
-    val_size = max(1, int(n * validation_split))
-    val_indices = indices[:val_size]
-    train_indices = indices[val_size:]
-
-    train_card_ids = card_ids_tensor[train_indices]
-    train_numeric = numeric_tensor[train_indices]
-    train_labels = labels_tensor[train_indices]
-
-    val_card_ids = card_ids_tensor[val_indices]
-    val_numeric = numeric_tensor[val_indices]
-    val_labels = labels_tensor[val_indices]
-
-    print(f"Train: {len(train_indices)}, Validation: {len(val_indices)}")
-
-    torch_device = _select_device(device)
-    val_card_ids = val_card_ids.to(torch_device)
-    val_numeric = val_numeric.to(torch_device)
-    val_labels = val_labels.to(torch_device)
-
-    print(f"Loading base model from {base_model_path}...")
-    checkpoint = torch.load(base_model_path, map_location=torch_device, weights_only=False)
-
-    saved_num_card_slots = checkpoint.get("num_card_slots")
-    saved_num_numeric_features = checkpoint.get("num_numeric_features")
-    if saved_num_card_slots != NUM_CARD_SLOTS:
-        raise ValueError(
-            f"Model card slot count mismatch: model={saved_num_card_slots}, runtime={NUM_CARD_SLOTS}. "
-            "Retrain model with current slot constants."
-        )
-    if saved_num_numeric_features != NUM_NUMERIC_FEATURES:
-        raise ValueError(
-            f"Model numeric feature count mismatch: model={saved_num_numeric_features}, "
-            f"runtime={NUM_NUMERIC_FEATURES}. Retrain model with current feature extractor."
-        )
-
-    saved_map = checkpoint.get("card_name_to_id")
-    if saved_map != CARD_NAME_TO_ID:
-        print("WARNING: Card ID mapping in model differs from current game. "
-              "Model may produce inaccurate results. Retrain recommended.")
-
-    model = create_model(num_card_types=checkpoint["num_card_types"])
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.to(torch_device)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    if "optimizer_state_dict" in checkpoint:
-        try:
-            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-            print("Loaded optimizer state from checkpoint.")
-        except Exception as e:
-            print(f"WARNING: Failed to load optimizer state ({e}). Starting with fresh optimizer.")
-    loss_fn = nn.BCELoss()
-
-    best_val_loss = float('inf')
-    best_state_dict = None
-
-    # Training loop
-    for epoch in range(1, epochs + 1):
-        model.train()
-
-        # Shuffle training data
-        perm = torch.randperm(len(train_indices))
-        train_card_ids = train_card_ids[perm]
-        train_numeric = train_numeric[perm]
-        train_labels = train_labels[perm]
-
-        epoch_loss = 0.0
-        num_batches = 0
-
-        for start in range(0, len(train_indices), batch_size):
-            end = min(start + batch_size, len(train_indices))
-            batch_cids = train_card_ids[start:end].to(torch_device)
-            batch_nums = train_numeric[start:end].to(torch_device)
-            batch_labels = train_labels[start:end].to(torch_device)
-
-            optimizer.zero_grad()
-            predictions = model(batch_cids, batch_nums)
-            loss = loss_fn(predictions, batch_labels)
-            loss.backward()
-            optimizer.step()
-
-            epoch_loss += loss.item()
-            num_batches += 1
-
-        avg_train_loss = epoch_loss / num_batches
-
-        # Validation
-        model.eval()
-        with torch.no_grad():
-            val_preds = model(val_card_ids, val_numeric)
-            val_loss = loss_fn(val_preds, val_labels).item()
-
-            # Accuracy: predict win if > 0.5
-            val_correct = ((val_preds > 0.5).float() == val_labels).float().mean().item()
-
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_state_dict = {k: v.clone() for k, v in model.state_dict().items()}
-
-        if epoch % 5 == 0 or epoch == 1:
-            print(f"  Epoch {epoch:3d}/{epochs}  "
-                  f"train_loss={avg_train_loss:.4f}  "
-                  f"val_loss={val_loss:.4f}  "
-                  f"val_acc={val_correct:.3f}"
-                  f"{'  *best*' if best_state_dict is not None and val_loss <= best_val_loss else ''}")
-
-    # Save best model
-    if best_state_dict is not None:
-        model.load_state_dict(best_state_dict)
-
-    save_data = {
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "card_name_to_id": CARD_NAME_TO_ID,
-        "num_card_types": NUM_CARD_TYPES,
-        "num_card_slots": NUM_CARD_SLOTS,
-        "num_numeric_features": NUM_NUMERIC_FEATURES,
-        "best_val_loss": best_val_loss,
-        "trained_device": str(torch_device),
-        "torch_version": torch.__version__,
-        "torch_hip_version": getattr(torch.version, "hip", None),
-        "resume_base_model": base_model_path,
-    }
-    torch.save(save_data, model_save_path)
-    print(f"\nResumed model saved to: {model_save_path}")
-    print(f"Best validation loss: {best_val_loss:.4f}")
-
-
 def test_model(
     data_path: str,
     model_path: str,
@@ -1139,24 +950,6 @@ def main():
                              choices=["auto", "cpu", "cuda"],
                              help="Evaluation device (default: auto). Use 'cuda' for NVIDIA/ROCm PyTorch builds.")
 
-    # train_r
-    train_r_parser = subparsers.add_parser("train_r", help="Resume training from an existing model")
-    train_r_parser.add_argument("--data", type=str, default="./ml/ml_training_data.jsonl",
-                                help="Training data path (default: ./ml/ml_training_data.jsonl)")
-    train_r_parser.add_argument("--base-model", type=str, default="./ml/model.pt",
-                                help="Existing model path to resume from (default: ./ml/model.pt)")
-    train_r_parser.add_argument("--model", type=str, default="./ml/model_resumed.pt",
-                                help="Output model save path (default: ./ml/model_resumed.pt)")
-    train_r_parser.add_argument("--epochs", type=int, default=30,
-                                help="Training epochs (default: 30)")
-    train_r_parser.add_argument("--batch-size", type=int, default=64,
-                                help="Batch size (default: 64)")
-    train_r_parser.add_argument("--lr", type=float, default=0.001,
-                                help="Learning rate (default: 0.001)")
-    train_r_parser.add_argument("--device", type=str, default="auto",
-                                choices=["auto", "cpu", "cuda"],
-                                help="Training device (default: auto). Use 'cuda' for NVIDIA/ROCm PyTorch builds.")
-
     args = parser.parse_args()
 
     if args.command == "collect":
@@ -1190,18 +983,6 @@ def main():
             model_path=args.model,
             batch_size=args.batch_size,
             validation_split=args.validation_split,
-            device=args.device,
-        )
-
-    elif args.command == "train_r":
-        print(f"Resuming training: base={args.base_model}, data={args.data} -> {args.model}")
-        train_model_resume(
-            data_path=args.data,
-            base_model_path=args.base_model,
-            model_save_path=args.model,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            lr=args.lr,
             device=args.device,
         )
 

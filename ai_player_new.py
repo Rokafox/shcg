@@ -24,6 +24,7 @@ DEFAULT_MAX_ENHANCE_PER_TURN = 1
 
 # AI constants
 DEFAULT_AI_ACTION_DELAY_MS = 600
+SINGLE_ACTION_SEQ_MAX_LENGTH = 30
 
 
 def _find_card_by_id(card_list: List[cards.Card], unique_id) -> Optional[cards.Card]:
@@ -922,7 +923,12 @@ class MinimaxAI:
 
         while continuous_visited_state_count < min_continuous_visited_state_req and len(visited_states) < max_unique_states:
             # do: generate single action sequences until requirement is met
-            next_possible_actions: list[tuple] = self._get_all_actions(current_state, player)
+            # single_action_seq too long? Maybe a infinite loop.
+            if len(single_action_seq) > SINGLE_ACTION_SEQ_MAX_LENGTH:
+                print("Action sequence too long. Resetting.")
+                next_possible_actions = [] # force stop and reset
+            else:
+                next_possible_actions: list[tuple] = self._get_all_actions(current_state, player)
 
             if not next_possible_actions: # if terminal state
                 # hash, compare, if in visited_states, increase continuous_visited_state_count

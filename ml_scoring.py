@@ -259,17 +259,20 @@ def _collect_single_game(
     deck2 = create_deck(deck2_recipe)
     state = create_game_state_with_decks(deck1, deck2)
 
-    ai1 = MinimaxAI(player_number=1)
-    ai1.continuous_unique_endturnstates_req_player_turn = ai_cuets
-    ai1.unique_states_max_player_turn = ai_max_states
-    ai1.continuous_unique_endturnstates_req_opp_turn = ai_cuets
-    ai1.unique_states_max_opp_turn = ai_max_states
-
-    ai2 = MinimaxAI(player_number=2)
-    ai2.continuous_unique_endturnstates_req_player_turn = ai_cuets
-    ai2.unique_states_max_player_turn = ai_max_states
-    ai2.continuous_unique_endturnstates_req_opp_turn = ai_cuets
-    ai2.unique_states_max_opp_turn = ai_max_states
+    ai1 = MinimaxAI(
+        player_number=1,
+        cuets_player_turn=ai_cuets,
+        cuets_opp_turn=ai_cuets,
+        unique_states_max_player_turn=ai_max_states,
+        unique_states_max_opp_turn=ai_max_states,
+    )
+    ai2 = MinimaxAI(
+        player_number=2,
+        cuets_player_turn=ai_cuets,
+        cuets_opp_turn=ai_cuets,
+        unique_states_max_player_turn=ai_max_states,
+        unique_states_max_opp_turn=ai_max_states,
+    )
 
     ais = {1: ai1, 2: ai2}
     snapshots: list[tuple[int, list[int], list[float]]] = []  # (perspective_player, card_ids, numeric)

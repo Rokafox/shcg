@@ -6,6 +6,7 @@ replacing the hand-crafted Evaluator.evaluate() heuristic.
 
 Usage:
     python ml_scoring.py collect [--games N] [--output PATH]
+    python ml_scoring.py preprocess [--data PATH] [--output PATH]
     python ml_scoring.py train [--data PATH] [--model PATH] [--epochs N] [--device auto|cpu|cuda]
     python ml_scoring.py test [--data PATH] [--model PATH] [--validation-split F] [--device auto|cpu|cuda]
     python ml_scoring.py info [--model PATH]
@@ -503,26 +504,114 @@ def collect_training_data(
 
 
 # ============================================================
-# Training
+# Data Preprocessing & Loading
 # ============================================================
 
-def train_model(
+def preprocess_data(jsonl_path: str, output_path: str):
+    """
+    Convert JSONL training data to compact binary .pt format.
+
+    Reads the JSONL line by line using numpy arrays to avoid the massive
+    memory overhead of Python lists. Peak memory is ~5-6 GB per 1M samples
+    instead of ~30 GB with the raw Python list approach.
+    """
+    import numpy as np
+    torch, _ = _import_torch()
+
+    # Pass 1: count lines and validate first sample
+    print(f"Counting samples in {jsonl_path}...")
+    n = 0
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if n == 0:
+                sample = json.loads(line)
+                if len(sample["card_ids"]) != NUM_CARD_SLOTS:
+                    raise ValueError(
+                        f"card_ids length mismatch: got {len(sample['card_ids'])}, "
+                        f"expected {NUM_CARD_SLOTS}. Re-run collect."
+                    )
+                if len(sample["numeric"]) != NUM_NUMERIC_FEATURES:
+                    raise ValueError(
+                        f"numeric length mismatch: got {len(sample['numeric'])}, "
+                        f"expected {NUM_NUMERIC_FEATURES}. Re-run collect."
+                    )
+            n += 1
+
+    if n == 0:
+        print("No data found.")
+        return
+
+    print(f"Found {n} samples. Pre-allocating arrays...")
+    # Use int16 for card IDs during processing (values are small),
+    # converted to int64 at save time.
+    card_ids_arr = np.zeros((n, NUM_CARD_SLOTS), dtype=np.int16)
+    numeric_arr = np.zeros((n, NUM_NUMERIC_FEATURES), dtype=np.float32)
+    labels_arr = np.zeros(n, dtype=np.float32)
+
+    # Pass 2: fill arrays
+    print("Parsing data...")
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            sample = json.loads(line)
+            card_ids_arr[i] = sample["card_ids"]
+            numeric_arr[i] = sample["numeric"]
+            labels_arr[i] = sample["label"]
+            if (i + 1) % 100000 == 0:
+                print(f"  {i + 1}/{n} samples processed")
+
+    print("Converting to tensors and saving...")
+    # Convert card_ids to int64 for torch, then free numpy array
+    card_ids_tensor = torch.from_numpy(card_ids_arr.astype(np.int64))
+    del card_ids_arr
+    numeric_tensor = torch.from_numpy(numeric_arr)
+    del numeric_arr
+    labels_tensor = torch.from_numpy(labels_arr)
+    del labels_arr
+
+    save_data = {
+        "card_ids": card_ids_tensor,
+        "numeric": numeric_tensor,
+        "labels": labels_tensor,
+        "num_samples": n,
+        "num_card_slots": NUM_CARD_SLOTS,
+        "num_numeric_features": NUM_NUMERIC_FEATURES,
+    }
+    torch.save(save_data, output_path)
+    print(f"Preprocessed data saved to: {output_path} ({n} samples)")
+
+
+def _load_data(
     data_path: str,
-    model_save_path: str,
-    epochs: int = 50,
-    batch_size: int = 64,
-    lr: float = 0.001,
-    validation_split: float = 0.1,
-    device: str = "auto",
-):
+) -> tuple:
     """
-    Train the scoring model on collected data.
+    Load training/test data from either .pt (preprocessed) or .jsonl (raw).
 
-    Saves model weights + metadata to model_save_path.
+    Returns (card_ids_tensor, numeric_tensor, labels_tensor).
     """
-    torch, nn = _import_torch()
+    torch, _ = _import_torch()
 
-    # Load data
+    if data_path.endswith(".pt"):
+        print(f"Loading preprocessed data from {data_path}...")
+        data = torch.load(data_path, weights_only=False)
+        saved_slots = data.get("num_card_slots")
+        saved_numeric = data.get("num_numeric_features")
+        if saved_slots != NUM_CARD_SLOTS:
+            raise ValueError(
+                f"Preprocessed card_ids slots mismatch: got {saved_slots}, "
+                f"expected {NUM_CARD_SLOTS}. Re-run preprocess."
+            )
+        if saved_numeric != NUM_NUMERIC_FEATURES:
+            raise ValueError(
+                f"Preprocessed numeric features mismatch: got {saved_numeric}, "
+                f"expected {NUM_NUMERIC_FEATURES}. Re-run preprocess."
+            )
+        card_ids_tensor = data["card_ids"]
+        numeric_tensor = data["numeric"]
+        labels_tensor = data["labels"].unsqueeze(1)
+        print(f"Loaded {len(labels_tensor)} samples")
+        return card_ids_tensor, numeric_tensor, labels_tensor
+
+    # Fall back to JSONL loading (works for small files)
     print(f"Loading data from {data_path}...")
     card_ids_list = []
     numeric_list = []
@@ -552,14 +641,39 @@ def train_model(
     n = len(labels_list)
     print(f"Loaded {n} samples")
 
-    if n == 0:
-        print("No data to train on.")
-        return
-
-    # Convert to tensors
     card_ids_tensor = torch.tensor(card_ids_list, dtype=torch.long)
     numeric_tensor = torch.tensor(numeric_list, dtype=torch.float32)
     labels_tensor = torch.tensor(labels_list, dtype=torch.float32).unsqueeze(1)
+    return card_ids_tensor, numeric_tensor, labels_tensor
+
+
+# ============================================================
+# Training
+# ============================================================
+
+def train_model(
+    data_path: str,
+    model_save_path: str,
+    epochs: int = 50,
+    batch_size: int = 64,
+    lr: float = 0.001,
+    validation_split: float = 0.1,
+    device: str = "auto",
+):
+    """
+    Train the scoring model on collected data.
+
+    Saves model weights + metadata to model_save_path.
+    """
+    torch, nn = _import_torch()
+
+    # Load data
+    card_ids_tensor, numeric_tensor, labels_tensor = _load_data(data_path)
+    n = len(labels_tensor)
+
+    if n == 0:
+        print("No data to train on.")
+        return
 
     # Train/val split
     indices = list(range(n))
@@ -677,44 +791,15 @@ def test_model(
     """
     torch, nn = _import_torch()
 
-    print(f"Loading data from {data_path}...")
-    card_ids_list = []
-    numeric_list = []
-    labels_list = []
+    card_ids_tensor, numeric_tensor, labels_tensor = _load_data(data_path)
+    n = len(labels_tensor)
 
-    with open(data_path, "r", encoding="utf-8") as f:
-        for line in f:
-            sample = json.loads(line)
-            card_ids_list.append(sample["card_ids"])
-            numeric_list.append(sample["numeric"])
-            labels_list.append(sample["label"])
-
-    if card_ids_list:
-        sample_card_slots = len(card_ids_list[0])
-        sample_numeric_features = len(numeric_list[0])
-        if sample_card_slots != NUM_CARD_SLOTS:
-            raise ValueError(
-                f"Dataset card_ids length mismatch: got {sample_card_slots}, expected {NUM_CARD_SLOTS}. "
-                "Your data was likely collected with older slot constants. Re-run collect."
-            )
-        if sample_numeric_features != NUM_NUMERIC_FEATURES:
-            raise ValueError(
-                f"Dataset numeric length mismatch: got {sample_numeric_features}, expected {NUM_NUMERIC_FEATURES}. "
-                "Re-run collect with the current feature extractor."
-            )
-
-    n = len(labels_list)
-    print(f"Loaded {n} samples")
     if n == 0:
         print("No data to test on.")
         return
 
     if not (0.0 < validation_split < 1.0):
         raise ValueError(f"validation_split must be in (0, 1), got {validation_split}")
-
-    card_ids_tensor = torch.tensor(card_ids_list, dtype=torch.long)
-    numeric_tensor = torch.tensor(numeric_list, dtype=torch.float32)
-    labels_tensor = torch.tensor(labels_list, dtype=torch.float32).unsqueeze(1)
 
     indices = list(range(n))
     random.shuffle(indices)
@@ -915,10 +1000,18 @@ def main():
     collect_parser.add_argument("--max-turns", type=int, default=200,
                                 help="Max turns per game (default: 200)")
 
+    # preprocess
+    preprocess_parser = subparsers.add_parser("preprocess",
+                                               help="Convert JSONL to compact .pt format (saves memory)")
+    preprocess_parser.add_argument("--data", type=str, default="./ml/ml_training_data.jsonl",
+                                    help="Input JSONL data path (default: ./ml/ml_training_data.jsonl)")
+    preprocess_parser.add_argument("--output", type=str, default="./ml/ml_training_data.pt",
+                                    help="Output .pt file path (default: ./ml/ml_training_data.pt)")
+
     # train
     train_parser = subparsers.add_parser("train", help="Train the model")
-    train_parser.add_argument("--data", type=str, default="./ml/ml_training_data.jsonl",
-                               help="Training data path (default: ./ml/ml_training_data.jsonl)")
+    train_parser.add_argument("--data", type=str, default="./ml/ml_training_data.pt",
+                               help="Training data path, .pt or .jsonl (default: ./ml/ml_training_data.pt)")
     train_parser.add_argument("--model", type=str, default="./ml/model.pt",
                                help="Model save path (default: ./ml/model.pt)")
     train_parser.add_argument("--epochs", type=int, default=30,
@@ -938,8 +1031,8 @@ def main():
 
     # test
     test_parser = subparsers.add_parser("test", help="Test a model on held-out data subset")
-    test_parser.add_argument("--data", type=str, default="./ml/ml_training_data.jsonl",
-                             help="Data path (default: ./ml/ml_training_data.jsonl)")
+    test_parser.add_argument("--data", type=str, default="./ml/ml_training_data.pt",
+                             help="Data path, .pt or .jsonl (default: ./ml/ml_training_data.pt)")
     test_parser.add_argument("--model", type=str, default="./ml/model.pt",
                              help="Model path (default: ./ml/model.pt)")
     test_parser.add_argument("--validation-split", type=float, default=0.5,
@@ -960,6 +1053,13 @@ def main():
             ai_cuets=args.ai_cuets,
             ai_max_states=args.ai_max_states,
             max_turns=args.max_turns,
+        )
+
+    elif args.command == "preprocess":
+        print(f"Preprocessing: {args.data} -> {args.output}")
+        preprocess_data(
+            jsonl_path=args.data,
+            output_path=args.output,
         )
 
     elif args.command == "train":

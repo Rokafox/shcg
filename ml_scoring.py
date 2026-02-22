@@ -6,7 +6,7 @@ replacing the hand-crafted Evaluator.evaluate() heuristic.
 
 Usage:
     python ml_scoring.py collect [--games N] [--output PATH]
-    python ml_scoring.py train [--data PATH] [--model PATH] [--epochs N]
+    python ml_scoring.py train [--data PATH] [--model PATH] [--epochs N] [--device auto|cpu|cuda]
     python ml_scoring.py info [--model PATH]
 
 Requires: torch (PyTorch)
@@ -35,10 +35,9 @@ from ai_player_new import (
 # Build a stable mapping: card class name -> integer ID.
 # Index 0 is reserved for "empty slot."
 # The order follows cards.all_card_types (sorted by type/cost/name)
-# plus debug_card_types, giving a deterministic ordering.
 
 CARD_NAME_TO_ID: dict[str, int] = {}
-for _i, _cls in enumerate(cards.all_card_types + cards.debug_card_types, start=1):
+for _i, _cls in enumerate(cards.all_card_types, start=1):
     CARD_NAME_TO_ID[_cls.__name__] = _i
 NUM_CARD_TYPES = len(CARD_NAME_TO_ID) + 1  # +1 for empty slot (index 0)
 EMPTY_CARD_ID = 0
@@ -50,15 +49,15 @@ EMPTY_CARD_ID = 0
 # Layout constants
 _FIELD_SLOTS = MAX_FIELD_SIZE  # 5 per player
 _HAND_SLOTS = MAX_HAND_SIZE    # 9 per player
-_GRAVEYARD_SLOTS = 15          # per player (card IDs only)
-_BANISHED_SLOTS = 10           # per player (card IDs only)
-_DECK_SLOTS = 20               # per player (card IDs only)
+_GRAVEYARD_SLOTS = 60          # per player (card IDs only)
+_BANISHED_SLOTS = 60           # per player (card IDs only)
+_DECK_SLOTS = 60               # per player (card IDs only)
 
 # Total card ID slots: field + hand (with numeric) + graveyard + banished + deck (IDs only)
 NUM_CARD_SLOTS = (
     (_FIELD_SLOTS + _HAND_SLOTS) * 2               # 28 (field + hand, both players)
-    + (_GRAVEYARD_SLOTS + _BANISHED_SLOTS + _DECK_SLOTS) * 2  # 90 (gy + banish + deck, both players)
-)  # 118 total
+    + (_GRAVEYARD_SLOTS + _BANISHED_SLOTS + _DECK_SLOTS) * 2  # 360 (gy + banish + deck, both players)
+)  # 388 total
 
 # Per-slot numeric features
 _FIELD_NUMERIC_PER_SLOT = 22  # see _encode_field_slot
@@ -265,6 +264,50 @@ def _import_torch():
         )
 
 
+def _select_device(device: str = "auto"):
+    """
+    Resolve and return the torch device for training/inference.
+
+    Args:
+        device: "auto", "cpu", or "cuda".
+            - auto: use CUDA/ROCm GPU if available, else CPU
+            - cuda: force CUDA/ROCm GPU (falls back to CPU with warning if unavailable)
+            - cpu: force CPU
+    """
+    torch, _ = _import_torch()
+
+    normalized = (device or "auto").strip().lower()
+    if normalized not in {"auto", "cpu", "cuda"}:
+        print(f"WARNING: Unknown device '{device}'. Falling back to auto.")
+        normalized = "auto"
+
+    if normalized == "cpu":
+        print("Using device: cpu")
+        return torch.device("cpu")
+
+    cuda_available = torch.cuda.is_available()
+    if normalized == "cuda":
+        if cuda_available:
+            if getattr(torch.version, "hip", None):
+                print(f"Using device: cuda (ROCm/hip {torch.version.hip})")
+            else:
+                print(f"Using device: cuda ({torch.cuda.get_device_name(0)})")
+            return torch.device("cuda")
+        print("WARNING: --device cuda requested but no CUDA/ROCm GPU available. Using cpu.")
+        return torch.device("cpu")
+
+    # auto mode
+    if cuda_available:
+        if getattr(torch.version, "hip", None):
+            print(f"Using device: cuda (ROCm/hip {torch.version.hip})")
+        else:
+            print(f"Using device: cuda ({torch.cuda.get_device_name(0)})")
+        return torch.device("cuda")
+
+    print("Using device: cpu")
+    return torch.device("cpu")
+
+
 def create_model(num_card_types: int = NUM_CARD_TYPES,
                  embedding_dim: int = 16,
                  hidden_dim: int = 256):
@@ -330,6 +373,7 @@ def _collect_single_game(
         create_deck,
         create_game_state_with_decks,
         get_ai_actions,
+        get_random_ai_actions,
         apply_action,
     )
 
@@ -359,7 +403,8 @@ def _collect_single_game(
         current_player = state.current_player
         ai = ais[current_player]
 
-        actions = get_ai_actions(ai, state)
+        # actions = get_ai_actions(ai, state)
+        actions = get_random_ai_actions(ai, state)
         for action in actions:
             if action[0] == 'end_turn':
                 break
@@ -463,6 +508,7 @@ def train_model(
     batch_size: int = 64,
     lr: float = 0.001,
     validation_split: float = 0.1,
+    device: str = "auto",
 ):
     """
     Train the scoring model on collected data.
@@ -483,6 +529,20 @@ def train_model(
             card_ids_list.append(sample["card_ids"])
             numeric_list.append(sample["numeric"])
             labels_list.append(sample["label"])
+
+    if card_ids_list:
+        sample_card_slots = len(card_ids_list[0])
+        sample_numeric_features = len(numeric_list[0])
+        if sample_card_slots != NUM_CARD_SLOTS:
+            raise ValueError(
+                f"Dataset card_ids length mismatch: got {sample_card_slots}, expected {NUM_CARD_SLOTS}. "
+                "Your data was likely collected with older slot constants. Re-run collect."
+            )
+        if sample_numeric_features != NUM_NUMERIC_FEATURES:
+            raise ValueError(
+                f"Dataset numeric length mismatch: got {sample_numeric_features}, expected {NUM_NUMERIC_FEATURES}. "
+                "Re-run collect with the current feature extractor."
+            )
 
     n = len(labels_list)
     print(f"Loaded {n} samples")
@@ -513,8 +573,14 @@ def train_model(
 
     print(f"Train: {len(train_indices)}, Validation: {len(val_indices)}")
 
+    torch_device = _select_device(device)
+    val_card_ids = val_card_ids.to(torch_device)
+    val_numeric = val_numeric.to(torch_device)
+    val_labels = val_labels.to(torch_device)
+
     # Create model
     model = create_model()
+    model.to(torch_device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.BCELoss()
 
@@ -536,9 +602,9 @@ def train_model(
 
         for start in range(0, len(train_indices), batch_size):
             end = min(start + batch_size, len(train_indices))
-            batch_cids = train_card_ids[start:end]
-            batch_nums = train_numeric[start:end]
-            batch_labels = train_labels[start:end]
+            batch_cids = train_card_ids[start:end].to(torch_device)
+            batch_nums = train_numeric[start:end].to(torch_device)
+            batch_labels = train_labels[start:end].to(torch_device)
 
             optimizer.zero_grad()
             predictions = model(batch_cids, batch_nums)
@@ -582,6 +648,9 @@ def train_model(
         "num_card_slots": NUM_CARD_SLOTS,
         "num_numeric_features": NUM_NUMERIC_FEATURES,
         "best_val_loss": best_val_loss,
+        "trained_device": str(torch_device),
+        "torch_version": torch.__version__,
+        "torch_hip_version": getattr(torch.version, "hip", None),
     }
     torch.save(save_data, model_save_path)
     print(f"\nModel saved to: {model_save_path}")
@@ -601,11 +670,25 @@ class MLEvaluator:
         score = evaluator.evaluate(state, player, only_care_about_winorlose=False)
     """
 
-    def __init__(self, model_path: str):
-        torch, nn = _import_torch()
+    def __init__(self, model_path: str, device: str = "auto"):
+        torch, _ = _import_torch()
         self._torch = torch
+        self.device = _select_device(device)
 
-        checkpoint = torch.load(model_path, weights_only=False)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+
+        saved_num_card_slots = checkpoint.get("num_card_slots")
+        saved_num_numeric_features = checkpoint.get("num_numeric_features")
+        if saved_num_card_slots != NUM_CARD_SLOTS:
+            raise ValueError(
+                f"Model card slot count mismatch: model={saved_num_card_slots}, runtime={NUM_CARD_SLOTS}. "
+                "Retrain model with current slot constants."
+            )
+        if saved_num_numeric_features != NUM_NUMERIC_FEATURES:
+            raise ValueError(
+                f"Model numeric feature count mismatch: model={saved_num_numeric_features}, "
+                f"runtime={NUM_NUMERIC_FEATURES}. Retrain model with current feature extractor."
+            )
 
         # Verify card mapping matches current game
         saved_map = checkpoint["card_name_to_id"]
@@ -617,6 +700,7 @@ class MLEvaluator:
             num_card_types=checkpoint["num_card_types"],
         )
         self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.model.to(self.device)
         self.model.eval()
 
     def evaluate(self, state: GameStateSnapshot, player: int,
@@ -647,8 +731,8 @@ class MLEvaluator:
         # Extract features and predict
         card_ids, numeric = extract_features(state, player)
 
-        card_ids_t = self._torch.tensor([card_ids], dtype=self._torch.long)
-        numeric_t = self._torch.tensor([numeric], dtype=self._torch.float32)
+        card_ids_t = self._torch.tensor([card_ids], dtype=self._torch.long, device=self.device)
+        numeric_t = self._torch.tensor([numeric], dtype=self._torch.float32, device=self.device)
 
         with self._torch.no_grad():
             win_prob = self.model(card_ids_t, numeric_t).item()
@@ -672,6 +756,10 @@ def _print_info(model_path: str):
     print(f"  Card slots:       {checkpoint['num_card_slots']}")
     print(f"  Numeric features: {checkpoint['num_numeric_features']}")
     print(f"  Best val loss:    {checkpoint.get('best_val_loss', 'N/A')}")
+    print(f"  Trained device:   {checkpoint.get('trained_device', 'N/A')}")
+    if checkpoint.get('torch_hip_version'):
+        print(f"  ROCm/HIP version: {checkpoint['torch_hip_version']}")
+    print(f"  Torch version:    {checkpoint.get('torch_version', 'N/A')}")
     print(f"  Card mapping:     {len(checkpoint['card_name_to_id'])} cards")
 
     # Model size
@@ -686,12 +774,12 @@ def main():
 
     # collect
     collect_parser = subparsers.add_parser("collect", help="Collect training data")
-    collect_parser.add_argument("--games", type=int, default=3000,
-                                help="Number of games to simulate (default: 3000)")
+    collect_parser.add_argument("--games", type=int, default=5000,
+                                help="Number of games to simulate (default: 5000)")
     collect_parser.add_argument("--output", type=str, default="./ml/ml_training_data.jsonl",
                                 help="Output file path (default: ./ml/ml_training_data.jsonl)")
-    collect_parser.add_argument("--ai-cuets", type=int, default=2,
-                                help="AI CUETS parameter (default: 2)")
+    collect_parser.add_argument("--ai-cuets", type=int, default=4,
+                                help="AI CUETS parameter (default: 4)")
     collect_parser.add_argument("--ai-max-states", type=int, default=4,
                                 help="AI max unique states (default: 4)")
     collect_parser.add_argument("--max-turns", type=int, default=200,
@@ -709,6 +797,9 @@ def main():
                                help="Batch size (default: 64)")
     train_parser.add_argument("--lr", type=float, default=0.001,
                                help="Learning rate (default: 0.001)")
+    train_parser.add_argument("--device", type=str, default="auto",
+                               choices=["auto", "cpu", "cuda"],
+                               help="Training device (default: auto). Use 'cuda' for NVIDIA/ROCm PyTorch builds.")
 
     # info
     info_parser = subparsers.add_parser("info", help="Show model info")
@@ -735,6 +826,7 @@ def main():
             epochs=args.epochs,
             batch_size=args.batch_size,
             lr=args.lr,
+            device=args.device,
         )
 
     elif args.command == "info":

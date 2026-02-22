@@ -184,6 +184,21 @@ def get_ai_actions(ai: MinimaxAI, state: GameStateSnapshot) -> list[tuple]:
     return best_actions
 
 
+def get_random_ai_actions(ai: MinimaxAI, state: GameStateSnapshot) -> list[tuple]:
+    """
+    Get one sequence of actions from the AI for the current state, skipping evaluation.
+    """
+    one_sequence = ai._generate_random_turn_sequences(
+        state, ai.player_number, 1, 1
+    )
+    if not one_sequence:
+        return [('end_turn',)]
+    the_only_actions = one_sequence[0]
+    the_only_actions.append(('end_turn',))
+    return the_only_actions
+
+
+
 def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
     """
     Apply an action to the state. Mirrors MinimaxAI._apply_action().

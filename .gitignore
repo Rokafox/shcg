@@ -211,3 +211,7 @@ image/cards
 image/leader
 saved_decks.json
 game_states/
+
+# shcg_ml_scoring
+ml/*.json
+ml/*.jsonl

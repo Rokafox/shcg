@@ -560,8 +560,9 @@ def preprocess_data(jsonl_path: str, output_path: str):
                 print(f"  {i + 1}/{n} samples processed")
 
     print("Converting to tensors and saving...")
-    # Convert card_ids to int64 for torch, then free numpy array
-    card_ids_tensor = torch.from_numpy(card_ids_arr.astype(np.int64))
+    # Keep card_ids as int16 — values are small (<200 card types).
+    # Cast to int64 (torch.long) only per-batch during training to avoid 4x memory waste.
+    card_ids_tensor = torch.from_numpy(card_ids_arr)  # stays int16
     del card_ids_arr
     numeric_tensor = torch.from_numpy(numeric_arr)
     del numeric_arr
@@ -587,7 +588,10 @@ def _load_data(
     Load training/test data from either .pt (preprocessed) or .jsonl (raw).
 
     Returns (card_ids_tensor, numeric_tensor, labels_tensor).
+    card_ids_tensor is int16 to save memory; callers must cast to long per-batch.
+    labels_tensor has shape (N, 1).
     """
+    import numpy as np
     torch, _ = _import_torch()
 
     if data_path.endswith(".pt"):
@@ -606,44 +610,67 @@ def _load_data(
                 f"expected {NUM_NUMERIC_FEATURES}. Re-run preprocess."
             )
         card_ids_tensor = data["card_ids"]
+        # Convert old int64 format to int16 to save ~4x memory
+        if card_ids_tensor.dtype == torch.int64:
+            print("  Converting card_ids from int64 to int16 (saving memory)...")
+            card_ids_tensor = card_ids_tensor.to(torch.int16)
         numeric_tensor = data["numeric"]
         labels_tensor = data["labels"].unsqueeze(1)
-        print(f"Loaded {len(labels_tensor)} samples")
+        del data
+        print(f"Loaded {len(labels_tensor)} samples (card_ids dtype: {card_ids_tensor.dtype})")
         return card_ids_tensor, numeric_tensor, labels_tensor
 
-    # Fall back to JSONL loading (works for small files)
+    # JSONL loading — use numpy to avoid Python list memory overhead
+    # (Python list of ints uses ~28 bytes/int vs 2 bytes for int16 numpy)
     print(f"Loading data from {data_path}...")
-    card_ids_list = []
-    numeric_list = []
-    labels_list = []
 
+    # Pass 1: count and validate
+    n = 0
     with open(data_path, "r", encoding="utf-8") as f:
         for line in f:
+            if n == 0:
+                sample = json.loads(line)
+                if len(sample["card_ids"]) != NUM_CARD_SLOTS:
+                    raise ValueError(
+                        f"Dataset card_ids length mismatch: got {len(sample['card_ids'])}, "
+                        f"expected {NUM_CARD_SLOTS}. Re-run collect."
+                    )
+                if len(sample["numeric"]) != NUM_NUMERIC_FEATURES:
+                    raise ValueError(
+                        f"Dataset numeric length mismatch: got {len(sample['numeric'])}, "
+                        f"expected {NUM_NUMERIC_FEATURES}. Re-run collect."
+                    )
+            n += 1
+
+    if n == 0:
+        print("No data found.")
+        card_ids_tensor = torch.zeros((0, NUM_CARD_SLOTS), dtype=torch.int16)
+        numeric_tensor = torch.zeros((0, NUM_NUMERIC_FEATURES), dtype=torch.float32)
+        labels_tensor = torch.zeros((0, 1), dtype=torch.float32)
+        return card_ids_tensor, numeric_tensor, labels_tensor
+
+    print(f"Found {n} samples. Loading with numpy arrays...")
+    card_ids_arr = np.zeros((n, NUM_CARD_SLOTS), dtype=np.int16)
+    numeric_arr = np.zeros((n, NUM_NUMERIC_FEATURES), dtype=np.float32)
+    labels_arr = np.zeros(n, dtype=np.float32)
+
+    # Pass 2: fill arrays
+    with open(data_path, "r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
             sample = json.loads(line)
-            card_ids_list.append(sample["card_ids"])
-            numeric_list.append(sample["numeric"])
-            labels_list.append(sample["label"])
+            card_ids_arr[i] = sample["card_ids"]
+            numeric_arr[i] = sample["numeric"]
+            labels_arr[i] = sample["label"]
+            if (i + 1) % 100000 == 0:
+                print(f"  {i + 1}/{n} samples loaded")
 
-    if card_ids_list:
-        sample_card_slots = len(card_ids_list[0])
-        sample_numeric_features = len(numeric_list[0])
-        if sample_card_slots != NUM_CARD_SLOTS:
-            raise ValueError(
-                f"Dataset card_ids length mismatch: got {sample_card_slots}, expected {NUM_CARD_SLOTS}. "
-                "Your data was likely collected with older slot constants. Re-run collect."
-            )
-        if sample_numeric_features != NUM_NUMERIC_FEATURES:
-            raise ValueError(
-                f"Dataset numeric length mismatch: got {sample_numeric_features}, expected {NUM_NUMERIC_FEATURES}. "
-                "Re-run collect with the current feature extractor."
-            )
-
-    n = len(labels_list)
-    print(f"Loaded {n} samples")
-
-    card_ids_tensor = torch.tensor(card_ids_list, dtype=torch.long)
-    numeric_tensor = torch.tensor(numeric_list, dtype=torch.float32)
-    labels_tensor = torch.tensor(labels_list, dtype=torch.float32).unsqueeze(1)
+    print(f"Loaded {n} samples, converting to tensors...")
+    card_ids_tensor = torch.from_numpy(card_ids_arr)  # int16
+    del card_ids_arr
+    numeric_tensor = torch.from_numpy(numeric_arr)
+    del numeric_arr
+    labels_tensor = torch.from_numpy(labels_arr).unsqueeze(1)
+    del labels_arr
     return card_ids_tensor, numeric_tensor, labels_tensor
 
 
@@ -655,7 +682,7 @@ def train_model(
     data_path: str,
     model_save_path: str,
     epochs: int = 50,
-    batch_size: int = 64,
+    batch_size: int = 512,
     lr: float = 0.001,
     validation_split: float = 0.1,
     device: str = "auto",
@@ -664,10 +691,17 @@ def train_model(
     Train the scoring model on collected data.
 
     Saves model weights + metadata to model_save_path.
+
+    Memory-optimized:
+    - card_ids stored as int16, cast to long per-batch only
+    - Validation batched (not sent to GPU all at once)
+    - Shuffling via index permutation (no full-tensor copy per epoch)
+    - Mixed precision (fp16) on CUDA/ROCm GPUs
     """
+    import gc
     torch, nn = _import_torch()
 
-    # Load data
+    # Load data (card_ids are int16 to save memory)
     card_ids_tensor, numeric_tensor, labels_tensor = _load_data(data_path)
     n = len(labels_tensor)
 
@@ -675,33 +709,42 @@ def train_model(
         print("No data to train on.")
         return
 
-    # Train/val split
-    indices = list(range(n))
-    random.shuffle(indices)
+    # Train/val split — use torch.randperm to avoid Python list overhead
+    perm = torch.randperm(n)
     val_size = max(1, int(n * validation_split))
-    val_indices = indices[:val_size]
-    train_indices = indices[val_size:]
+    val_idx = perm[:val_size]
+    train_idx = perm[val_size:]
 
-    train_card_ids = card_ids_tensor[train_indices]
-    train_numeric = numeric_tensor[train_indices]
-    train_labels = labels_tensor[train_indices]
+    # Split data and free originals immediately
+    train_card_ids = card_ids_tensor[train_idx]
+    train_numeric = numeric_tensor[train_idx]
+    train_labels = labels_tensor[train_idx]
 
-    val_card_ids = card_ids_tensor[val_indices]
-    val_numeric = numeric_tensor[val_indices]
-    val_labels = labels_tensor[val_indices]
+    val_card_ids = card_ids_tensor[val_idx]
+    val_numeric = numeric_tensor[val_idx]
+    val_labels = labels_tensor[val_idx]
 
-    print(f"Train: {len(train_indices)}, Validation: {len(val_indices)}")
+    del card_ids_tensor, numeric_tensor, labels_tensor, perm, val_idx, train_idx
+    gc.collect()
+
+    n_train = len(train_labels)
+    n_val = len(val_labels)
+    print(f"Train: {n_train}, Validation: {n_val}")
 
     torch_device = _select_device(device)
-    val_card_ids = val_card_ids.to(torch_device)
-    val_numeric = val_numeric.to(torch_device)
-    val_labels = val_labels.to(torch_device)
+    use_amp = torch_device.type == "cuda"
+    if use_amp:
+        print("Using mixed precision (fp16) for faster training and lower GPU memory")
+
+    # Keep validation data on CPU — batch it to GPU during evaluation
+    # (moving entire val set to GPU caused OOM on 8GB GPUs)
 
     # Create model
     model = create_model()
     model.to(torch_device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.BCELoss()
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
     best_val_loss = float('inf')
     best_state_dict = None
@@ -710,51 +753,81 @@ def train_model(
     for epoch in range(1, epochs + 1):
         model.train()
 
-        # Shuffle training data
-        perm = torch.randperm(len(train_indices))
-        train_card_ids = train_card_ids[perm]
-        train_numeric = train_numeric[perm]
-        train_labels = train_labels[perm]
+        # Shuffle via index permutation — no full-tensor copy
+        shuffle_perm = torch.randperm(n_train)
 
         epoch_loss = 0.0
         num_batches = 0
 
-        for start in range(0, len(train_indices), batch_size):
-            end = min(start + batch_size, len(train_indices))
-            batch_cids = train_card_ids[start:end].to(torch_device)
-            batch_nums = train_numeric[start:end].to(torch_device)
-            batch_labels = train_labels[start:end].to(torch_device)
+        for start in range(0, n_train, batch_size):
+            end = min(start + batch_size, n_train)
+            idx = shuffle_perm[start:end]
+
+            # Cast card_ids int16 -> long only for this batch, directly on device
+            batch_cids = train_card_ids[idx].to(torch_device, dtype=torch.long)
+            batch_nums = train_numeric[idx].to(torch_device)
+            batch_labels = train_labels[idx].to(torch_device)
 
             optimizer.zero_grad()
-            predictions = model(batch_cids, batch_nums)
-            loss = loss_fn(predictions, batch_labels)
-            loss.backward()
-            optimizer.step()
+
+            if use_amp:
+                with torch.amp.autocast("cuda"):
+                    predictions = model(batch_cids, batch_nums)
+                    loss = loss_fn(predictions, batch_labels)
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                predictions = model(batch_cids, batch_nums)
+                loss = loss_fn(predictions, batch_labels)
+                loss.backward()
+                optimizer.step()
 
             epoch_loss += loss.item()
             num_batches += 1
 
         avg_train_loss = epoch_loss / num_batches
 
-        # Validation
+        # Batched validation — don't send entire val set to GPU at once
         model.eval()
-        with torch.no_grad():
-            val_preds = model(val_card_ids, val_numeric)
-            val_loss = loss_fn(val_preds, val_labels).item()
+        val_loss_sum = 0.0
+        val_correct_sum = 0
+        val_count = 0
 
-            # Accuracy: predict win if > 0.5
-            val_correct = ((val_preds > 0.5).float() == val_labels).float().mean().item()
+        with torch.no_grad():
+            for start in range(0, n_val, batch_size):
+                end = min(start + batch_size, n_val)
+                batch_cids = val_card_ids[start:end].to(torch_device, dtype=torch.long)
+                batch_nums = val_numeric[start:end].to(torch_device)
+                batch_labels = val_labels[start:end].to(torch_device)
+
+                if use_amp:
+                    with torch.amp.autocast("cuda"):
+                        preds = model(batch_cids, batch_nums)
+                        batch_loss = loss_fn(preds, batch_labels).item()
+                else:
+                    preds = model(batch_cids, batch_nums)
+                    batch_loss = loss_fn(preds, batch_labels).item()
+
+                batch_count = end - start
+                val_loss_sum += batch_loss * batch_count
+                val_correct_sum += int(((preds > 0.5).float() == batch_labels).sum().item())
+                val_count += batch_count
+
+        val_loss = val_loss_sum / val_count
+        val_correct = val_correct_sum / val_count
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_state_dict = {k: v.clone() for k, v in model.state_dict().items()}
+            # Save best weights to CPU to avoid using GPU memory
+            best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
         if epoch % 5 == 0 or epoch == 1:
             print(f"  Epoch {epoch:3d}/{epochs}  "
                   f"train_loss={avg_train_loss:.4f}  "
                   f"val_loss={val_loss:.4f}  "
                   f"val_acc={val_correct:.3f}"
-                  f"{'  *best*' if best_state_dict is not None and val_loss <= best_val_loss else ''}")
+                  f"{'  *best*' if val_loss <= best_val_loss else ''}")
 
     # Save best model
     if best_state_dict is not None:
@@ -810,12 +883,16 @@ def test_model(
     test_numeric = numeric_tensor[test_indices]
     test_labels = labels_tensor[test_indices]
 
-    print(f"Test subset: {len(test_indices)} samples (validation_split={validation_split})")
+    # Free originals
+    del card_ids_tensor, numeric_tensor, labels_tensor
+    import gc; gc.collect()
+
+    n_test = len(test_indices)
+    print(f"Test subset: {n_test} samples (validation_split={validation_split})")
 
     torch_device = _select_device(device)
-    test_card_ids = test_card_ids.to(torch_device)
-    test_numeric = test_numeric.to(torch_device)
-    test_labels = test_labels.to(torch_device)
+    # Keep test data on CPU — batch it to GPU during evaluation
+    # (moving entire set to GPU caused OOM on 8GB GPUs)
 
     print(f"Loading model from {model_path}...")
     checkpoint = torch.load(model_path, map_location=torch_device, weights_only=False)
@@ -848,15 +925,23 @@ def test_model(
     total_correct = 0
     total_count = 0
 
-    with torch.no_grad():
-        for start in range(0, len(test_indices), batch_size):
-            end = min(start + batch_size, len(test_indices))
-            batch_cids = test_card_ids[start:end]
-            batch_nums = test_numeric[start:end]
-            batch_labels = test_labels[start:end]
+    use_amp = torch_device.type == "cuda"
 
-            preds = model(batch_cids, batch_nums)
-            batch_loss = loss_fn(preds, batch_labels).item()
+    with torch.no_grad():
+        for start in range(0, n_test, batch_size):
+            end = min(start + batch_size, n_test)
+            # Transfer batch from CPU to GPU with int16->long cast for card_ids
+            batch_cids = test_card_ids[start:end].to(torch_device, dtype=torch.long)
+            batch_nums = test_numeric[start:end].to(torch_device)
+            batch_labels = test_labels[start:end].to(torch_device)
+
+            if use_amp:
+                with torch.amp.autocast("cuda"):
+                    preds = model(batch_cids, batch_nums)
+                    batch_loss = loss_fn(preds, batch_labels).item()
+            else:
+                preds = model(batch_cids, batch_nums)
+                batch_loss = loss_fn(preds, batch_labels).item()
             batch_count = end - start
 
             total_loss += batch_loss * batch_count
@@ -1016,8 +1101,8 @@ def main():
                                help="Model save path (default: ./ml/model.pt)")
     train_parser.add_argument("--epochs", type=int, default=30,
                                help="Training epochs (default: 30)")
-    train_parser.add_argument("--batch-size", type=int, default=64,
-                               help="Batch size (default: 64)")
+    train_parser.add_argument("--batch-size", type=int, default=512,
+                               help="Batch size (default: 512)")
     train_parser.add_argument("--lr", type=float, default=0.001,
                                help="Learning rate (default: 0.001)")
     train_parser.add_argument("--device", type=str, default="auto",

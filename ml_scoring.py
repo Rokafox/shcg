@@ -773,7 +773,8 @@ def train_model(
             if use_amp:
                 with torch.amp.autocast("cuda"):
                     predictions = model(batch_cids, batch_nums)
-                    loss = loss_fn(predictions, batch_labels)
+                # BCELoss must run in fp32 (outside autocast)
+                loss = loss_fn(predictions.float(), batch_labels)
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
@@ -804,7 +805,8 @@ def train_model(
                 if use_amp:
                     with torch.amp.autocast("cuda"):
                         preds = model(batch_cids, batch_nums)
-                        batch_loss = loss_fn(preds, batch_labels).item()
+                    # BCELoss must run in fp32
+                    batch_loss = loss_fn(preds.float(), batch_labels).item()
                 else:
                     preds = model(batch_cids, batch_nums)
                     batch_loss = loss_fn(preds, batch_labels).item()
@@ -938,7 +940,8 @@ def test_model(
             if use_amp:
                 with torch.amp.autocast("cuda"):
                     preds = model(batch_cids, batch_nums)
-                    batch_loss = loss_fn(preds, batch_labels).item()
+                # BCELoss must run in fp32
+                batch_loss = loss_fn(preds.float(), batch_labels).item()
             else:
                 preds = model(batch_cids, batch_nums)
                 batch_loss = loss_fn(preds, batch_labels).item()

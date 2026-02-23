@@ -733,8 +733,15 @@ def train_model(
 
     torch_device = _select_device(device)
     use_amp = torch_device.type == "cuda"
+    # GradScaler triggers illegal memory access on ROCm/HIP — disable it there.
+    # autocast alone still gives fp16 speedup without the scaler.
+    is_rocm = bool(getattr(torch.version, "hip", None))
+    use_scaler = use_amp and not is_rocm
     if use_amp:
-        print("Using mixed precision (fp16) for faster training and lower GPU memory")
+        if is_rocm:
+            print("Using mixed precision (fp16) for faster training (GradScaler disabled on ROCm)")
+        else:
+            print("Using mixed precision (fp16) for faster training and lower GPU memory")
 
     # Keep validation data on CPU — batch it to GPU during evaluation
     # (moving entire val set to GPU caused OOM on 8GB GPUs)
@@ -744,7 +751,7 @@ def train_model(
     model.to(torch_device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.BCELoss()
-    scaler = torch.amp.GradScaler("cuda") if use_amp else None
+    scaler = torch.amp.GradScaler("cuda") if use_scaler else None
 
     best_val_loss = float('inf')
     best_state_dict = None
@@ -775,9 +782,13 @@ def train_model(
                     predictions = model(batch_cids, batch_nums)
                 # BCELoss must run in fp32 (outside autocast)
                 loss = loss_fn(predictions.float(), batch_labels)
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+                if scaler is not None:
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    optimizer.step()
             else:
                 predictions = model(batch_cids, batch_nums)
                 loss = loss_fn(predictions, batch_labels)

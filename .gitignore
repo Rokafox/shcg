@@ -210,4 +210,5 @@ __marimo__/
 image/cards
 image/leader
 saved_decks.json
+saved_decks*.json
 game_states/

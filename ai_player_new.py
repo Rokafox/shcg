@@ -11,6 +11,7 @@ import cards
 import shcg_error
 import random
 from typing import TYPE_CHECKING, List, Tuple, Any, Optional
+from ai_player_evaluator import Evaluator
 if TYPE_CHECKING:
     from super_hard_card_game import SHCGGameState
 
@@ -421,7 +422,10 @@ class GameSimulator:
         state.foxtail[player] -= card.cost
         state.hands[player].remove(card)
 
-        card.on_play_effect(state, False, False, None, targets, effect_choice, multi_targets)
+        if "skip_on_play_effect" in card.extra_effect_list:
+            pass
+        else:
+            card.on_play_effect(state, False, False, None, targets, effect_choice, multi_targets)
 
         if isinstance(card, cards.Follower):
             card.mv([card], "summon", state, draw_ui=False, set_text=False, the_actual_textbox=None, player=player)
@@ -447,6 +451,9 @@ class GameSimulator:
         if attacker not in state.fields[player]:
             return False
         protect_exists = any([c.ability_protect for c in state.fields[3 - player] if isinstance(c, cards.Follower)])
+
+        # attacker before attack effect
+        attacker.before_attack_effect(state, False, False, None, target)
 
         opponent = 3 - player
 
@@ -534,6 +541,10 @@ class GameSimulator:
         # Apply start of turn effects to current player's followers
         for card in state.fields[state.current_player].copy():
             card.start_of_turn_on_field_effect(state, False, False, None)
+
+        for card in itertools.chain(state.hands[state.current_player].copy(), state.graveyard[state.current_player].copy(), 
+                                    state.banished[state.current_player].copy(), state.decks[state.current_player].copy()):
+            card.start_of_turn_not_on_field_effect(state, False, False, None)
 
         state.enhance_used_this_turn = {1: 0, 2: 0}
         state.turn += 1
@@ -726,91 +737,6 @@ class MoveGenerator:
                 len(state.decks[player]) > 0)
 
 
-class Evaluator:
-    """
-    Evaluates game states from a player's perspective.
-    """
-
-    # Weight constants for evaluation
-    HP_WEIGHT = 2.0
-    FIELD_POWER_WEIGHT = 1.0
-    HAND_SIZE_WEIGHT = 2.0 # Could be 4.0, but should prefer board presence more
-    DECK_SIZE_WEIGHT = 0.1
-
-    @staticmethod
-    def evaluate(state: GameStateSnapshot, player: int, only_care_about_winorlose: bool) -> float:
-        """
-        Evaluate the game state from player's perspective.
-        Returns infinity for wins, -infinity for losses.
-        2026/02/05 Removed basic_lethal_check parameter, add only_care_about_winorlose.
-        Written and Verified by Rokafox on 2026/02/05
-        """
-        # NOTE: this method is called after the player's turn ends
-        opponent = 3 - player
-
-        # Check for game end
-        if state.concluded:
-            if state.winner == player:
-                return float('inf')
-            elif state.winner == opponent:
-                return float('-inf')
-            else:
-                return 0.0  # 
-            
-        # Useful when simulating the last turn, for either of the players
-        # for example at depth 1, care about score on your turn, but not on opponent turn (last turn)
-        # for performance reasons, depth > 1 is not considered.
-        if only_care_about_winorlose:
-            return 0.0
-
-        score = 100.0 # Base score
-
-        own_hp_value = state.hp[player]
-        opp_hp_value = state.hp[opponent]
-        score += (own_hp_value - opp_hp_value) * Evaluator.HP_WEIGHT
-
-        # Field power (total attack + hp of followers)
-        own_field_power = 0
-        for f in state.fields[player]:
-            if isinstance(f, cards.Follower):
-                own_field_power += f.attack + f.hp
-                # 守護 (.ability_protect) 者のHPの100%を追加ボーナスとして加算
-                if f.ability_protect:
-                    own_field_power += f.hp
-                # drain 者の攻撃力の100%を追加ボーナスとして加算
-                if f.ability_drain:
-                    own_field_power += f.attack
-                # lethal 4 points
-                if f.ability_lethal:
-                    own_field_power += 4
-            elif isinstance(f, cards.Amulet):
-                own_field_power += f.amulet_value_for_evaluate
-        opp_field_power = 0
-        for f in state.fields[opponent]:
-            if isinstance(f, cards.Follower):
-                opp_field_power += f.attack + f.hp
-                if f.ability_protect:
-                    opp_field_power += f.hp
-                if f.ability_drain:
-                    opp_field_power += f.attack
-                if f.ability_lethal:
-                    opp_field_power += 4
-            elif isinstance(f, cards.Amulet):
-                opp_field_power += f.amulet_value_for_evaluate
-        score += (own_field_power - opp_field_power) * Evaluator.FIELD_POWER_WEIGHT
-        # Hand size
-        score += (len(state.hands[player]) - len(state.hands[opponent])) * Evaluator.HAND_SIZE_WEIGHT
-        # Deck size
-        score += (len(state.decks[player]) - len(state.decks[opponent])) * Evaluator.DECK_SIZE_WEIGHT
-        # graveyard - Star Phoenix can be summoned from graveyard
-        if state.graveyard[player]:
-            for c in state.graveyard[player]:
-                if isinstance(c, cards.スターフェニックス):
-                    score += 4.0  # 2/2
-
-        return score
-
-
 class MinimaxAI:
     """
     Not minimax at all.
@@ -855,7 +781,7 @@ class MinimaxAI:
                     raise shcg_error.AIError("Invalid action sequence generated.")
 
             GameSimulator.end_turn(test_state)
-            score = Evaluator.evaluate(test_state, self.player_number, only_care_about_winorlose=False) # Basic evaluation
+            score = Evaluator.evaluate_new(test_state, self.player_number, only_care_about_winorlose=False) # Basic evaluation
 
             # Advanced evaluation: simulate opponent's turn
             # If opponent scores inf for any seq, its a loss for us and set score to -inf.
@@ -874,13 +800,12 @@ class MinimaxAI:
                     # End opponent's turn
                     GameSimulator.end_turn(opp_test_state)
                     # No basic lethal check. Only matters if opponent can score infinity here
-                    opp_score = Evaluator.evaluate(opp_test_state, 3 - self.player_number, only_care_about_winorlose=True)
+                    opp_score = Evaluator.evaluate_new(opp_test_state, 3 - self.player_number, only_care_about_winorlose=True)
                     self.endturnstate_evaluated_additional += 1
 
                     if opp_score == float('inf'):
                         # Opponent can win, so this is a loss for us
                         score = float('-inf')
-                        self.loss_endturnstate_avoided += 1
                         break
                     else:
                         pass
@@ -889,6 +814,9 @@ class MinimaxAI:
                 # print("Advanced evaluation skipped due to definitive score.")
 
             self.endturnstate_evaluated += 1
+
+            if score == float('-inf'):
+                self.loss_endturnstate_avoided += 1
 
             if score > best_score:
                 best_score = score

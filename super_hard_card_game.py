@@ -122,12 +122,15 @@ class SHCGGameState:
         else:
             effect_choice = None
 
-
-        card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
-                            the_actual_textbox=text_box,
-                            selected_card_for_effect=targets,
-                            effect_choice=effect_choice,
-                            selected_cards_for_multi_effect=multi_targets)
+        if "skip_on_play_effect" in card.extra_effect_list:
+            if ui_set_text:
+                text_box.append_html_text(f"{card}の場に出す効果は発動しなかったのじゃ。\n")
+        else:
+            card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
+                                the_actual_textbox=text_box,
+                                selected_card_for_effect=targets,
+                                effect_choice=effect_choice,
+                                selected_cards_for_multi_effect=multi_targets)
 
         if isinstance(card, cards.Follower):
             card.mv([card], "summon", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
@@ -159,6 +162,10 @@ class SHCGGameState:
             raise shcg_error.FlowError(f"{attacker} is not on the field and cannot attack.")
         # check protect ability
         protect_exists = any([c.ability_protect for c in global_vars_shcg.fields[self.opponent] if isinstance(c, cards.Follower)])
+
+        # attacker before attack effect
+        attacker.before_attack_effect(self, ui_draw, ui_set_text, text_box, target)
+
         if isinstance(target, cards.Follower):
             if target not in self.fields[self.opponent]:
                 raise shcg_error.FlowError(f"{target} is not on the field and cannot be attacked.")
@@ -285,6 +292,9 @@ class SHCGGameState:
         self.foxtail[self.current_player] = 9
         for card in self.fields[self.current_player].copy():
             card.start_of_turn_on_field_effect(self, ui_draw, ui_set_text, text_box)
+        for card in itertools.chain(self.hands[self.current_player].copy(), self.graveyard[self.current_player].copy(), 
+                                    self.banished[self.current_player].copy(), self.decks[self.current_player].copy()):
+            card.start_of_turn_not_on_field_effect(self, ui_draw, ui_set_text, text_box)
         self.turn += 1
         self.enhance_used_this_turn = {1: 0, 2: 0}
         if self.concluded:
@@ -960,14 +970,18 @@ def _execute_pending_selection():
             single_ok = False
 
     # Read multi-card selection (independent from per-step)
-    if multi_card_required and multi_card_selection_list:
-        max_count = multi_sel[1]
-        selected_strs = multi_card_selection_list.get_multi_selection()
-        if selected_strs and 0 < len(selected_strs) <= max_count:
-            selected_multi_targets = [_multi_card_selection_option_map[s] for s in selected_strs if s in _multi_card_selection_option_map]
-            multi_ok = len(selected_multi_targets) > 0
+    if multi_card_required:
+        if multi_card_selection_list:
+            max_count = multi_sel[1]
+            selected_strs = multi_card_selection_list.get_multi_selection()
+            if selected_strs and 0 < len(selected_strs) <= max_count:
+                selected_multi_targets = [_multi_card_selection_option_map[s] for s in selected_strs if s in _multi_card_selection_option_map]
+                multi_ok = len(selected_multi_targets) > 0
+            else:
+                multi_ok = False
         else:
-            multi_ok = False
+            # but no options to select
+            multi_ok = True
 
     # Read effect choice
     if effect_required and effect_selection_list:
@@ -1395,8 +1409,8 @@ unique_states_max_player_turn_dropdown = None
 unique_states_max_opp_turn_dropdown = None
 global_vars_cuets_player_turn_set_option: int = 6
 global_vars_cuets_opp_turn_set_option: int = 3
-global_vars_unique_states_max_player_turn: int = 400
-global_vars_unique_states_max_opp_turn: int = 80
+global_vars_unique_states_max_player_turn: int = 300
+global_vars_unique_states_max_opp_turn: int = 60
 
 
 def change_theme(theme=None):
@@ -1432,7 +1446,7 @@ def change_theme(theme=None):
 
 global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
 global_vars_use_minimax_ai: bool = True  # Default to new minimax AI
-global_vars_minimax_ai_manager = ai_player_new.MinimaxAIManager(6, 3, 400, 80)
+global_vars_minimax_ai_manager = ai_player_new.MinimaxAIManager(6, 3, 300, 60)
 
 def _build_random_deck() -> list[cards.Card]:
     """Build a random deck (15 types x 3 copies = 45 cards)."""

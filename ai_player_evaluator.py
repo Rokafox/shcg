@@ -1,5 +1,6 @@
 """
 Evaluator for game states from a player's perspective.
+Usage: Evaluator.evaluate_new. evaluate(for testing different evaluation methods)(used in simulate_games.py) is not implemented
 """
 from typing import TYPE_CHECKING
 import cards
@@ -8,15 +9,8 @@ if TYPE_CHECKING:
     
 
 class Evaluator:
-    """
-    Evaluates game states from a player's perspective.
-    """    
-
     @staticmethod
     def evaluate_new(state: GameStateSnapshot, player: int, only_care_about_winorlose: bool) -> float:
-        """
-        Evaluate the game state from player's perspective.
-        """
         # Weight constants for evaluation
         HP_WEIGHT = 2.0
         LOW_HP_THRESHOLD = 10

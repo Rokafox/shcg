@@ -991,13 +991,16 @@ class MinimaxAI:
             if target == "leader":
                 actual_target = "leader"
             else:
-                actual_target = _find_card_by_id(state.fields[3 - player], target.unique_id)
+                if target.is_generated:
+                    actual_target = _find_card_by_void_id(state.fields[3 - player], target.void_id)
+                else:
+                    actual_target = _find_card_by_id(state.fields[3 - player], target.unique_id)
                 if actual_target is None:
-                    state_string = state.serialize_to_string()
-                    save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                    with open(save_path, "w", encoding="utf-8") as f:
-                        f.write(state_string)
-                    print(f"Attack, {attacker}, {target}")
+                    # state_string = state.serialize_to_string()
+                    # save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    # with open(save_path, "w", encoding="utf-8") as f:
+                    #     f.write(state_string)
+                    # print(f"Attack, {attacker}, {target}")
                     raise shcg_error.CardNotFoundError(f"Attack target not found on field: {target}")
 
             return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)

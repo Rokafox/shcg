@@ -477,6 +477,7 @@ def _run_game_loop(
     ais: dict[int, MinimaxAI],
     get_eval: Callable[[int], EvalFunc],
     max_turns: int = 200,
+    card_play_count: dict[str, int] | None = None,
 ) -> tuple[int | None, int]:
     """Core game loop shared by both simulation modes."""
     while not state.concluded and state.turn <= max_turns:
@@ -486,6 +487,10 @@ def _run_game_loop(
         for action in actions:
             if action[0] == "end_turn":
                 break
+            # Track actual card plays (not AI lookahead)
+            if card_play_count is not None and action[0] == "play":
+                card_name = action[1].name
+                card_play_count[card_name] = card_play_count.get(card_name, 0) + 1
             apply_action(state, current, action)
             if state.concluded:
                 break
@@ -503,10 +508,14 @@ def simulate_single_game(
     deck2: list[cards.Card],
     evaluate_method: EvalFunc,
     max_turns: int = 200,
+    card_play_count: dict[str, int] | None = None,
 ) -> tuple[int | None, int]:
     """Simulate a single game between two AIs using the same evaluator."""
     state = create_initial_state(deck1, deck2)
-    return _run_game_loop(state, {1: ai1, 2: ai2}, lambda _: evaluate_method, max_turns)
+    return _run_game_loop(
+        state, {1: ai1, 2: ai2}, lambda _: evaluate_method, max_turns,
+        card_play_count=card_play_count,
+    )
 
 
 def simulate_game_with_methods(
@@ -554,6 +563,24 @@ def ask_yes_no(prompt: str, default: bool = False) -> bool:
         print("Please enter y or n.")
 
 
+def ask_choice(prompt: str, options: list[str], default: int = 1) -> int:
+    """Ask the user to choose from a numbered list. Returns 1-based index."""
+    print(prompt)
+    for i, option in enumerate(options, 1):
+        print(f"  {i}. {option}")
+    while True:
+        raw = input(f"Choice [{default}]: ").strip()
+        if raw == "":
+            return default
+        try:
+            val = int(raw)
+            if 1 <= val <= len(options):
+                return val
+            print(f"Please enter a number between 1 and {len(options)}.")
+        except ValueError:
+            print("Please enter a valid number.")
+
+
 # ---------------------------------------------------------------------------
 # Progress tracking
 # ---------------------------------------------------------------------------
@@ -594,6 +621,7 @@ def print_report(
     deck_stats: dict[str, WinLossDrawRecord],
     player_stats: dict[int | None, int],
     card_stats: dict[str, WinLossDrawRecord],
+    card_play_count: dict[str, int],
     all_turns: list[int],
     total_games: int,
     num_games_per_matchup: int,
@@ -647,7 +675,8 @@ def print_report(
     )
     card_pad = max((len(n) for n, _ in sorted_cards), default=0)
     for name, record in sorted_cards:
-        print(f"  {name:<{card_pad}}: {record}")
+        plays = card_play_count.get(name, 0)
+        print(f"  {name:<{card_pad}}: {record}  (played {plays} times)")
 
     # --- Average Turn Count ---
     print(f"\n{THIN_SEP}")
@@ -843,6 +872,7 @@ def run_standard_simulation(
     deck_stats = {name: WinLossDrawRecord() for name in deck_names}
     player_stats: dict[int | None, int] = {1: 0, 2: 0, None: 0}
     card_stats: dict[str, WinLossDrawRecord] = defaultdict(WinLossDrawRecord)
+    card_play_count: dict[str, int] = defaultdict(int)
     all_turns: list[int] = []
     progress = ProgressTracker(total_games)
 
@@ -857,6 +887,7 @@ def run_standard_simulation(
 
             winner, turn_count = simulate_single_game(
                 ai1, ai2, deck1, deck2, evaluate_method,
+                card_play_count=card_play_count,
             )
 
             all_turns.append(turn_count)
@@ -875,7 +906,7 @@ def run_standard_simulation(
 
     print_report(
         deck_names, matchup_results, deck_stats, player_stats,
-        dict(card_stats), all_turns, total_games, num_games,
+        dict(card_stats), dict(card_play_count), all_turns, total_games, num_games,
     )
 
 
@@ -937,6 +968,26 @@ def main() -> None:
     deck_names = list(deck_pool.keys())
     print(f"Decks: {', '.join(deck_names)}\n")
 
+    # Matchup mode selection
+    if len(deck_names) >= 3:
+        mode_choice = ask_choice(
+            "Matchup mode:",
+            ["Round-robin (all vs all)", "One deck vs all others"],
+            default=1,
+        )
+    else:
+        mode_choice = 1  # Only round-robin makes sense with 2 decks
+
+    focus_deck: str | None = None
+    if mode_choice == 2:
+        focus_idx = ask_choice(
+            "Select the focus deck:",
+            deck_names,
+            default=1,
+        )
+        focus_deck = deck_names[focus_idx - 1]
+        print(f"Focus deck: {focus_deck}")
+
     # Simulation parameters
     num_games = ask_int("Number of games per matchup", default=100)
     cuets_player = ask_int("CUETS for player turn", default=6)
@@ -948,8 +999,18 @@ def main() -> None:
         default=False,
     )
 
-    # Generate matchups: all ordered pairs (i, j) where i ≠ j
-    matchups = [(a, b) for a, b in permutations(deck_names, 2)]
+    # Generate matchups based on mode
+    if focus_deck is not None:
+        # One deck vs all others (both seat orders)
+        others = [n for n in deck_names if n != focus_deck]
+        matchups = []
+        for other in others:
+            matchups.append((focus_deck, other))
+            matchups.append((other, focus_deck))
+    else:
+        # Round-robin: all ordered pairs (i, j) where i ≠ j
+        matchups = [(a, b) for a, b in permutations(deck_names, 2)]
+
     total_games = len(matchups) * num_games
 
     print(f"\nMatchups: {len(matchups)}")

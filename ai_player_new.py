@@ -429,16 +429,10 @@ class GameSimulator:
 
         if isinstance(card, cards.Follower):
             card.mv([card], "summon", state, draw_ui=False, set_text=False, the_actual_textbox=None, player=player)
-        elif isinstance(card, cards.Amulet):
-            state.fields[player].append(card)
         elif isinstance(card, cards.Spell):
-            state.graveyard[player].append(card)
-            # if has star pheonix in graveyard, summon it.
-            if state.graveyard[player]:
-                for c in state.graveyard[player].copy():
-                    if isinstance(c, cards.スターフェニックス):
-                        c.reset_stats()  # reset stats before summoning
-                        c.mv(state.graveyard[player], "summon", state, draw_ui=False, set_text=False, the_actual_textbox=None, player=player)
+            card.mv([card], "play_spell", state, draw_ui=False, set_text=False, the_actual_textbox=None, player=player)
+        elif isinstance(card, cards.Amulet):
+            card.mv([card], "place_amulet", state, draw_ui=False, set_text=False, the_actual_textbox=None, player=player)
 
         return True
 
@@ -606,6 +600,8 @@ class MoveGenerator:
             if card.cost > foxtail:
                 continue
             if card.type != 'spell' and field_count >= MAX_FIELD_SIZE:
+                continue
+            if not card.ai_meet_play_condition(state, player):
                 continue
             # o0: card, o1: targets list, o2: effect choice, o3: multi targets
             o0 = card
@@ -997,11 +993,11 @@ class MinimaxAI:
             else:
                 actual_target = _find_card_by_id(state.fields[3 - player], target.unique_id)
                 if actual_target is None:
-                    # state_string = state.serialize_to_string()
-                    # save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                    # with open(save_path, "w", encoding="utf-8") as f:
-                    #     f.write(state_string)
-                    # print(f"Attack, {attacker}, {target}")
+                    state_string = state.serialize_to_string()
+                    save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    with open(save_path, "w", encoding="utf-8") as f:
+                        f.write(state_string)
+                    print(f"Attack, {attacker}, {target}")
                     raise shcg_error.CardNotFoundError(f"Attack target not found on field: {target}")
 
             return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)

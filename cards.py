@@ -73,10 +73,15 @@ class Card:
         """
         pass
 
+    def ai_meet_play_condition(self, game_state: SHCGGameState, player: int) -> bool:
+        """
+        This method exist to guide the AI to avoid most obvious bad plays.
+        """
+        return True
+
     def cost_change_effect(self, amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
         """
         Handle generic cost changes effect like -1, +2, etc.
-        Use simple version if not on hand.
         """
         self.cost += amount
         if self.cost < 0:
@@ -128,6 +133,13 @@ class Card:
         """
         pass
 
+    def effect_when_other_spell_played(self, target_spell: Card, game_state: SHCGGameState, draw_ui, set_text,
+                                       the_actual_textbox, target_spell_is_own: bool):
+        """
+        triggers when any spell is played.
+        """
+        pass
+
     def effect_when_other_card_returned_to_hand(self, target_card: Card, game_state: SHCGGameState, draw_ui, set_text, 
                                                 the_actual_textbox, target_card_is_own: bool):
         """
@@ -145,7 +157,8 @@ class Card:
     def mv(self, org: list[Card], mode: str, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
         """
         move this card from org(like field) to another zone, based on mode.
-        available modes: generic, destroy, discard, to_g, banish, to_hand, return_to_hand, to_deck_top, to_deck_bottom
+        available modes: generic, destroy, discard, to_g, banish, to_hand, return_to_hand, to_deck_top, to_deck_bottom,
+        play_spell, summon, place_amulet
         notes: to_hand: add to hand.
         """
         success = True
@@ -168,6 +181,10 @@ class Card:
                     the_actual_textbox.append_html_text(f"{self}がデッキの一番上に置かれたのじゃ。\n")
                 case "to_deck_bottom":
                     the_actual_textbox.append_html_text(f"{self}がデッキの一番下に置かれたのじゃ。\n")
+                case "play_spell":
+                    the_actual_textbox.append_html_text(f"{self}がプレイされたのじゃ。\n")
+                case "place_amulet":
+                    the_actual_textbox.append_html_text(f"{self}が場に置かれたのじゃ。\n")
                 case "summon":
                     the_actual_textbox.append_html_text(f"{self}が召喚されたのじゃ。\n")
                 case _:
@@ -175,7 +192,7 @@ class Card:
 
         self.on_leave_field_effect(mode, game_state, draw_ui, set_text, the_actual_textbox, player)
         match mode:
-            case "generic" | "destroy" | "discard" | "to_g":
+            case "generic" | "destroy" | "discard" | "to_g" | "play_spell":
                 game_state.graveyard[player].append(self)
             case "banish":
                 game_state.banished[player].append(self)
@@ -189,7 +206,7 @@ class Card:
                 game_state.decks[player].append(self)
             case "to_deck_bottom":
                 game_state.decks[player].insert(0, self)
-            case "summon":
+            case "summon" | "place_amulet":
                 if len(game_state.fields[player]) < 5:
                     game_state.fields[player].append(self)
                     if isinstance(self, Follower):
@@ -223,6 +240,19 @@ class Card:
                 if c != self:
                     c.effect_when_other_card_returned_to_hand(self, game_state, draw_ui, set_text, the_actual_textbox, False)
             self.effect_when_returned_to_hand(game_state, draw_ui, set_text, the_actual_textbox)
+
+        elif mode == "play_spell":
+            for c in game_state.fields[player].copy():
+                c.effect_when_other_spell_played(self, game_state, draw_ui, set_text, the_actual_textbox, True)
+            for c in game_state.fields[3 - player].copy():
+                c.effect_when_other_spell_played(self, game_state, draw_ui, set_text, the_actual_textbox, False)
+            if game_state.graveyard[player]:
+                for c in game_state.graveyard[player].copy():
+                    # if isinstance(c, スターフェニックス):
+                    if c.name == "スターフェニックス":
+                        c.reset_stats()  # reset stats before summoning
+                        c.mv(game_state.graveyard[player], "summon", game_state, draw_ui, set_text, the_actual_textbox, player)
+
 
 
     @classmethod
@@ -424,6 +454,8 @@ class Follower(Card):
                 if effect.startswith("battle_damage_f_extra:"):
                     extra_damage += int(effect.split(":", 1)[1])
 
+        damage_amount = self.effect_before_taking_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker, is_battle_damage)
+
         self.hp -= damage_amount
         self.hp -= extra_damage
 
@@ -437,6 +469,14 @@ class Follower(Card):
             self.effect_after_taking_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox)
         if draw_ui:
             game_state.draw_field_ui(player)
+
+
+    def effect_before_taking_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                                    attacker: Card | None, is_battle_damage: bool = False) -> int:
+        """
+        Trigger effect before follower taking damage, return modified damage amount.
+        """
+        return damage_amount
 
 
     def effect_after_taking_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox):
@@ -642,6 +682,12 @@ class ガブリエル(Follower):
             target.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
                                        imposter=self, attack_change=4, hp_change=3)
 
+    def ai_meet_play_condition(self, game_state: SHCGGameState, player: int) -> bool:
+        # only play when there is another follower on field to buff
+        # sometimes it can still be good without buff target, but whatever.
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[player])
+        return condition_1
+
 
 class ハンサ(Follower):
     """
@@ -660,6 +706,12 @@ class ハンサ(Follower):
             top_card = game_state.decks[game_state.current_player][-1]
             self.stats_change_effect_simple(attack_change=top_card.cost, hp_change=0, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox)
 
+    def ai_meet_play_condition(self, game_state, player):
+        # make no sense to play if that cost is less than 2, unless desperate.
+        top_card_cost = game_state.decks[player][-1].cost
+        condition_1 = top_card_cost >= 2
+        return condition_1
+
 
 class 唯我の絶傑マゼルベイン(Follower):
     """
@@ -677,6 +729,11 @@ class 唯我の絶傑マゼルベイン(Follower):
             for c in game_state.fields[game_state.opponent].copy():
                 if isinstance(c, Follower):
                     c.take_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when the opponent has followers on field
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
+        return condition_1
 
 
 class 機構翼の少女ローザ(Follower):
@@ -732,6 +789,11 @@ class 飢餓の使徒(Follower):
                 target.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
                                        imposter=self, attack_change=3, hp_change=0)
 
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there is another follower on own field to buff
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[player] if c != self)
+        return condition_1
+
 
 class 飢餓の絶傑ギルネリーゼ(Follower):
     """
@@ -765,6 +827,11 @@ class 飢餓の絶傑ギルネリーゼ(Follower):
                                        imposter=self, attack_change=4, hp_change=0)
             # add card to hand
             new_card.mv([new_card], mode="to_hand", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=game_state.current_player)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there is another follower on field to target
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[1]) or any(isinstance(c, Follower) for c in game_state.fields[2])
+        return condition_1
 
 
 class 不殺の絶傑エズディア(Follower):
@@ -870,6 +937,17 @@ class 真実の絶傑ライオ(Follower):
                 if game_state.concluded:
                     break
 
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when: 
+        # 1. there are spell cards in hand and your spell cards are less than or equal to the amount of followers on opponent's field, or
+        # 2. you have 神弓の座天使リリエル on field to protect yourself.
+        spell_cards_in_hand = [c for c in game_state.hands[player] if isinstance(c, Spell)]
+        amount_opp_followers = sum(1 for c in game_state.fields[game_state.opponent] if isinstance(c, Follower))
+        has_lilier = any(isinstance(c, 神弓の座天使リリエル) for c in game_state.fields[player])
+        condition_1 = len(spell_cards_in_hand) > 0 and len(spell_cards_in_hand) <= amount_opp_followers
+        condition_2 = has_lilier
+        return condition_1 or condition_2
+
 
 class 侮蔑の絶傑ガルミーユ(Follower):
     """
@@ -973,12 +1051,12 @@ class 円卓の騎士ガウェイン(Follower):
     def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect, effect_choice, selected_cards_for_multi_effect: list[Card] | None = None):
         player = game_state.current_player
         num_followers_in_hand = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
-        # NOTE: adding foxtail manually here. Not good.
-        game_state.foxtail[player] += num_followers_in_hand
-        if set_text:
-            the_actual_textbox.append_html_text(f"円卓の騎士・ガウェインの効果で、プレイヤー{player}は狐尾を{num_followers_in_hand}回復したのじゃ。\n")
-        if draw_ui:
-            game_state.draw_tail_ui(player)
+        game_state.add_foxtail(player, num_followers_in_hand, draw_ui, set_text)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are other followers in hand (at least 2) to gain foxtail
+        condition_1 = sum(1 for c in game_state.hands[player] if isinstance(c, Follower) and c != self) >= 2
+        return condition_1
 
 
 class スターフェニックス(Follower):
@@ -1004,6 +1082,11 @@ class 白翼の守護神アイテール(Follower):
         player = game_state.current_player
         if target is not None and target in game_state.hands[player]:
             target.mv(game_state.hands[player], "summon", game_state, draw_ui, set_text, the_actual_textbox, player=player)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are other followers in hand (at least 3)
+        condition_1 = sum(1 for c in game_state.hands[player] if isinstance(c, Follower) and c != self) >= 3
+        return condition_1
 
 
 class キラキラヒーラー(Follower):
@@ -1032,6 +1115,12 @@ class キラキラヒーラー(Follower):
         self.on_play_effect(game_state, draw_ui, set_text, the_actual_textbox,
                             selected_card_for_effect, effect_choice=None, selected_cards_for_multi_effect=None)
 
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are spell cards in hand and your hp is less than 20
+        condition_1 = any(isinstance(c, Spell) for c in game_state.hands[player])
+        condition_2 = game_state.hp[player] < 20
+        return condition_1 and condition_2
+
 
 class ミスティアストロジスト(Follower):
     """
@@ -1046,6 +1135,11 @@ class ミスティアストロジスト(Follower):
         player = game_state.current_player
         num_followers_in_hand = sum(1 for c in game_state.hands[player] if isinstance(c, Follower))
         game_state.draw_card_by_effect(player, num_followers_in_hand, draw_ui, set_text)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are followers in hand to draw cards, at least 2 to make it worth
+        condition_1 = sum(1 for c in game_state.hands[player] if isinstance(c, Follower) and c != self) >= 2
+        return condition_1
 
 
 class 水竜神の巫女(Follower):
@@ -1068,9 +1162,12 @@ class 水竜神の巫女(Follower):
                 top_card.mv(game_state.decks[player], mode="discard", game_state=game_state, 
                             draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
                 actual_discarded += 1
-
-        # Increase HP by actual discarded amount
         self.stats_change_effect_simple(0, actual_discarded, draw_ui, set_text, the_actual_textbox)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are followers in hand to discard cards and buff self, at least 2 to make it worth
+        condition_1 = sum(1 for c in game_state.hands[player] if isinstance(c, Follower) and c != self) >= 2
+        return condition_1
 
 
 class 黄金都市の姫リテュエル(Follower):
@@ -1123,6 +1220,11 @@ class 癒しの奏者アンリエット(Follower):
             if set_text:
                 the_actual_textbox.append_html_text(f"癒しの奏者・アンリエットの効果で、プレイヤー{game_state.current_player}の{target}は+2/+2し、突進を得たのじゃ。\n")
 
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are followers on field to buff
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[player])
+        return condition_1
+
 
 class フレイルナイト(Follower):
     """
@@ -1148,6 +1250,12 @@ class フレイルナイト(Follower):
             # Deal damage to leader
             game_state.player_take_damage(target_owner, num_followers_in_hand, draw_ui, set_text)
 
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are followers in hand to deal damage, at least 2 to make it worth, and there are targets on opp field
+        condition_1 = sum(1 for c in game_state.hands[player] if isinstance(c, Follower) and c != self) >= 2
+        condition_2 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
+        return condition_1 and condition_2
+
 
 class お爺さんとお婆さん(Follower):
     """
@@ -1167,6 +1275,11 @@ class お爺さんとお婆さん(Follower):
 
         if self in game_state.fields[self_owner]:
             self.mv(game_state.fields[self_owner], mode="return_to_hand", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=self_owner)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are targets on opponent field to make use of rush and lethal
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
+        return condition_1
 
 
 class 大魔法の妖精リラ(Follower):
@@ -1189,6 +1302,12 @@ class 大魔法の妖精リラ(Follower):
         target1 = selected_card_for_effect[1] if len(selected_card_for_effect) > 1 else None
         if target1 is not None and isinstance(target1, Follower) and target1 in game_state.fields[game_state.current_player]:
             target1.mv(game_state.fields[game_state.current_player], mode="return_to_hand", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=game_state.current_player)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are targets on opponent field to destroy
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
+        condition_2 = any(isinstance(c, Follower) for c in game_state.fields[player]) # not used to avoid being too strict.
+        return condition_1
 
 
 class セラフィックレオガルエル(Follower):
@@ -1261,6 +1380,11 @@ class 暗黒の御使い(Follower):
     def end_of_turn_on_field_effect(self, game_state, draw_ui, set_text, the_actual_textbox):
         # Deal 2 damage to own leader
         game_state.player_take_damage(game_state.current_player, 2, draw_ui, set_text)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are targets on opponent field to deal damage
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
+        return condition_1
 
 
 class 若き鬼狩人モモ(Follower):
@@ -1385,6 +1509,99 @@ class ユニコーンの踊り手ユニコ(Follower):
         game_state.player_heal(player, 3, draw_ui, set_text)
 
 
+class 次元の魔女ドロシー(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="次元の魔女・ドロシー", cost=5, attack=5, hp=5, can_enhance=False)
+        self.effect_description = "場に出す時、自分の墓場のスペルカードが5の倍数であるなら、狐尾を5回復し、" \
+        "自分の手札のすべてのスペルカードのコストが-5する。そうではないなら、スペルカードのコスト-1する。"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: list[Card] | None, effect_choice: str | None, selected_cards_for_multi_effect: list[Card] | None = None):
+        player = game_state.current_player
+        num_spells_in_graveyard = sum(1 for c in game_state.graveyard[player] if isinstance(c, Spell))
+        if num_spells_in_graveyard % 5 == 0:
+            # Recover 5 fox tail
+            game_state.add_foxtail(player, 5, draw_ui, set_text)
+            # Reduce cost of all spell cards in hand by 5
+            for c in game_state.hands[player]:
+                if isinstance(c, Spell):
+                    c.cost_change_effect(-5, game_state, draw_ui, set_text, the_actual_textbox)
+        else:
+            for c in game_state.hands[player]:
+                if isinstance(c, Spell):
+                    c.cost_change_effect(-1, game_state, draw_ui, set_text, the_actual_textbox)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play if num_spells_in_graveyard % 5 == 0, and you have at least 2 spell cards
+        condition_1 = sum(1 for c in game_state.graveyard[player] if isinstance(c, Spell)) % 5 == 0
+        condition_2 = sum(1 for c in game_state.hands[player] if isinstance(c, Spell)) >= 2
+        return condition_1 and condition_2
+
+
+class パフュームドワーフ(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="パフュームドワーフ", cost=3, attack=2, hp=3, can_enhance=False)
+        self.effect_description = "場に出すとき、手札のスペルカード6枚まで選ぶ、それらのコストが2倍になる。" \
+        "これの攻撃力と体力はX倍になる。Xは選んだスペルカードの枚数である。"
+        self.request_multi_card_selection_on_play = ("hand_spell", 6)
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: list[Card] | None, effect_choice: str | None, selected_cards_for_multi_effect: list[Card] | None = None):
+        if not selected_cards_for_multi_effect:
+            return
+        num_selected_spells = 0
+        for target in selected_cards_for_multi_effect:
+            if target in game_state.hands[game_state.current_player] and isinstance(target, Spell):
+                target.cost_change_effect(target.cost, game_state, draw_ui, set_text, the_actual_textbox)  # Double the cost
+                num_selected_spells += 1
+        # Increase attack and hp by X times
+        self.stats_change_effect_simple(self.attack * (num_selected_spells - 1), self.hp * (num_selected_spells - 1), draw_ui, set_text, the_actual_textbox)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # at least 3 spell cards in hand to make it worth
+        condition_1 = sum(1 for c in game_state.hands[player] if isinstance(c, Spell)) >= 3
+        return condition_1
+
+
+class 太陽の巫女パメラ(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="太陽の巫女・パメラ", cost=4, attack=4, hp=4, can_enhance=False)
+        self.effect_description = "場に出すとき、「大地の魔片」1つ手札に加える。これが場にいる限り、自分がスペルカードをプレイするたびに、" \
+        "相手のリーダーに2ダメージ。これが「大地の魔片」によりダメージを受けるとき、そのダメージを0にし、相手のリーダーに3ダメージ、" \
+        "自分のリーダーに3回復。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        player = game_state.current_player
+        new_card = 大地の魔片().cp(game_state, draw_ui, set_text, the_actual_textbox)
+        new_card.mv([new_card], "to_hand", game_state, draw_ui, set_text, the_actual_textbox, player=player)
+
+    def effect_when_other_spell_played(self, target_spell, game_state, draw_ui, set_text, the_actual_textbox, target_spell_is_own):
+        if target_spell_is_own:
+            opponent = game_state.opponent
+            game_state.player_take_damage(opponent, 2, draw_ui, set_text)
+            game_state.player_heal(game_state.current_player, 3, draw_ui, set_text)
+
+    def effect_before_taking_damage(self, damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker, is_battle_damage = False):
+        if attacker.name == "大地の魔片":
+            # Negate the damage to this card
+            for p in [1, 2]:
+                if self in game_state.fields[p]:
+                    player_owning_this = p
+                    break
+            # Deal 3 damage to opponent leader and heal self for 3
+            opponent = 3 - player_owning_this
+            game_state.player_take_damage(opponent, 3, draw_ui, set_text)
+            game_state.player_heal(player_owning_this, 3, draw_ui, set_text)
+            return 0  # Negate the damage
+        return damage_amount
+
+
 # ==============================
 # Spells
 # ==============================
@@ -1406,6 +1623,11 @@ class 天なる大河(Spell):
         for c in game_state.hands[player].copy():
             c.mv(game_state.hands[player], mode="to_deck_bottom", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
         game_state.draw_card_by_effect(player, num_cards + 1, draw_ui, set_text)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # at least 2 cards in hand
+        condition_1 = len(game_state.hands[player]) >= 2
+        return condition_1
 
 
 class 神秘の指輪(Spell):
@@ -1430,6 +1652,11 @@ class 神秘の指輪(Spell):
         else:
             if set_text:
                 the_actual_textbox.append_html_text(f"神秘の指輪の効果は発動しなかったのじゃ。\n")
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are cards in hand to select
+        condition_1 = len(game_state.hands[player]) >= 2 # one is self if 2
+        return condition_1
 
 
 class ミヒライテ(Spell):
@@ -1499,6 +1726,11 @@ class 飢餓の輝き(Spell):
             if set_text:
                 the_actual_textbox.append_html_text("飢餓の輝きの効果は発動しなかったのじゃ。\n")
 
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are targets on field to select
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[1]) or any(isinstance(c, Follower) for c in game_state.fields[2])
+        return condition_1
+
 
 class 真実の宣告(Spell):
     """
@@ -1534,6 +1766,11 @@ class 真実の宣告(Spell):
             if set_text:
                 the_actual_textbox.append_html_text("真実の宣告の効果は発動しなかったのじゃ。\n")
 
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are spell cards in hand to select
+        condition_1 = any(isinstance(c, Spell) for c in game_state.hands[player] if c != self)
+        return condition_1
+
 
 class 侮蔑の炎爪(Spell):
     """
@@ -1566,6 +1803,11 @@ class 侮蔑の炎爪(Spell):
             if set_text:
                 the_actual_textbox.append_html_text("侮蔑の炎爪の効果は発動しなかったのじゃ。\n")
 
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there are followers on field to damage
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[1]) or any(isinstance(c, Follower) for c in game_state.fields[2])
+        return condition_1
+
 
 class 唯我の一刀(Spell):
     """
@@ -1586,6 +1828,12 @@ class 唯我の一刀(Spell):
         else:
             if set_text:
                 the_actual_textbox.append_html_text("唯我の一刀の効果は発動しなかったのじゃ。\n")
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when there is exactly one follower on the field
+        f = [c for c in game_state.fields[player] if isinstance(c, Follower)]
+        condition_1 = len(f) == 1
+        return condition_1
 
 
 class 簒奪の蛇剣(Spell):
@@ -1617,6 +1865,12 @@ class 簒奪の蛇剣(Spell):
         else:
             game_state.player_take_damage(player, x, draw_ui, set_text)
 
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when opponent has exactly one follower to target unless you have 神弓の座天使リリエル
+        condition_1 = sum(1 for c in game_state.fields[game_state.opponent] if isinstance(c, Follower)) == 1
+        condition_2 = any(c.name == "神弓の座天使・リリエル" for c in game_state.fields[player])
+        return condition_1 or condition_2
+
 
 class 円卓会議(Spell):
     """
@@ -1647,6 +1901,11 @@ class 円卓会議(Spell):
                                           imposter=self, attack_change=x, hp_change=0)
         else:
             raise ValueError("Invalid effect choice for 円卓会議.")
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when at least 3 followers in hand
+        condition_1 = sum(1 for c in game_state.hands[player] if isinstance(c, Follower)) >= 3
+        return condition_1
 
 
 class 無謀なる戦(Spell):
@@ -1698,6 +1957,11 @@ class フラワーブリーズ(Spell):
             if set_text:
                 the_actual_textbox.append_html_text("フラワーブリーズの効果は発動しなかったのじゃ。\n")
 
+    def ai_meet_play_condition(self, game_state, player):
+        # at least 2 followers on field
+        condition_1 = sum(1 for c in game_state.fields[player] if isinstance(c, Follower)) >= 2
+        return condition_1
+
 
 class 森の音楽隊(Spell):
     """
@@ -1728,6 +1992,11 @@ class 森の音楽隊(Spell):
                 if set_text:
                     the_actual_textbox.append_html_text("森の音楽隊の選択効果は発動しなかったのじゃ。\n")
 
+    def ai_meet_play_condition(self, game_state, player):
+        # at least 1 follower in hand with cost 2 or less
+        condition_1 = any(isinstance(c, Follower) and c.cost <= 2 for c in game_state.hands[player])
+        return condition_1
+
 
 class 魔女の雷撃(Spell):
     """
@@ -1754,7 +2023,7 @@ class アリスの冒険(Spell):
     """
     def __init__(self):
         super().__init__(name="アリスの冒険", cost=2)
-        self.effect_description = "自分の手札のフォロワー4体まで選ぶ。それらは「場に出す効果は発動しない」を持つ。それらは+2/+2する。"
+        self.effect_description = "自分の手札のフォロワー4体まで選ぶ。それらは「場に出す効果は発動しない」を持つ。それらは+3/+3する。"
         self.request_multi_card_selection_on_play = ("hand_follower", 4)
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
@@ -1768,6 +2037,11 @@ class アリスの冒険(Spell):
             target.stats_change_effect_simple(2, 2, draw_ui, set_text, the_actual_textbox)
             if "skip_on_play_effect" not in target.extra_effect_list:
                 target.extra_effect_list.append("skip_on_play_effect")
+
+    def ai_meet_play_condition(self, game_state, player):
+        # at least 3 followers in hand
+        condition_1 = sum(1 for c in game_state.hands[player] if isinstance(c, Follower)) >= 3
+        return condition_1
 
                 
 class 白霜の風(Spell):
@@ -1793,6 +2067,35 @@ class 白霜の風(Spell):
             if isinstance(c, Amulet):
                 if c.decrease_counter(1):
                     c.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, opp)
+
+
+class 渾身の一振り(Spell):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="渾身の一振り", cost=5)
+        self.effect_description = "自分の場にフォロワーがあり、相手の場がフォロワーがないなら、相手のリーダーに9ダメージ。" \
+        "そうでないなら、相手のリーダーに1ダメージ。"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: list[Card] | None, effect_choice: str | None, selected_cards_for_multi_effect: list[Card] | None = None):
+        player = game_state.current_player
+        opponent = game_state.opponent
+        player_has_followers = any(isinstance(c, Follower) for c in game_state.fields[player])
+        opponent_has_followers = any(isinstance(c, Follower) for c in game_state.fields[opponent])
+        if player_has_followers and not opponent_has_followers:
+            damage_amount = 9
+        else:
+            damage_amount = 1
+        game_state.player_take_damage(opponent, damage_amount, draw_ui, set_text)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when you have followers and opponent has no followers, unless opp have 1 hp
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[player])
+        condition_2 = not any(isinstance(c, Follower) for c in game_state.fields[3 - player])
+        condition_3 = game_state.hp[3 - player] == 1
+        return (condition_1 and condition_2) or condition_3
+
 
 
 
@@ -1916,7 +2219,8 @@ class 獣姫の呼び声(Amulet):
     def __init__(self):
         super().__init__(name="獣姫の呼び声", cost=3)
         self.effect_description = "エンドフェイズ開始時、カウンターは1減らす。カウンターが0になったとき、これは破壊される。" \
-        "これが破壊される時、「ホーリーファルコン」と「ホーリータイガー」を1体ずつ出す。それらは守護を持つ。"
+        "これが破壊される時、「ホーリーファルコン」と「ホーリータイガー」を1体ずつ出す。それらは守護を持つ。" \
+        "自分のデッキの同名カード1枚つきそれは+1/+1する。"
         self.counter_name = "獣姫の呼び声カウンター"
         self.counter_max = 3
         self.counter = self.counter_max
@@ -1936,6 +2240,42 @@ class 獣姫の呼び声(Amulet):
                       set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
             tiger.mv([tiger], mode="summon", game_state=game_state, draw_ui=draw_ui, 
                      set_text=set_text, the_actual_textbox=the_actual_textbox, player=player)
+            # check how many falcon and tiger in deck and buff accordingly
+            num_falcon_in_deck = sum(1 for c in game_state.decks[player] if c.name == "ホーリーファルコン")
+            num_tiger_in_deck = sum(1 for c in game_state.decks[player] if c.name == "ホーリータイガー")
+            if num_falcon_in_deck > 0:
+                falcon.stats_change_effect_simple(num_falcon_in_deck, num_falcon_in_deck, draw_ui, set_text, the_actual_textbox)
+            if num_tiger_in_deck > 0:
+                tiger.stats_change_effect_simple(num_tiger_in_deck, num_tiger_in_deck, draw_ui, set_text, the_actual_textbox)
+
+
+class 大地の魔片(Amulet):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="大地の魔片", cost=1)
+        self.effect_description = "スペルカードをプレイするたび、カウンターを1減らす。カウンターが0になったとき、これは破壊される。" \
+        "破壊されるとき、場のすべてのフォロワーに3ダメージ。相手のリーダーに2ダメージ。"
+        self.counter_name = "魔片カウンター"
+        self.counter_max = 3
+        self.counter = self.counter_max
+
+    def effect_when_other_spell_played(self, target_spell, game_state, draw_ui, set_text, the_actual_textbox, target_spell_is_own):
+        if target_spell_is_own:
+            for p in [1, 2]:
+                if self in game_state.fields[p]:
+                    player_owning_this = p
+                    break
+            if self.decrease_counter(1):
+                self.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, player_owning_this)
+            
+    def on_leave_field_effect(self, mode: str, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, player: int):
+        if mode == "destroy":
+            for c in itertools.chain(game_state.fields[player].copy(), game_state.fields[3 - player].copy()):
+                if isinstance(c, Follower):
+                    c.take_damage(3, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+            game_state.player_take_damage(3 - player, 2, draw_ui, set_text)
+
 
 # ===============================
 # Debugs
@@ -1991,19 +2331,13 @@ class ExampleCard(Follower):
 # All Cards List
 # ==============================
 
-all_card_types: list[type[Card]] = [ゴブリン, ファイター, ゴリアテ, ガブリエル, ハンサ, 
-                天なる大河, 唯我の絶傑マゼルベイン, ミヒライテ, フェアリーアサルト,
-                機構翼の少女ローザ, 飢餓の使徒, 飢餓の輝き, 飢餓の絶傑ギルネリーゼ,
-                不殺の絶傑エズディア, 真実の絶傑ライオ, 真実の宣告, 侮蔑の炎爪, 唯我の一刀, 侮蔑の絶傑ガルミーユ,
-                神弓の座天使リリエル, 簒奪の絶傑オクトリス, 簒奪の蛇剣, オウルキャット, 円卓の騎士ガウェイン, 天界への階段,
-                スターフェニックス, 白翼の守護神アイテール, 祈りの燭台, 神秘の指輪, キラキラヒーラー, ミスティアストロジスト,
-                水竜神の巫女, 黄金都市の姫リテュエル, 癒しの奏者アンリエット, フレイルナイト, 円卓会議, お爺さんとお婆さん,
-                茨の森, お菓子の家, 大魔法の妖精リラ, ホーリーファルコン, ホーリータイガー, セラフィックレオガルエル, 鳥飼いの使徒,
-                暗黒の御使い, 無謀なる戦, 若き鬼狩人モモ, 赤ずきんメイジー, ガーベラベアー, ブロッサムウルフスレイド, フラワーブリーズ,
-                森の音楽隊, 魔女の雷撃, アリスの冒険, ユニコーンの踊り手ユニコ, 獣姫の呼び声, 白霜の風
-                ]
-
 debug_card_types: list[type[Card]] = [ExampleCard]
+_debug_set = set(debug_card_types)
+all_card_types = [
+    c for base in (Follower, Spell, Amulet)
+    for c in base.__subclasses__()
+    if c not in _debug_set
+]
 
 # sort with follower spell amulet order, then by cost ascending, then by name alphabetical
 _type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}

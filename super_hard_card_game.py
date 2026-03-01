@@ -135,15 +135,9 @@ class SHCGGameState:
         if isinstance(card, cards.Follower):
             card.mv([card], "summon", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
         elif isinstance(card, cards.Spell):
-            self.graveyard[player].append(card)
-            # if has star pheonix in graveyard, summon it.
-            if self.graveyard[player]:
-                for c in self.graveyard[player].copy():
-                    if isinstance(c, cards.スターフェニックス):
-                        c.reset_stats()  # reset stats before summoning
-                        c.mv(self.graveyard[player], "summon", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
+            card.mv([card], "play_spell", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
         elif isinstance(card, cards.Amulet):
-            self.fields[player].append(card)
+            card.mv([card], "place_amulet", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
         if ui_draw:
             self.draw_hand_ui(player)
             self.draw_field_ui(player)

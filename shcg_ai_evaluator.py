@@ -3,9 +3,9 @@ Evaluator for game states from a player's perspective.
 Usage: Evaluator.evaluate_new. evaluate(for testing different evaluation methods)(used in simulate_games.py) is not implemented
 """
 from typing import TYPE_CHECKING
-import cards
+import shcg_core_cards
 if TYPE_CHECKING:
-    from ai_player_new import GameStateSnapshot
+    from shcg_ai import GameStateSnapshot
     
 
 class Evaluator:
@@ -67,7 +67,7 @@ class Evaluator:
         own_field_have_protector = False
         amulet_names_on_own_field = set()
         for f in state.fields[player]:
-            if isinstance(f, cards.Follower):
+            if isinstance(f, shcg_core_cards.Follower):
                 own_field_power += f.attack + f.hp
                 # 守護 (.ability_protect) 者のHPの100%を追加ボーナスとして加算
                 if f.ability_protect:
@@ -79,7 +79,7 @@ class Evaluator:
                 # lethal 4 points, 1 cost
                 if f.ability_lethal:
                     own_field_power += 4
-            elif isinstance(f, cards.Amulet):
+            elif isinstance(f, shcg_core_cards.Amulet):
                 if f.name not in amulet_names_on_own_field:
                     own_field_power += f.amulet_value_for_evaluate
                     amulet_names_on_own_field.add(f.name)
@@ -90,7 +90,7 @@ class Evaluator:
         opp_field_lethal_power = 0
         amulet_names_on_opp_field = set()
         for f in state.fields[opponent]:
-            if isinstance(f, cards.Follower):
+            if isinstance(f, shcg_core_cards.Follower):
                 opp_field_power += f.attack + f.hp
                 if f.attack_ability == 1 and f.can_attack_this_turn:
                     opp_field_power += f.attack_ability * FIELD_POWER_OPP_ATTACK_ABILITY_WEIGHT
@@ -103,7 +103,7 @@ class Evaluator:
                     opp_field_power += f.attack
                 if f.ability_lethal:
                     opp_field_power += 4
-            elif isinstance(f, cards.Amulet):
+            elif isinstance(f, shcg_core_cards.Amulet):
                 if f.name not in amulet_names_on_opp_field:
                     opp_field_power += f.amulet_value_for_evaluate
                     amulet_names_on_opp_field.add(f.name)
@@ -125,7 +125,7 @@ class Evaluator:
         for c in state.hands[player]:
             if c.cost != c.original_cost:
                 own_hand_power += (c.original_cost - c.cost) * 4
-            if isinstance(c, cards.Follower) and not isinstance(c, cards.お爺さんとお婆さん):
+            if isinstance(c, shcg_core_cards.Follower) and not isinstance(c, shcg_core_cards.お爺さんとお婆さん):
                 if c.attack != c.original_attack:
                     own_hand_power += (c.attack - c.original_attack)
                 if c.attack > c.original_attack:
@@ -139,7 +139,7 @@ class Evaluator:
         for c in state.hands[opponent]:
             if c.cost != c.original_cost:
                 opp_hand_power += (c.original_cost - c.cost) * 4
-            if isinstance(c, cards.Follower) and not isinstance(c, cards.お爺さんとお婆さん):
+            if isinstance(c, shcg_core_cards.Follower) and not isinstance(c, shcg_core_cards.お爺さんとお婆さん):
                 if c.attack != c.original_attack:
                     opp_hand_power += (c.attack - c.original_attack)
                 if c.attack > c.original_attack:
@@ -157,7 +157,7 @@ class Evaluator:
         # graveyard - Star Phoenix can be summoned from graveyard
         if state.graveyard[player]:
             for c in state.graveyard[player]:
-                if isinstance(c, cards.スターフェニックス):
+                if isinstance(c, shcg_core_cards.スターフェニックス):
                     score += 4.0  # 2/2
 
         return score

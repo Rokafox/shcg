@@ -6,7 +6,7 @@ Call init() after pygame and UI managers are set up to inject dependencies.
 """
 import pygame
 import pygame_gui
-import cards
+import shcg_core_cards
 
 
 # =====================================
@@ -71,7 +71,7 @@ def build_debug_window():
                                         "Card:",
                                         _ui_manager,
                                         container=_debug_window)
-    all_card_names = [card_type().name for card_type in cards.all_card_types + cards.debug_card_types]
+    all_card_names = [card_type().name for card_type in shcg_core_cards.all_card_types + shcg_core_cards.debug_card_types]
     _debug_card_selection_dropdown = pygame_gui.elements.UIDropDownMenu(all_card_names,
                                                         all_card_names[0],
                                                         pygame.Rect((70, 10), (200, 35)),
@@ -130,7 +130,7 @@ def debug_add_card_to_top_of_deck():
         return
     card_to_add = None
     card_name = _debug_card_selection_dropdown.selected_option[0]
-    for card_type in cards.all_card_types:
+    for card_type in shcg_core_cards.all_card_types:
         if card_type().name == card_name:
             card_to_add = card_type()
             break

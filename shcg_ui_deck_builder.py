@@ -9,7 +9,7 @@ import json
 import random
 import pygame
 import pygame_gui
-import cards
+import shcg_core_cards
 
 
 # =====================================
@@ -68,7 +68,7 @@ deck_builder_deck_item_to_name: dict[str, str] = {}
 
 global_vars_db_deck_max_copies = 3
 global_vars_db_where_currently_selected: str = "collection"  # or "deck"
-global_vars_db_recently_selected_card: cards.Card | None = None
+global_vars_db_recently_selected_card: shcg_core_cards.Card | None = None
 
 
 # =====================================
@@ -128,10 +128,10 @@ def _deck_builder_card_display_str(card_type) -> str:
     return f"[{card.cost}] {card.name}"
 
 
-def build_deck_from_recipe(recipe: dict[str, int]) -> list[cards.Card]:
+def build_deck_from_recipe(recipe: dict[str, int]) -> list[shcg_core_cards.Card]:
     """Build a list of Card instances from a deck recipe."""
     deck = []
-    for card_type in cards.all_card_types:
+    for card_type in shcg_core_cards.all_card_types:
         card = card_type()
         if card.name in recipe:
             for _ in range(recipe[card.name]):
@@ -181,7 +181,7 @@ def build_deck_builder_window():
     # Build card list items and mapping
     card_list_items = []
     deck_builder_collection_map = {}
-    for card_type in cards.all_card_types:
+    for card_type in shcg_core_cards.all_card_types:
         display_str = _deck_builder_card_display_str(card_type)
         card_list_items.append(display_str)
         deck_builder_collection_map[display_str] = card_type
@@ -475,7 +475,7 @@ def deck_builder_clear():
 def deck_builder_randomize():
     """Fill the deck with 15 random card types, 3 copies each."""
     deck_builder_deck.clear()
-    selected = random.sample(cards.all_card_types, 15)
+    selected = random.sample(shcg_core_cards.all_card_types, 15)
     for card_type in selected:
         card = card_type()
         deck_builder_deck[card.name] = 3
@@ -491,7 +491,7 @@ def _update_deck_builder_deck_display():
     # Build sorted deck list items (by type priority, then cost, then name)
     type_priority = {'follower': 0, 'spell': 1, 'amulet': 2}
     entries = []
-    for card_type in cards.all_card_types:
+    for card_type in shcg_core_cards.all_card_types:
         card = card_type()
         if card.name in deck_builder_deck:
             count = deck_builder_deck[card.name]

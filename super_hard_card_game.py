@@ -5,535 +5,17 @@ import itertools
 import datetime
 import pygame, pygame_gui
 from pygame_gui.windows import UIFileDialog
-import cards
+import shcg_core_cards
 import random
-import ai_player_new
+import shcg_ai
 import shcg_ui_deck_builder
 import shcg_ui_zone_viewer
 import shcg_ui_debug
-import shcg_error
+from shcg_core_gamestate import SHCGGameState
 
 
 pygame.init()
 clock = pygame.time.Clock()
-
-# ====================================
-# Game State
-# ====================================
-
-DEFAULT_HP_F = 20
-DEFAULT_HP_S = 26
-
-class SHCGGameState:
-    def __init__(self, current_player):
-        # update load_from_string if you change the attributes here
-        self.current_player = current_player  # 1 or 2
-        self.turn = 1
-        self.concluded = False
-        self.decks: dict[int, list[cards.Card]] = {1: [], 2: []}
-        self.hands: dict[int, list[cards.Card]] = {1: [], 2: []}
-        self.fields: dict[int, list[cards.Card]] = {1: [], 2: []}
-        self.max_hp = {1: DEFAULT_HP_S, 2: DEFAULT_HP_F}
-        self.hp = {1: DEFAULT_HP_S, 2: DEFAULT_HP_F}
-        self.foxtail = {1: 9, 2: 9}
-        self.enhance_used_this_turn = {1: 0, 2: 0}
-        self.max_enhance_allowed_per_turn = {1: 1, 2: 1}
-        # Every time a card is generated, the player who generated it gets 1 count
-        self.amount_card_generated_from_void: dict[int, int] = {1: 0, 2: 0}
-        # hidden card
-        self.hidden_cards: dict[int, list[cards.Card]] = {1: [], 2: []}
-        # graveyard and banished zones
-        self.graveyard: dict[int, list[cards.Card]] = {1: [], 2: []}
-        self.banished: dict[int, list[cards.Card]] = {1: [], 2: []}
-        # ui
-        self.top_of_the_deck_ui_marker: dict[int, pygame_gui.elements.UIImage | None] = {1: None, 2: None}
-    
-    @property
-    def opponent(self):
-        return 3 - self.current_player
-
-    def draw_card_with_foxtail(self, player, ui_draw, ui_set_text):
-        """
-        At any time, the current player can consume 1 foxtail to draw a card. No restriction unless hand is full.
-        """
-        if self.decks[player] == [] or len(self.hands[player]) >= 9:
-            return
-        if self.foxtail[player] > 0:
-            self.use_foxtail(player, 1, ui_draw, ui_set_text)
-        else:
-            return
-        drawn_card = self.decks[player].pop()
-        self.hands[player].append(drawn_card)
-        if ui_set_text:
-            text_box.append_html_text(f"プレイヤー{player}がカード{drawn_card}引いたのじゃ。\n")
-        if ui_draw:
-            self.draw_hand_ui(player)
-            # draw_deck_ui is unnecessary as it is handled by pygame event
-
-    def draw_card_by_effect(self, player, num_cards, ui_draw, ui_set_text):
-        """
-        draw num_cards cards triggered by card effect.
-        """
-        for _ in range(num_cards):
-            if self.decks[player] == [] or len(self.hands[player]) >= 9:
-                return
-            drawn_card = self.decks[player].pop()
-            self.hands[player].append(drawn_card)
-            if ui_set_text:
-                text_box.append_html_text(f"プレイヤー{player}がカード{drawn_card}引いたのじゃ。\n")
-        if ui_draw:
-            self.draw_hand_ui(player)
-            self.draw_deck_ui(player)
-
-    def play_card(self, player: int, card: cards.Card, ui_draw, ui_set_text, additional_targets: list[cards.Card] | None,
-                  is_ai_player: bool, effect_choice: str | None,
-                  additional_multi_targets: list[cards.Card] | None = None):
-        global text_box
-        if len(self.fields[player]) > 4 and not isinstance(card, cards.Spell):
-            raise shcg_error.FlowError("Cannot play more than 5 followers/amulets on the field.")
-        if self.foxtail[player] < card.cost:
-            raise shcg_error.FlowError(f"Not enough foxtail to play {card}. Required: {card.cost}, Available: {self.foxtail[player]}")
-        self.use_foxtail(player, card.cost, ui_draw, ui_set_text)
-        self.hands[player].remove(card)
-        if ui_set_text:
-            text_box.append_html_text(f"プレイヤー{player}が{card}をプレイしたぞ！\n")
-
-        targets = None
-        multi_targets = None
-        player_prefix = "AI" if is_ai_player else ""
-
-        if card.request_card_selection_on_play:
-            targets = additional_targets
-            if ui_set_text and targets:
-                targets_str = ", ".join(str(t) for t in targets)
-                text_box.append_html_text(f"{player_prefix}プレイヤー{player}が{card}をプレイする時に{targets_str}を選択したのじゃ。\n")
-
-        if card.request_multi_card_selection_on_play[0]:
-            multi_targets = additional_multi_targets
-            if ui_set_text and multi_targets:
-                targets_str = ", ".join(str(t) for t in multi_targets)
-                text_box.append_html_text(f"{player_prefix}プレイヤー{player}が{card}をプレイする時に{targets_str}を複数選択したのじゃ。\n")
-
-        if card.request_effect_choose_option:
-            if effect_choice is None or effect_choice not in card.request_effect_choose_option:
-                raise shcg_error.AbilityToReadError(f"Invalid effect choice: {effect_choice}. Must be one of {card.request_effect_choose_option}")
-            elif ui_set_text and is_ai_player:
-                text_box.append_html_text(f"AIプレイヤー{player}が{card}の効果選択として{effect_choice}を選択したのじゃ。\n")
-        else:
-            effect_choice = None
-
-        if "skip_on_play_effect" in card.extra_effect_list:
-            if ui_set_text:
-                text_box.append_html_text(f"{card}の場に出す効果は発動しなかったのじゃ。\n")
-        else:
-            card.on_play_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
-                                the_actual_textbox=text_box,
-                                selected_card_for_effect=targets,
-                                effect_choice=effect_choice,
-                                selected_cards_for_multi_effect=multi_targets)
-
-        if isinstance(card, cards.Follower):
-            card.mv([card], "summon", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
-        elif isinstance(card, cards.Spell):
-            card.mv([card], "play_spell", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
-        elif isinstance(card, cards.Amulet):
-            card.mv([card], "place_amulet", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=player)
-        if ui_draw:
-            self.draw_hand_ui(player)
-            self.draw_field_ui(player)
-            self.draw_field_ui(3 - player)
-            self.draw_deck_ui(player)
-
-
-    def follower_attack(self, player, attacker: cards.Follower, target: cards.Follower | str, ui_draw, ui_set_text):
-        if attacker.attack_ability <= 0:
-            raise shcg_error.FlowError(f"{attacker} cannot attack because it has no attack ability.")
-        if not attacker.can_attack_this_turn:
-            raise shcg_error.FlowError(f"{attacker} cannot attack this turn.")
-        if not isinstance(attacker, cards.Follower):
-            raise shcg_error.FlowError(f"{attacker} is not a follower and cannot attack.")
-        if attacker not in self.fields[player]:
-            raise shcg_error.FlowError(f"{attacker} is not on the field and cannot attack.")
-        # check protect ability
-        protect_exists = any([c.ability_protect for c in global_vars_shcg.fields[self.opponent] if isinstance(c, cards.Follower)])
-
-        # attacker before attack effect
-        attacker.before_attack_effect(self, ui_draw, ui_set_text, text_box, target)
-
-        if isinstance(target, cards.Follower):
-            if target not in self.fields[self.opponent]:
-                raise shcg_error.FlowError(f"{target} is not on the field and cannot be attacked.")
-            if not target.ability_protect and protect_exists:
-                raise shcg_error.FlowError(f"Cannot attack {target} because there is a follower with protect ability on opponent's field.")
-            if ui_set_text:
-                # text_box.append_html_text(f"{attacker} is about to attack {target}.\n")
-                text_box.append_html_text(f"{attacker}は{target}を攻撃するぞ！\n")
-            target_hp_before = target.hp
-            target.take_damage(attacker.attack, self, ui_draw, ui_set_text, text_box, attacker=attacker, is_battle_damage=True)
-            target_hp_changed = target_hp_before - target.hp
-            # drain ability
-            if attacker.ability_drain and target_hp_changed > 0:
-                self.player_heal(player, target_hp_changed, ui_draw, ui_set_text)
-            attacker.take_damage(target.attack, self, ui_draw, ui_set_text, text_box, attacker=target, is_battle_damage=True)
-            # Remove dead followers handled in take_damage method
-            attacker.after_attack_effect()
-            if ui_draw:
-                self.draw_field_ui(1)
-                self.draw_field_ui(2)
-        elif target == "leader":
-            if attacker.attack_ability < 2:
-                raise shcg_error.FlowError(f"{attacker} cannot attack leader because its attack ability is less than 2.")
-            if protect_exists:
-                raise shcg_error.FlowError(f"Cannot attack leader because there is a follower with protect ability on opponent's field.")
-            if ui_set_text:
-                text_box.append_html_text(f"{attacker}の直接攻撃！\n")
-            self.player_take_damage(self.opponent, attacker.attack, ui_draw, ui_set_text, is_follower_attack=True)
-            # drain ability
-            if attacker.ability_drain and attacker.attack > 0:
-                self.player_heal(player, attacker.attack, ui_draw, ui_set_text)
-            attacker.after_attack_effect()
-            self.draw_field_ui(player)
-        else:
-            raise Exception("Should not reach here.")
-
-
-    def player_take_damage(self, player: int, amount: int, ui_draw: bool, ui_set_text: bool, is_follower_attack: bool=False) -> bool:
-        if amount < 0:
-            raise shcg_error.FlowError("Damage amount cannot be negative.")
-        # has 神弓の座天使・リリエル on field, no effect damage taken
-        if not is_follower_attack:
-            for c in self.fields[player]:
-                if isinstance(c, cards.神弓の座天使リリエル):
-                    if ui_set_text:
-                        text_box.append_html_text(f"プレイヤー{player}は神弓の座天使・リリエルの効果で能力によるダメージを受けなかったのじゃ。\n")
-                    return False
-        self.hp[player] -= amount
-        if ui_set_text:
-            text_box.append_html_text(f"プレイヤー{player}が{amount}のダメージを受けたのじゃ。残りHP:{self.hp[player]}。\n")
-        if amount > 0 and ui_draw:
-            self.draw_player_hp_ui()
-        if self.hp[player] <= 0:
-            winner = 3 - player
-            if ui_set_text:
-                text_box.append_html_text(f"プレイヤー{winner}の勝利じゃ！\n")
-            self.concluded = True
-            return True
-        return False
-
-    def player_heal(self, player: int, amount: int, ui_draw, ui_set_text) -> None:
-        """
-        Heal leader, but not exceeding max HP.
-        """
-        if amount < 0:
-            raise shcg_error.FlowError("Heal amount cannot be negative.")
-        prev_hp = self.hp[player]
-        self.hp[player] = min(self.hp[player] + amount, self.max_hp[player])
-        if ui_set_text:
-            text_box.append_html_text(f"プレイヤー{player}が{self.hp[player] - prev_hp}のHPを回復したのじゃ。現在のHP:{self.hp[player]}。\n")
-        if amount > 0 and ui_draw:
-            self.draw_player_hp_ui()
-
-
-    def serialize_to_string(self) -> str:
-        """Serialize the game state to a JSON string. Can be restored with load_from_string."""
-        snap = ai_player_new.GameStateSnapshot.from_game_state(self)
-        return snap.serialize_to_string()
-
-    def load_from_string(self, s: str):
-        """Restore the game state from a JSON string produced by serialize_to_string.
-        UI must be redrawn after calling this method.
-        """
-        snap = ai_player_new.GameStateSnapshot.load_from_string(s)
-        self.current_player = snap.current_player
-        self.turn = snap.turn
-        self.concluded = snap.concluded
-        self.hp = snap.hp
-        self.max_hp = snap.max_hp
-        self.foxtail = snap.foxtail
-        self.enhance_used_this_turn = snap.enhance_used_this_turn
-        self.max_enhance_allowed_per_turn = snap.max_enhance_allowed_per_turn
-        self.amount_card_generated_from_void = snap.amount_card_generated_from_void
-        self.decks = snap.decks
-        self.hands = snap.hands
-        self.fields = snap.fields
-        self.hidden_cards = snap.hidden_cards
-        self.graveyard = snap.graveyard
-        self.banished = snap.banished
-
-    def redraw_all_ui(self):
-        """Redraw all UI elements to reflect current game state."""
-        self.draw_player_hp_ui()
-        self.draw_tail_ui(1)
-        self.draw_tail_ui(2)
-        self.draw_hand_ui(1)
-        self.draw_hand_ui(2)
-        self.draw_deck_ui(1)
-        self.draw_deck_ui(2)
-        self.draw_field_ui(1)
-        self.draw_field_ui(2)
-        self.draw_current_player_indicator()
-
-    def end_turn(self, ui_draw, ui_set_text):
-        for c in self.fields[self.current_player].copy():
-            c.end_of_turn_on_field_effect(self, ui_draw, ui_set_text, text_box)
-            if "end_of_turn_destroy" in c.extra_effect_list and c in self.fields[self.current_player]:
-                c.mv(self.fields[self.current_player], "destroy", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=text_box, player=self.current_player)
-        if self.concluded:
-            # text_box.append_html_text("The game has concluded. Start a new game instead.\n")
-            text_box.append_html_text("ゲームは終了したのじゃ。新しいゲームを始めようではないか。\n")
-            return
-        self.current_player = self.opponent
-        self.foxtail[self.current_player] = 9
-        for card in self.fields[self.current_player].copy():
-            card.start_of_turn_on_field_effect(self, ui_draw, ui_set_text, text_box)
-        for card in itertools.chain(self.hands[self.current_player].copy(), self.graveyard[self.current_player].copy(), 
-                                    self.banished[self.current_player].copy(), self.decks[self.current_player].copy()):
-            card.start_of_turn_not_on_field_effect(self, ui_draw, ui_set_text, text_box)
-        self.turn += 1
-        self.enhance_used_this_turn = {1: 0, 2: 0}
-        if self.concluded:
-            # text_box.append_html_text("The game has concluded. Start a new game instead.\n")
-            text_box.append_html_text("ゲームは終了したのじゃ。新しいゲームを始めようではないか。\n")
-            return
-        # If both players have no cards in deck, the game ends in a draw
-        if self.decks[1] == [] and self.decks[2] == []:
-            self.concluded = True
-            if ui_set_text:
-                text_box.append_html_text("引き分けじゃ。\n")
-            return
-        if ui_draw:
-            self.draw_tail_ui(self.current_player)
-            self.draw_field_ui(1)
-            self.draw_field_ui(2)
-            self.draw_hand_ui(1)
-            self.draw_hand_ui(2)
-            self.draw_deck_ui(1)
-            self.draw_deck_ui(2)
-            self.draw_current_player_indicator()
-        if ui_set_text:
-            text_box.append_html_text(text_box_introduction_text)
-            text_box.append_html_text(f"プレイヤー{self.current_player}のターンじゃ。\n")
-            text_box.append_html_text(f"ターン{self.turn}。\n")
-
-
-    def use_foxtail(self, player, amount, ui_draw, ui_set_text):
-        # The player use this amount of foxtail
-        assert amount >= 0
-        assert amount <= 9
-        if amount == 0:
-            return
-        global global_vars_tail_indicators, global_vars_tail_indicators_active
-        foxtail_prev = self.foxtail[player]
-        if self.foxtail[player] >= amount:
-            self.foxtail[player] -= amount
-            if ui_draw:
-                for i in range(self.foxtail[player], foxtail_prev):
-                    global_vars_tail_indicators[player][i].set_image(image_others["405"])
-                    global_vars_tail_indicators_active[player].remove(global_vars_tail_indicators[player][i])
-        else:
-            raise shcg_error.FlowError(f"Player {player} does not have enough foxtail to use {amount}. Current foxtail: {self.foxtail[player]}")
-
-
-    def add_foxtail(self, player, amount, ui_draw, ui_set_text):
-        # add amount of foxtail for player
-        assert amount >= 0
-        if amount == 0:
-            return
-        global global_vars_tail_indicators, global_vars_tail_indicators_active
-        foxtail_prev = self.foxtail[player]
-        self.foxtail[player] = min(9, self.foxtail[player] + amount)
-
-        if ui_draw:
-            for i in range(foxtail_prev, self.foxtail[player]):
-                global_vars_tail_indicators[player][i].set_image(image_others["foxtail"])
-                global_vars_tail_indicators_active[player].append(global_vars_tail_indicators[player][i])
-
-
-    def on_card_enhanced(self, player, card_to_enhance: cards.Follower, additional_targets: list[cards.Card] | None, is_ai_player: bool, ui_set_text,
-                         ui_draw, effect_choice: str | None = None,
-                         additional_multi_targets: list[cards.Card] | None = None):
-        # not having foxtail will return early
-        assert self.foxtail[player] > 0
-        if self.foxtail[player] < 1:
-            return
-        if self.enhance_used_this_turn[player] >= self.max_enhance_allowed_per_turn[player]:
-            return
-        if not hasattr(card_to_enhance, 'can_enhance') or not card_to_enhance.can_enhance:
-            return
-        if card_to_enhance not in self.fields[player]:
-            return
-        if ui_set_text:
-            text_box.append_html_text(f"プレイヤー{player}が{card_to_enhance}を強化するぞ！\n")
-
-        targets = None
-        multi_targets = None
-
-        prefix = "AI" if is_ai_player else ""
-        if card_to_enhance.request_card_selection_on_enhance:
-            targets = additional_targets
-            if ui_set_text and targets:
-                targets_str = ", ".join(str(t) for t in targets)
-                text_box.append_html_text(f"{prefix}プレイヤー{player}が{card_to_enhance}を強化する時に{targets_str}を選択したのじゃ。\n")
-
-        if card_to_enhance.request_multi_card_selection_on_enhance[0]:
-            multi_targets = additional_multi_targets
-            if ui_set_text and multi_targets:
-                targets_str = ", ".join(str(t) for t in multi_targets)
-                text_box.append_html_text(f"{prefix}プレイヤー{player}が{card_to_enhance}を強化する時に{targets_str}を複数選択したのじゃ。\n")
-
-        card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,
-                                            the_actual_textbox=text_box,
-                                            selected_card_for_effect=targets,
-                                            effect_choice=effect_choice,
-                                            selected_cards_for_multi_effect=multi_targets)
-
-        global_vars_shcg.enhance_used_this_turn[player] += 1
-        global_vars_shcg.use_foxtail(player, 1, ui_draw=True, ui_set_text=True)
-        if ui_draw:
-            global_vars_shcg.draw_field_ui(player)
-            global_vars_shcg.draw_field_ui(3 - player)
-            global_vars_shcg.draw_hand_ui(player)
-            global_vars_shcg.draw_hand_ui(3 - player)
-
-
-    # ====================================
-    # UI functions
-    # ====================================
-
-
-    def draw_deck_ui(self, player):
-        global global_vars_deck_slots
-        if global_vars_deck_slots[player]:
-            for card_ui in global_vars_deck_slots[player]:
-                card_ui.kill()
-        deck = self.decks[player]
-        if not deck:
-            return
-        if player == 1: # 'top'
-            base_x = 1500 - 100 - 50
-            base_y = 50
-        else:  # 'bottom'
-            base_x = 1500 - 100 - 50
-            base_y = 900 - 145 - 50
-        deck_tooltip_str = " | ".join([f"{i + 1}: {str(card)}" for i, card in enumerate(deck)])
-        for i in range(len(deck)):
-            offset = i * 1
-            card_ui = pygame_gui.elements.UIImage(
-                pygame.Rect((base_x + offset, base_y + offset), (100, 145)),
-                pygame.Surface((100, 145)),
-                ui_manager
-            )
-            card_ui.set_image(draw_card(deck[i]))
-            global_vars_deck_slots[player].append(card_ui)
-            if i == len(deck) - 1:
-                self.top_of_the_deck_ui_marker[player] = card_ui
-                card_ui.set_tooltip(deck_tooltip_str, delay=0.1, wrap_width=600)
-        return
-
-
-    def draw_hand_ui(self, player):
-        self.hands[player] = sorted(self.hands[player], key=lambda x: x.cost)
-        hand = self.hands[player]
-        global global_vars_hand_slots
-        slots = global_vars_hand_slots[player]
-        for i in range(9):
-            if i < len(hand):
-                slots[i].set_image(draw_card(hand[i]))
-                slots[i].set_tooltip(hand[i].tooltip_str(), delay=0.1, wrap_width=300)
-            else:
-                slots[i].set_image(image_405_card_slot)
-                slots[i].set_tooltip("", delay=0.1, wrap_width=300)
-        return
-
-
-    def draw_field_ui(self, player):
-        self.fields[player] = sorted(self.fields[player], key=lambda x: x.cost)
-        field = self.fields[player]
-        global global_vars_field_slots
-        slots = global_vars_field_slots[player]
-        for i in range(5):
-            if i < len(field):
-                slots[i].set_image(draw_card(field[i], show_attack_status_indicator=True))
-                slots[i].set_tooltip(field[i].tooltip_str(), delay=0.1, wrap_width=300)
-            else:
-                slots[i].set_image(image_405_card_slot)
-                slots[i].set_tooltip("", delay=0.1, wrap_width=300)
-        return
-
-
-    def draw_tail_ui(self, player):
-        # fill tail indicators to default value (9) according to foxtail count
-        foxtail = self.foxtail[player]
-        global global_vars_tail_indicators, global_vars_tail_indicators_active
-        indicators = global_vars_tail_indicators[player]
-        for i in range(9):
-            if i < foxtail:
-                indicators[i].set_image(image_others["foxtail"])  # filled
-                global_vars_tail_indicators_active[player].append(indicators[i])
-            else:
-                indicators[i].set_image(image_others["405"])  # empty
-        return
-
-
-    def draw_player_hp_ui(self):
-        # draw player hp on player_1_hp_slot and player_2_hp_slot
-        # green text, bold font
-        font_bold = pygame.font.Font(None, 64)
-        
-        # player 1
-        hp_text_1 = str(self.hp[1])
-        image_with_hp_1 = image_others["405"].copy()
-        hp_render_1 = font_bold.render(hp_text_1, True, deep_dark_blue)
-        
-        # transform size of image_with_hp_1 to fit the player_1_hp_slot
-        x = player_1_hp_slot.get_relative_rect().width
-        y = player_1_hp_slot.get_relative_rect().height
-        image_with_hp_1 = pygame.transform.scale(image_with_hp_1, (x, y))
-        text_rect_1 = hp_render_1.get_rect(center=(x//2, y//2))
-        image_with_hp_1.blit(hp_render_1, text_rect_1)
-        player_1_hp_slot.set_image(image_with_hp_1)
-        
-        # player 2
-        hp_text_2 = str(self.hp[2])
-        image_with_hp_2 = image_others["405"].copy()
-        hp_render_2 = font_bold.render(hp_text_2, True, deep_dark_blue)
-        
-        # transform size of image_with_hp_2 to fit the player_2_hp_slot
-        x = player_2_hp_slot.get_relative_rect().width
-        y = player_2_hp_slot.get_relative_rect().height
-        image_with_hp_2 = pygame.transform.scale(image_with_hp_2, (x, y))
-        text_rect_2 = hp_render_2.get_rect(center=(x//2, y//2))
-        image_with_hp_2.blit(hp_render_2, text_rect_2)
-        player_2_hp_slot.set_image(image_with_hp_2)
-
-    def draw_current_player_indicator(self):
-        # draw an indicator on the current player's leader image slot
-        # deep dark blue border with width 5
-        for player in [1, 2]:
-            if player == self.current_player:
-                border_width = 5
-            else:
-                border_width = 0
-
-            slot = global_vars_leader_slots[player][0]
-            slot_width = slot.get_relative_rect().width
-            slot_height = slot.get_relative_rect().height
-
-            leader_img_key = str(player)
-            if leader_img_key in image_leader:
-                leader_image = image_leader[leader_img_key]
-            else:
-                leader_image = image_others["404coyote"]
-
-            image_with_indicator = pygame.transform.scale(leader_image, (slot_width, slot_height))
-            if border_width > 0:
-                pygame.draw.rect(
-                    image_with_indicator,
-                    deep_dark_blue,
-                    pygame.Rect(0, 0, slot_width, slot_height),
-                    border_width,
-                )
-            slot.set_image(image_with_indicator)
 
 
 # =====================================
@@ -617,7 +99,7 @@ pygame.draw.rect(image_405_card_slot, deep_dark_blue, pygame.Rect(0, 0, 100, 145
 # =====================================
 # End of Color and UI Managers
 # =====================================
-# Example UI Components
+# UI Components A
 # =====================================
 
 global_vars_deck_slots: dict[int, list[pygame_gui.elements.UIImage]] = {1: [], 2: []}
@@ -652,8 +134,31 @@ load_game_file_dialog: UIFileDialog | None = None
 _turn_start_state_string: str | None = None
 
 
+settings_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 330), (200, 50)),
+                                    text='Settings',
+                                    manager=ui_manager,)
+
+new_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 390), (200, 50)),
+                                    text='New Game',
+                                    manager=ui_manager,)
+
+quit_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 450), (200, 50)),
+                                    text='Quit Game',
+                                    manager=ui_manager,)
+
+deck_builder_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 510), (200, 50)),
+                                    text='Deck Builder',
+                                    manager=ui_manager,)
+
+text_box = pygame_gui.elements.UITextEntryBox(pygame.Rect((895, 255), (410, 345)),"", ui_manager)
+text_box_introduction_text = "======================================\n"
+text_box.set_text(text_box_introduction_text)
+
+
 # =====================================
-# Card/Effect Selection Window
+# End of UI Components A
+# =====================================
+# UI Component B
 # =====================================
 
 card_selection_window = None
@@ -663,12 +168,12 @@ effect_selection_list = None
 card_selection_confirm_button = None
 card_selection_cancel_button = None
 pending_selection_action = None  # dict with pending play/enhance action info
-_card_selection_option_maps: list[dict[str, cards.Card]] = []  # list of option maps, one per step
-_multi_card_selection_option_map: dict[str, cards.Card] = {}  # display string -> card object (multi select)
+_card_selection_option_maps: list[dict[str, shcg_core_cards.Card]] = []  # list of option maps, one per step
+_multi_card_selection_option_map: dict[str, shcg_core_cards.Card] = {}  # display string -> card object (multi select)
 
 
 def _build_card_selection_options(selection_type: str, pending_info: dict,
-                                   target_map: dict[str, cards.Card] | None = None) -> list[str]:
+                                   target_map: dict[str, shcg_core_cards.Card] | None = None) -> list[str]:
     """Build display strings for the card selection list and populate the option map.
     If target_map is provided, populate that dict. Otherwise use a throwaway local dict.
     """
@@ -687,26 +192,26 @@ def _build_card_selection_options(selection_type: str, pending_info: dict,
 
     if selection_type == "field":
         for i, c in enumerate(global_vars_shcg.fields[cp]):
-            if isinstance(c, cards.Follower):
+            if isinstance(c, shcg_core_cards.Follower):
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
                 om[display] = c
 
     elif selection_type == "field_opponent":
         for i, c in enumerate(global_vars_shcg.fields[op]):
-            if isinstance(c, cards.Follower):
+            if isinstance(c, shcg_core_cards.Follower):
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
                 om[display] = c
 
     elif selection_type == "field_both":
         for i, c in enumerate(global_vars_shcg.fields[cp]):
-            if isinstance(c, cards.Follower):
+            if isinstance(c, shcg_core_cards.Follower):
                 display = f"CP {i + 1} {str(c)}"
                 options.append(display)
                 om[display] = c
         for i, c in enumerate(global_vars_shcg.fields[op]):
-            if isinstance(c, cards.Follower):
+            if isinstance(c, shcg_core_cards.Follower):
                 display = f"OP {i + 1} {str(c)}"
                 options.append(display)
                 om[display] = c
@@ -723,7 +228,7 @@ def _build_card_selection_options(selection_type: str, pending_info: dict,
         for i, c in enumerate(global_vars_shcg.hands[cp]):
             if action_type == 'play' and c is played_card:
                 continue
-            if isinstance(c, cards.Follower):
+            if isinstance(c, shcg_core_cards.Follower):
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
                 om[display] = c
@@ -732,7 +237,7 @@ def _build_card_selection_options(selection_type: str, pending_info: dict,
         for i, c in enumerate(global_vars_shcg.hands[cp]):
             if action_type == 'play' and c is played_card:
                 continue
-            if isinstance(c, cards.Spell):
+            if isinstance(c, shcg_core_cards.Spell):
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
                 om[display] = c
@@ -1023,29 +528,7 @@ def _cancel_pending_selection():
     card_selection_cancel_button = None
 
 
-
-settings_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 330), (200, 50)),
-                                    text='Settings',
-                                    manager=ui_manager,)
-
-new_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 390), (200, 50)),
-                                    text='New Game',
-                                    manager=ui_manager,)
-
-quit_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 450), (200, 50)),
-                                    text='Quit Game',
-                                    manager=ui_manager,)
-
-deck_builder_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((50, 510), (200, 50)),
-                                    text='Deck Builder',
-                                    manager=ui_manager,)
-
-text_box = pygame_gui.elements.UITextEntryBox(pygame.Rect((895, 255), (410, 345)),"", ui_manager)
-text_box_introduction_text = "======================================\n"
-text_box.set_text(text_box_introduction_text)
-
-
-def draw_card(card: cards.Card, show_attack_status_indicator: bool = False, wh: tuple = (200, 290)) -> pygame.Surface:
+def draw_card(card: shcg_core_cards.Card, show_attack_status_indicator: bool = False, wh: tuple = (200, 290)) -> pygame.Surface:
     width = max(1, int(wh[0]))
     height = max(1, int(wh[1]))
     card_surface = pygame.Surface((width, height))
@@ -1180,6 +663,7 @@ def create_slots(count, start_pos, size, spacing, image_key):
         slots.append(slot)
     return slots
 
+
 global_vars_hand_slots = {1: create_slots(9, (300, 50), (100, 145), 110, "404coyote"), 
                           2: create_slots(9, (300, 700), (100, 145), 110, "404coyote")}
 
@@ -1200,28 +684,9 @@ player_1_hp_slot = global_vars_player_hp_slots[1][0]
 player_2_hp_slot = global_vars_player_hp_slots[2][0]
 
 # =====================================
-# End of Example UI Components
+# End of UI Component B
 # =====================================
-# Component tooltips
-# =====================================
-
-def build_component_tooltips():
-    """
-    All tooltips here. Delay should always be 0.1
-    """
-    settings_button.set_tooltip("Open settings window.", delay=0.1, wrap_width=300)
-    end_turn_button.set_tooltip("End your turn and pass to opponent.", delay=0.1, wrap_width=300)
-    reset_turn_button.set_tooltip("Reset your turn to undo all actions taken this turn.", delay=0.1, wrap_width=300)
-    new_game_button.set_tooltip("Start a new game.", delay=0.1, wrap_width=300)
-    deck_builder_button.set_tooltip("Open deck builder to create custom decks.", delay=0.1, wrap_width=300)
-    save_game_button.set_tooltip("Save the current game state to a file.", delay=0.1, wrap_width=300)
-    load_game_button.set_tooltip("Load a game state from a file.", delay=0.1, wrap_width=300)
-
-
-build_component_tooltips()
-
-# =====================================
-# Windows & Support Functions
+# UI Component C
 # =====================================
 
 def build_settings_window():
@@ -1237,7 +702,7 @@ def build_settings_window():
         return s
 
     # Get current AI manager based on toggle
-    current_ai_manager = global_vars_minimax_ai_manager
+    current_ai_manager = global_vars_bf_ai_manager
 
     settings_window = pygame_gui.elements.UIWindow(pygame.Rect((500, 50), (400, 800)),
                                         ui_manager,
@@ -1435,68 +900,14 @@ def change_theme(theme=None):
     global_vars_shcg.draw_hand_ui(2)
     global_vars_shcg.draw_field_ui(1)
     global_vars_shcg.draw_field_ui(2)
-    
 
 
-global_vars_shcg: SHCGGameState = SHCGGameState(current_player=2)
-global_vars_use_minimax_ai: bool = True  # Default to new minimax AI
-global_vars_minimax_ai_manager = ai_player_new.MinimaxAIManager(6, 3, 300, 60)
 
-def _build_random_deck() -> list[cards.Card]:
-    """Build a random deck (15 types x 3 copies = 45 cards)."""
-    deck: list[cards.Card] = []
-    selected_card_types = random.sample(cards.all_card_types, 15)
-    for card_type in selected_card_types:
-        for _ in range(3):
-            deck.append(card_type())
-    random.shuffle(deck)
-    return deck
-
-
-def _resolve_deck_for_player(player: int) -> list[cards.Card]:
-    """Resolve which deck to use for a player based on settings selection."""
-    deck_name = shcg_ui_deck_builder.deck_builder_selected_decks.get(player, "Random")
-    if deck_name != "Random" and deck_name in shcg_ui_deck_builder.deck_builder_saved_decks:
-        return shcg_ui_deck_builder.build_deck_from_recipe(shcg_ui_deck_builder.deck_builder_saved_decks[deck_name])
-    return _build_random_deck()
-
-
-def start_new_game():
-    # fetch decks, deck and deck for cpu are selected by player
-    # shuffle decks
-    # draw UI components
-    # Use deck selected in settings (saved deck or random)
-    example_deck_1 = _resolve_deck_for_player(1)
-    example_deck_2 = _resolve_deck_for_player(2)
-
-    text_box.set_text(text_box_introduction_text)
-    global global_vars_shcg
-    global_vars_shcg = SHCGGameState(current_player=2)
-    global_vars_shcg.decks = {1: example_deck_1, 2: example_deck_2}
-
-    # draw UI
-    global_vars_shcg.draw_player_hp_ui()
-    global_vars_shcg.draw_current_player_indicator()
-    global_vars_shcg.draw_tail_ui(1)
-    global_vars_shcg.draw_tail_ui(2)
-    # draw hand
-    global_vars_shcg.draw_hand_ui(1)
-    global_vars_shcg.draw_hand_ui(2)
-    # draw deck
-    global_vars_shcg.draw_deck_ui(1)
-    global_vars_shcg.draw_deck_ui(2)
-    # draw field
-    global_vars_shcg.draw_field_ui(1)
-    global_vars_shcg.draw_field_ui(2)
-    # text_box.append_html_text(f"Player {global_vars_shcg.current_player}'s turn. \n")
-    # text_box.append_html_text(f"Turn {global_vars_shcg.turn}. \n")
-    text_box.append_html_text(f"プレイヤー{global_vars_shcg.current_player}のターンなのじゃ。\n")
-    text_box.append_html_text(f"ターン{global_vars_shcg.turn}\n")
-    global_vars_minimax_ai_manager.ai_clear_pending_actions()
-    # Save state at start of turn for Reset Turn
-    global _turn_start_state_string
-    _turn_start_state_string = global_vars_shcg.serialize_to_string()
-
+# =====================================
+# End of UI Component C
+# =====================================
+# UI Component D
+# =====================================
 
 # top right
 debug_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1500, 10), (90, 35)),
@@ -1506,7 +917,6 @@ debug_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1500, 10)
 
 
 # Graveyard / Banished / Deck buttons (same x as debug button)
-
 # Player 1 buttons (below debug button)
 p1_graveyard_button = pygame_gui.elements.UIButton(
     relative_rect=pygame.Rect((1500, 50), (90, 35)),
@@ -1558,10 +968,111 @@ shcg_ui_zone_viewer.init(ui_manager, draw_card, lambda: global_vars_shcg)
 # Initialize debug module with dependencies
 shcg_ui_debug.init(ui_manager, lambda: global_vars_shcg, lambda: text_box)
 
+
+# =====================================
+# End of UI Component D
+# =====================================
+# Component tooltips
+# =====================================
+
+def build_component_tooltips():
+    """
+    All tooltips here. Delay should always be 0.1
+    """
+    settings_button.set_tooltip("Open settings window.", delay=0.1, wrap_width=300)
+    end_turn_button.set_tooltip("End your turn and pass to opponent.", delay=0.1, wrap_width=300)
+    reset_turn_button.set_tooltip("Reset your turn to undo all actions taken this turn.", delay=0.1, wrap_width=300)
+    new_game_button.set_tooltip("Start a new game.", delay=0.1, wrap_width=300)
+    deck_builder_button.set_tooltip("Open deck builder to create custom decks.", delay=0.1, wrap_width=300)
+    save_game_button.set_tooltip("Save the current game state to a file.", delay=0.1, wrap_width=300)
+    load_game_button.set_tooltip("Load a game state from a file.", delay=0.1, wrap_width=300)
+
+
+build_component_tooltips()
+
+# =====================================
+# End of Component tooltips
+# =====================================
+# Start New Game
+# =====================================
+
+global_vars_bf_ai_manager = shcg_ai.BruteForceAIManager(6, 3, 300, 60)
+
+def _build_random_deck() -> list[shcg_core_cards.Card]:
+    """Build a random deck (15 types x 3 copies = 45 cards)."""
+    deck: list[shcg_core_cards.Card] = []
+    selected_card_types = random.sample(shcg_core_cards.all_card_types, 15)
+    for card_type in selected_card_types:
+        for _ in range(3):
+            deck.append(card_type())
+    random.shuffle(deck)
+    return deck
+
+
+def _resolve_deck_for_player(player: int) -> list[shcg_core_cards.Card]:
+    """Resolve which deck to use for a player based on settings selection."""
+    deck_name = shcg_ui_deck_builder.deck_builder_selected_decks.get(player, "Random")
+    if deck_name != "Random" and deck_name in shcg_ui_deck_builder.deck_builder_saved_decks:
+        return shcg_ui_deck_builder.build_deck_from_recipe(shcg_ui_deck_builder.deck_builder_saved_decks[deck_name])
+    return _build_random_deck()
+
+
+def start_new_game():
+    # fetch decks, deck and deck for cpu are selected by player
+    # shuffle decks
+    # draw UI components
+    # Use deck selected in settings (saved deck or random)
+    example_deck_1 = _resolve_deck_for_player(1)
+    example_deck_2 = _resolve_deck_for_player(2)
+
+    text_box.set_text(text_box_introduction_text)
+    global global_vars_shcg
+    global_vars_shcg = SHCGGameState(current_player=2)
+    global_vars_shcg.image_others = image_others
+    global_vars_shcg.image_leader = image_leader
+    global_vars_shcg.ui_manager = ui_manager
+    global_vars_shcg.draw_card_image_func = draw_card
+    global_vars_shcg.image_405_card_slot = image_405_card_slot
+    global_vars_shcg.player_2_hp_slot = player_2_hp_slot
+    global_vars_shcg.player_1_hp_slot = player_1_hp_slot
+    global_vars_shcg.leader_slots = global_vars_leader_slots
+    global_vars_shcg.deep_dark_blue = deep_dark_blue
+    global_vars_shcg.global_vars_tail_indicators = global_vars_tail_indicators
+    global_vars_shcg.global_vars_tail_indicators_active = global_vars_tail_indicators_active
+    global_vars_shcg.text_box = text_box
+    global_vars_shcg.global_vars_deck_slots = global_vars_deck_slots
+    global_vars_shcg.global_vars_hand_slots = global_vars_hand_slots
+    global_vars_shcg.global_vars_field_slots = global_vars_field_slots
+
+    global_vars_shcg.decks = {1: example_deck_1, 2: example_deck_2}
+
+    # draw UI
+    global_vars_shcg.draw_player_hp_ui()
+    global_vars_shcg.draw_current_player_indicator()
+    global_vars_shcg.draw_tail_ui(1)
+    global_vars_shcg.draw_tail_ui(2)
+    # draw hand
+    global_vars_shcg.draw_hand_ui(1)
+    global_vars_shcg.draw_hand_ui(2)
+    # draw deck
+    global_vars_shcg.draw_deck_ui(1)
+    global_vars_shcg.draw_deck_ui(2)
+    # draw field
+    global_vars_shcg.draw_field_ui(1)
+    global_vars_shcg.draw_field_ui(2)
+
+    text_box.append_html_text(f"プレイヤー{global_vars_shcg.current_player}のターンなのじゃ。\n")
+    text_box.append_html_text(f"ターン{global_vars_shcg.turn}\n")
+    global_vars_bf_ai_manager.ai_clear_pending_actions()
+    # Save state at start of turn for Reset Turn
+    global _turn_start_state_string
+    _turn_start_state_string = global_vars_shcg.serialize_to_string()
+
+
 start_new_game()
 
 # =====================================
-# End of Windows & Support Functions
+# End of Start New Game
 # =====================================
 
 
@@ -1582,7 +1093,7 @@ if __name__ == "__main__":
     running = True 
 
     # other variables
-    the_selected_card: cards.Card | None = None # record which card in hand is being dragged
+    the_selected_card: shcg_core_cards.Card | None = None # record which card in hand is being dragged
 
 
     while running:
@@ -1649,7 +1160,7 @@ if __name__ == "__main__":
                             if the_selected_card:
                                 condition1 = the_selected_card.cost <= global_vars_shcg.foxtail[cp]
                                 condition2 = True
-                                if len(global_vars_shcg.fields[cp]) > 4 and not isinstance(the_selected_card, cards.Spell):
+                                if len(global_vars_shcg.fields[cp]) > 4 and not isinstance(the_selected_card, shcg_core_cards.Spell):
                                     condition2 = False
                                 if condition1 and condition2:
                                     needs_card_sel = the_selected_card.request_card_selection_on_play  # list[str]
@@ -1693,14 +1204,14 @@ if __name__ == "__main__":
 
                     elif ui_drag_and_drop_usage == "attack_with_follower_player":
                         opponent = global_vars_shcg.opponent
-                        protect_exists = any([c.ability_protect for c in global_vars_shcg.fields[opponent] if isinstance(c, cards.Follower)])
+                        protect_exists = any([c.ability_protect for c in global_vars_shcg.fields[opponent] if isinstance(c, shcg_core_cards.Follower)])
                         for index, slot in enumerate(global_vars_field_slots[opponent]):
                             if slot.rect.collidepoint(event.pos):
                                 if the_selected_card:
                                     target_card = None
                                     if index < len(global_vars_shcg.fields[opponent]):
                                         target_card = global_vars_shcg.fields[opponent][index]
-                                    if target_card and isinstance(target_card, cards.Follower):
+                                    if target_card and isinstance(target_card, shcg_core_cards.Follower):
                                         # if target_card .ability_protect is false but there exists other followers
                                         # on opponent field with ability_protect true, cannot attack this target
                                         if protect_exists and not target_card.ability_protect:
@@ -1722,7 +1233,7 @@ if __name__ == "__main__":
                                 if slot.rect.collidepoint(event.pos):
                                     if index < len(global_vars_shcg.fields[cp]):
                                         target_card = global_vars_shcg.fields[cp][index]
-                                        if isinstance(target_card, cards.Follower) and target_card.can_enhance:
+                                        if isinstance(target_card, shcg_core_cards.Follower) and target_card.can_enhance:
                                             needs_card_sel = target_card.request_card_selection_on_enhance  # list[str]
                                             needs_multi_card_sel = target_card.request_multi_card_selection_on_enhance
                                             needs_effect_sel = target_card.request_effect_choose_option_e
@@ -1829,7 +1340,7 @@ if __name__ == "__main__":
                 # Zone viewer buttons (< and > pagination)
                 shcg_ui_zone_viewer.handle_button_pressed(event)
                 # AI toggle buttons
-                current_ai_manager = global_vars_minimax_ai_manager
+                current_ai_manager = global_vars_bf_ai_manager
                 if ai_player1_toggle and event.ui_element == ai_player1_toggle:
                     current_ai_manager.ai_enabled[1] = not current_ai_manager.ai_enabled[1]
                     current_ai_manager.enable_ai(1, current_ai_manager.ai_enabled[1])
@@ -1851,19 +1362,19 @@ if __name__ == "__main__":
                     change_theme()
                 if event.ui_element == cuets_player_turn_dropdown:
                     global_vars_cuets_player_turn_set_option = int(cuets_player_turn_dropdown.selected_option[0])
-                    global_vars_minimax_ai_manager.set_new_cuets(global_vars_cuets_player_turn_set_option,
+                    global_vars_bf_ai_manager.set_new_cuets(global_vars_cuets_player_turn_set_option,
                                                 global_vars_cuets_opp_turn_set_option)
                 if event.ui_element == cuets_opp_turn_dropdown:
                     global_vars_cuets_opp_turn_set_option = int(cuets_opp_turn_dropdown.selected_option[0])
-                    global_vars_minimax_ai_manager.set_new_cuets(global_vars_cuets_player_turn_set_option,
+                    global_vars_bf_ai_manager.set_new_cuets(global_vars_cuets_player_turn_set_option,
                                                 global_vars_cuets_opp_turn_set_option)
                 if event.ui_element == unique_states_max_player_turn_dropdown:
                     global_vars_unique_states_max_player_turn = int(unique_states_max_player_turn_dropdown.selected_option[0])
-                    global_vars_minimax_ai_manager.set_new_unique_states_max(global_vars_unique_states_max_player_turn,
+                    global_vars_bf_ai_manager.set_new_unique_states_max(global_vars_unique_states_max_player_turn,
                                                 global_vars_unique_states_max_opp_turn)
                 if event.ui_element == unique_states_max_opp_turn_dropdown:
                     global_vars_unique_states_max_opp_turn = int(unique_states_max_opp_turn_dropdown.selected_option[0])
-                    global_vars_minimax_ai_manager.set_new_unique_states_max(global_vars_unique_states_max_player_turn,
+                    global_vars_bf_ai_manager.set_new_unique_states_max(global_vars_unique_states_max_player_turn,
                                                 global_vars_unique_states_max_opp_turn)
 
                 # Deck selection in settings
@@ -1901,7 +1412,7 @@ if __name__ == "__main__":
             ui_manager_overlay.process_events(event)
 
         # AI Turn Logic - use appropriate AI manager based on toggle
-        active_ai_manager = global_vars_minimax_ai_manager
+        active_ai_manager = global_vars_bf_ai_manager
         if not global_vars_shcg.concluded and active_ai_manager.is_ai_turn(global_vars_shcg):
             current_time = pygame.time.get_ticks()
             if current_time - active_ai_manager.last_ai_action_time >= active_ai_manager.ai_action_delay:

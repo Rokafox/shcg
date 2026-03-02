@@ -49,6 +49,7 @@ class Card:
         # As a workaround, compare len(card_selection_list.get_multi_selection) before allowing to proceed.
         self.request_effect_choose_option: list[str] = [] # e.g., ["Option 1", "Option 2"] on playing this card
         self.extra_effect_list: list[str] = []
+        self.extra_tooltip_str: str = ""
 
 
     def tooltip_str(self):
@@ -56,6 +57,9 @@ class Card:
         if self.effect_description:
             c = "#6c6cff"
             s += f"<font color={c}>{self.effect_description}</font>\n"
+        if self.extra_tooltip_str:
+            c = "#9900ff"
+            s += f"<font color={c}>{self.extra_tooltip_str}</font>\n"
         if self.description:
             s += f"{self.description}\n"
         return s
@@ -313,6 +317,9 @@ class Follower(Card):
         s += f"<font color={c}>攻撃:{self.attack} HP:{self.hp}/{self.max_hp}</font>\n"
         # how many attacks done
         s += f"<font color={c}>攻撃回数: {self.how_many_attacks_done_of_turn}/{self.how_many_attacks_max_of_turn}</font>\n"
+        c = "#9900ff"
+        if self.extra_tooltip_str:
+            s += f"<font color={c}>{self.extra_tooltip_str}</font>\n"
         if self.ability_rush:
             c = "#9a9c00"
             s += f"<font color={c}>【突進】</font>\n" # yellow
@@ -597,6 +604,9 @@ class Amulet(Card):
         c = "#070c55"
         if self.counter_name:
             s += f"<font color={c}>{self.counter_name}: {self.counter}</font>\n"
+        if self.extra_tooltip_str:
+            c = "#9900ff"
+            s += f"<font color={c}>{self.extra_tooltip_str}</font>\n"
         if self.effect_description:
             c = "#6c6cff"
             s += f"<font color={c}>{self.effect_description}</font>\n"
@@ -1514,14 +1524,14 @@ class 次元の魔女ドロシー(Follower):
     """
     def __init__(self):
         super().__init__(name="次元の魔女・ドロシー", cost=5, attack=5, hp=5, can_enhance=False)
-        self.effect_description = "場に出す時、自分の墓場のスペルカードが5の倍数であるなら、狐尾を5回復し、" \
+        self.effect_description = "場に出す時、自分の墓場のスペルカードが0以上かつ5の倍数であるなら、狐尾を5回復し、" \
         "自分の手札のすべてのスペルカードのコストが-5する。そうではないなら、スペルカードのコスト-1する。"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                         selected_card_for_effect: list[Card] | None, effect_choice: str | None, selected_cards_for_multi_effect: list[Card] | None = None):
         player = game_state.current_player
         num_spells_in_graveyard = sum(1 for c in game_state.graveyard[player] if isinstance(c, Spell))
-        if num_spells_in_graveyard % 5 == 0:
+        if num_spells_in_graveyard % 5 == 0 and num_spells_in_graveyard > 0:
             # Recover 5 fox tail
             game_state.add_foxtail(player, 5, draw_ui, set_text)
             # Reduce cost of all spell cards in hand by 5
@@ -1534,10 +1544,12 @@ class 次元の魔女ドロシー(Follower):
                     c.cost_change_effect(-1, game_state, draw_ui, set_text, the_actual_textbox)
 
     def ai_meet_play_condition(self, game_state, player):
-        # only play if num_spells_in_graveyard % 5 == 0, and you have at least 2 spell cards
-        condition_1 = sum(1 for c in game_state.graveyard[player] if isinstance(c, Spell)) % 5 == 0
+        # only play if num_spells_in_graveyard > 0 and % 5 == 0, and you have at least 2 spell cards
+        num_spells_in_graveyard = sum(1 for c in game_state.graveyard[player] if isinstance(c, Spell))
+        condition_0 = num_spells_in_graveyard > 0
+        condition_1 = num_spells_in_graveyard % 5 == 0
         condition_2 = sum(1 for c in game_state.hands[player] if isinstance(c, Spell)) >= 2
-        return condition_1 and condition_2
+        return condition_0 and condition_1 and condition_2
 
 
 class パフュームドワーフ(Follower):
@@ -2281,49 +2293,6 @@ class 大地の魔片(Amulet):
 # Debugs
 # ===============================
 
-class ExampleCard(Follower):
-    """
-    Used to test new features.
-    Currently testing: request_card_selection_on_play as list and request_card_selection_on_enhance as list.
-    Demonstrates multi-step card selection where each step targets a different zone.
-    """
-    def __init__(self):
-        super().__init__(name="Example Card", cost=1, attack=1, hp=1, can_enhance=True)
-        self.effect_description = "場に出す時、自分の場のフォロワー1体を選ぶ、それに1ダメージ。" \
-                                  "次に、相手の場のフォロワー1体を選ぶ、それに5ダメージ。" \
-                                  "進化する時、相手の場のフォロワー1体を選ぶ、それに1ダメージ。" \
-                                  "次に、相手の場のフォロワー1体を選ぶ、それに5ダメージ。"
-        self.request_card_selection_on_play = ["field", "field_opponent"]
-        self.request_card_selection_on_enhance = ["field_opponent", "field_opponent"]
-
-    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                        selected_card_for_effect: list[Card] | None, effect_choice: str | None,
-                        selected_cards_for_multi_effect: list[Card] | None = None):
-        if not selected_card_for_effect:
-            return
-        # Step 0: Deal 1 damage to selected follower on own field
-        target0 = selected_card_for_effect[0] if len(selected_card_for_effect) > 0 else None
-        if target0 is not None and isinstance(target0, Follower) and target0 in game_state.fields[game_state.current_player]:
-            target0.take_damage(1, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
-        # Step 1: Deal 5 damage to selected follower on opponent field
-        target1 = selected_card_for_effect[1] if len(selected_card_for_effect) > 1 else None
-        if target1 is not None and isinstance(target1, Follower) and target1 in game_state.fields[game_state.opponent]:
-            target1.take_damage(5, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
-
-    def on_enhance_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                          selected_card_for_effect: list[Card] | None, effect_choice: str | None = None,
-                          selected_cards_for_multi_effect: list[Card] | None = None):
-        self.on_enhance_effect_default()
-        if not selected_card_for_effect:
-            return
-        # Step 0: Deal 1 damage to selected follower on opponent field
-        target0 = selected_card_for_effect[0] if len(selected_card_for_effect) > 0 else None
-        if target0 is not None and isinstance(target0, Follower) and target0 in game_state.fields[game_state.opponent]:
-            target0.take_damage(1, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
-        # Step 1: Deal 5 damage to selected follower on opponent field (can be the same card)
-        target1 = selected_card_for_effect[1] if len(selected_card_for_effect) > 1 else None
-        if target1 is not None and isinstance(target1, Follower) and target1 in game_state.fields[game_state.opponent]:
-            target1.take_damage(5, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
 
 
 
@@ -2331,7 +2300,7 @@ class ExampleCard(Follower):
 # All Cards List
 # ==============================
 
-debug_card_types: list[type[Card]] = [ExampleCard]
+debug_card_types: list[type[Card]] = []
 _debug_set = set(debug_card_types)
 all_card_types = [
     c for base in (Follower, Spell, Amulet)
@@ -2352,3 +2321,91 @@ all_card_types.sort(key=_card_sort_key)
 card_class_by_name: dict[str, type[Card]] = {}
 for _cls in all_card_types + debug_card_types:
     card_class_by_name[_cls.__name__] = _cls
+
+
+# ==============================
+# End of Card list
+# ==============================
+# Other utility functions
+# ==============================
+
+def serialize_card(card: Card) -> dict:
+    """Serialize a card to a JSON-compatible dict."""
+    d = {
+        'cls': card.__class__.__name__,
+        'uid': str(card.unique_id),
+        'vid': str(card.void_id),
+        'gen': card.is_generated,
+        'cost': card.cost,
+        'ocost': card.original_cost,
+        'exl': card.extra_effect_list,
+        'ets': card.extra_tooltip_str
+    }
+    if isinstance(card, Follower):
+        d['t'] = 'follower'
+        d['atk'] = card.attack
+        d['hp'] = card.hp
+        d['mhp'] = card.max_hp
+        d['oatk'] = card.original_attack
+        d['omhp'] = card.original_max_hp
+        d['ce'] = card.can_enhance
+        d['ie'] = card.is_enhanced
+        d['st'] = card.summoned_this_turn
+        d['et'] = card.enhanced_this_turn
+        d['aa'] = card.attack_ability
+        d['hamt'] = card.how_many_attacks_max_of_turn
+        d['hadt'] = card.how_many_attacks_done_of_turn
+        d['cat'] = card.can_attack_this_turn
+        d['ar'] = card.ability_rush
+        d['asr'] = card.ability_super_rush
+        d['ap'] = card.ability_protect
+        d['ad'] = card.ability_drain
+        d['al'] = card.ability_lethal
+    elif isinstance(card, Amulet):
+        d['t'] = 'amulet'
+        d['cnt'] = card.counter
+        d['cmax'] = card.counter_max
+    elif isinstance(card, Spell):
+        d['t'] = 'spell'
+    return d
+
+
+def deserialize_card(d: dict) -> Card:
+    """Deserialize a card from a dict."""
+    cls_name = d['cls']
+    if cls_name not in card_class_by_name:
+        raise ValueError(f"Unknown card class: {cls_name}")
+    card_cls = card_class_by_name[cls_name]
+    card = card_cls()
+    card.unique_id = uuid.UUID(d['uid'])
+    card.void_id = uuid.UUID(d['vid'])
+    card.is_generated = d['gen']
+    card.cost = d['cost']
+    card.original_cost = d['ocost']
+    card.extra_effect_list = d['exl']
+    card.extra_tooltip_str = d['ets']
+
+    if isinstance(card, Follower):
+        card.attack = d['atk']
+        card.hp = d['hp']
+        card.max_hp = d['mhp']
+        card.original_attack = d['oatk']
+        card.original_max_hp = d['omhp']
+        card.can_enhance = d['ce']
+        card.is_enhanced = d['ie']
+        card.summoned_this_turn = d['st']
+        card.enhanced_this_turn = d['et']
+        card.attack_ability = d['aa']
+        card.how_many_attacks_max_of_turn = d['hamt']
+        card.how_many_attacks_done_of_turn = d['hadt']
+        card.can_attack_this_turn = d['cat']
+        card.ability_rush = d['ar']
+        card.ability_super_rush = d['asr']
+        card.ability_protect = d['ap']
+        card.ability_drain = d['ad']
+        card.ability_lethal = d['al']
+    elif isinstance(card, Amulet):
+        card.counter = d['cnt']
+        card.counter_max = d['cmax']
+
+    return card

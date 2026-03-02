@@ -5,6 +5,7 @@ Automatically loads all saved decks, includes random deck(s),
 simulates round-robin matchups, and generates a detailed report.
 """
 
+import copy
 import json
 import random
 import sys
@@ -14,18 +15,11 @@ from itertools import permutations
 from pathlib import Path
 from typing import Callable
 
-import cards
-from ai_player_new import (
-    Evaluator,
-    GameSimulator,
-    GameStateSnapshot,
-    MinimaxAI,
-    _find_card_by_id,
-    _find_card_by_void_id,
-    _find_card_in_zones,
-    _find_card_in_zones_by_void_id,
-)
-from shcg_error import AIError, CardNotFoundError
+import shcg_core_cards
+from shcg_ai_evaluator import Evaluator
+from shcg_ai import BruteForceAI, apply_action as ai_apply_action
+from shcg_core_gamestate import SHCGGameState
+from shcg_core_error import AIError
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -39,7 +33,7 @@ MAX_COPIES_PER_CARD = 3
 CARDS_PER_RANDOM_TYPE = 3
 RANDOM_TYPE_COUNT = 15
 
-EvalFunc = Callable[[GameStateSnapshot, int, bool], float]
+EvalFunc = Callable[[SHCGGameState, int, bool], float]
 
 # ---------------------------------------------------------------------------
 # Data classes for cleaner stat tracking
@@ -150,7 +144,7 @@ _VALID_CARD_NAMES: set[str] | None = None
 def _get_valid_card_names() -> set[str]:
     global _VALID_CARD_NAMES
     if _VALID_CARD_NAMES is None:
-        _VALID_CARD_NAMES = {card_type().name for card_type in cards.all_card_types}
+        _VALID_CARD_NAMES = {card_type().name for card_type in shcg_core_cards.all_card_types}
     return _VALID_CARD_NAMES
 
 
@@ -219,13 +213,13 @@ def load_saved_decks() -> dict[str, dict[str, int]]:
     return valid_decks
 
 
-def build_deck_from_recipe(recipe: dict[str, int]) -> list[cards.Card]:
+def build_deck_from_recipe(recipe: dict[str, int]) -> list[shcg_core_cards.Card]:
     """Build a shuffled list of Card instances from a deck recipe."""
     ok, reason = validate_deck_recipe(recipe)
     if not ok:
         raise ValueError(f"Invalid deck recipe: {reason}")
 
-    name_to_type = {ct().name: ct for ct in cards.all_card_types}
+    name_to_type = {ct().name: ct for ct in shcg_core_cards.all_card_types}
     deck = [
         name_to_type[name]()
         for name, count in recipe.items()
@@ -235,77 +229,22 @@ def build_deck_from_recipe(recipe: dict[str, int]) -> list[cards.Card]:
     return deck
 
 
-def create_random_deck() -> list[cards.Card]:
+def create_random_deck() -> list[shcg_core_cards.Card]:
     """Create a random deck: 15 random card types × 3 copies each."""
-    selected = random.sample(cards.all_card_types, RANDOM_TYPE_COUNT)
+    selected = random.sample(shcg_core_cards.all_card_types, RANDOM_TYPE_COUNT)
     deck = [ct() for ct in selected for _ in range(CARDS_PER_RANDOM_TYPE)]
     random.shuffle(deck)
     return deck
 
 
-def create_deck(recipe: dict[str, int] | None) -> list[cards.Card]:
+def create_deck(recipe: dict[str, int] | None) -> list[shcg_core_cards.Card]:
     """Create a deck from a recipe, or a random deck if recipe is None."""
     return build_deck_from_recipe(recipe) if recipe is not None else create_random_deck()
 
 
-def get_card_names_from_deck(deck: list[cards.Card]) -> set[str]:
+def get_card_names_from_deck(deck: list[shcg_core_cards.Card]) -> set[str]:
     """Get unique card type names from a deck."""
     return {card.name for card in deck}
-
-
-# ---------------------------------------------------------------------------
-# Target resolution helpers
-# ---------------------------------------------------------------------------
-
-
-def _resolve_card_ref(
-    zone: list[cards.Card],
-    card: cards.Card,
-    *,
-    extra_filter: Callable[[cards.Card], bool] | None = None,
-) -> cards.Card | None:
-    """Find a card in a zone by void_id (generated) or unique_id, with optional filter."""
-    for c in zone:
-        match = (c.void_id == card.void_id) if card.is_generated else (c.unique_id == card.unique_id)
-        if match and (extra_filter is None or extra_filter(c)):
-            return c
-    return None
-
-
-def _resolve_target(state: GameStateSnapshot, target: cards.Card, player: int) -> cards.Card:
-    """Resolve a single target card across all zones."""
-    if target.is_generated:
-        actual = _find_card_in_zones_by_void_id(state, target.void_id, player)
-    else:
-        actual = _find_card_in_zones(state, target.unique_id, player)
-    if actual is None:
-        raise CardNotFoundError(f"Target not found: {target}")
-    return actual
-
-
-def _resolve_targets_list(
-    state: GameStateSnapshot,
-    templates: list[cards.Card | None] | None,
-    player: int,
-) -> list[cards.Card | None] | None:
-    """Resolve a list of target templates (some may be None)."""
-    if templates is None:
-        return None
-    return [
-        None if t is None else _resolve_target(state, t, player)
-        for t in templates
-    ]
-
-
-def _resolve_multi_targets(
-    state: GameStateSnapshot,
-    templates: list[cards.Card] | None,
-    player: int,
-) -> list[cards.Card] | None:
-    """Resolve multi-target templates (none may be None)."""
-    if templates is None:
-        return None
-    return [_resolve_target(state, t, player) for t in templates]
 
 
 # ---------------------------------------------------------------------------
@@ -314,27 +253,26 @@ def _resolve_multi_targets(
 
 
 def create_initial_state(
-    deck1: list[cards.Card],
-    deck2: list[cards.Card],
-) -> GameStateSnapshot:
+    deck1: list[shcg_core_cards.Card],
+    deck2: list[shcg_core_cards.Card],
+) -> SHCGGameState:
     """Create a new game state with pre-built decks."""
-    state = GameStateSnapshot()
+    state = SHCGGameState(current_player=2)  # Player 2 goes first
     state.decks[1] = deck1
     state.decks[2] = deck2
-    state.current_player = 2  # Player 2 goes first
     return state
 
 
 def get_ai_actions(
-    ai: MinimaxAI,
-    state: GameStateSnapshot,
+    ai: BruteForceAI,
+    state: SHCGGameState,
     evaluate_method: EvalFunc,
 ) -> list[tuple]:
     """
-    Get the best actions from the AI for the current state.
+    Get the best actions from the AI for the current state using a pluggable evaluator.
 
-    Mirrors MinimaxAI.get_best_turn_actions() but works directly on
-    GameStateSnapshot.
+    Mirrors BruteForceAI.get_best_turn_actions() but accepts a custom evaluate_method
+    so the evaluator-comparison mode can inject different scoring functions.
     """
     ai.endturnstate_evaluated = 0
     ai.endturnstate_evaluated_additional = 0
@@ -351,12 +289,11 @@ def get_ai_actions(
     )
 
     for actions in all_sequences:
-        test_state = state.copy()
+        test_state = copy.deepcopy(state)
         for action in actions:
-            if not ai._apply_action(test_state, ai.player_number, action):
-                raise AIError("Invalid action sequence generated.")
+            ai_apply_action(test_state, ai.player_number, action, False, False, True)
 
-        GameSimulator.end_turn(test_state)
+        test_state.end_turn(False, False)
         score = evaluate_method(test_state, ai.player_number, only_care_about_winorlose=False)
 
         # Lookahead: simulate opponent's response
@@ -368,12 +305,11 @@ def get_ai_actions(
                 ai.unique_states_max_opp_turn,
             )
             for opp_actions in opp_sequences:
-                opp_state = test_state.copy()
+                opp_state = copy.deepcopy(test_state)
                 for opp_action in opp_actions:
-                    if not ai._apply_action(opp_state, test_state.current_player, opp_action):
-                        raise AIError("Invalid opponent action sequence generated.")
+                    ai_apply_action(opp_state, 3 - ai.player_number, opp_action, False, False, True)
 
-                GameSimulator.end_turn(opp_state)
+                opp_state.end_turn(False, False)
                 opp_score = evaluate_method(
                     opp_state, 3 - ai.player_number, only_care_about_winorlose=True
                 )
@@ -397,84 +333,9 @@ def get_ai_actions(
     return best_actions
 
 
-def apply_action(state: GameStateSnapshot, player: int, action: tuple) -> bool:
-    """
-    Apply an action to the state. Handles is_generated cards via void_id lookup.
-    """
-    action_type = action[0]
-
-    if action_type == "play":
-        return _apply_play(state, player, action)
-    elif action_type == "attack":
-        return _apply_attack(state, player, action)
-    elif action_type == "enhance":
-        return _apply_enhance(state, player, action)
-    elif action_type == "draw":
-        return GameSimulator.draw_card(state, player)
-
-    return False
-
-
-def _apply_play(state: GameStateSnapshot, player: int, action: tuple) -> bool:
-    card, targets_template, effect_choice = action[1], action[2], action[3]
-    multi_targets_template = action[4] if len(action) > 4 else None
-
-    actual_card = _resolve_card_ref(state.hands[player], card)
-    if actual_card is None:
-        raise CardNotFoundError(f"Card to play not found in hand: {card}")
-
-    actual_targets = _resolve_targets_list(state, targets_template, player)
-    actual_multi = _resolve_multi_targets(state, multi_targets_template, player)
-
-    return GameSimulator.play_card(
-        state, player, actual_card, actual_targets, effect_choice,
-        multi_targets=actual_multi,
-    )
-
-
-def _apply_attack(state: GameStateSnapshot, player: int, action: tuple) -> bool:
-    attacker, target = action[1], action[2]
-
-    actual_attacker = _resolve_card_ref(
-        state.fields[player], attacker,
-        extra_filter=lambda c: c.can_attack_this_turn,
-    )
-    if actual_attacker is None:
-        raise CardNotFoundError(f"Attacker not found on field: {attacker}")
-
-    if target == "leader":
-        actual_target = "leader"
-    else:
-        actual_target = _find_card_by_id(state.fields[3 - player], target.unique_id)
-        if actual_target is None:
-            raise CardNotFoundError(f"Attack target not found on field: {target}")
-
-    return GameSimulator.follower_attack(state, player, actual_attacker, actual_target)
-
-
-def _apply_enhance(state: GameStateSnapshot, player: int, action: tuple) -> bool:
-    follower, targets_template, effect_choice = action[1], action[2], action[3]
-    multi_targets_template = action[4] if len(action) > 4 else None
-
-    actual_follower = _resolve_card_ref(
-        state.fields[player], follower,
-        extra_filter=lambda c: c.can_enhance,
-    )
-    if actual_follower is None:
-        raise CardNotFoundError(f"Follower to enhance not found on field: {follower}")
-
-    actual_targets = _resolve_targets_list(state, targets_template, player)
-    actual_multi = _resolve_multi_targets(state, multi_targets_template, player)
-
-    return GameSimulator.enhance_follower(
-        state, player, actual_follower, actual_targets,
-        effect_choice=effect_choice, multi_targets=actual_multi,
-    )
-
-
 def _run_game_loop(
-    state: GameStateSnapshot,
-    ais: dict[int, MinimaxAI],
+    state: SHCGGameState,
+    ais: dict[int, BruteForceAI],
     get_eval: Callable[[int], EvalFunc],
     max_turns: int = 200,
     card_play_count: dict[str, int] | None = None,
@@ -491,21 +352,21 @@ def _run_game_loop(
             if card_play_count is not None and action[0] == "play":
                 card_name = action[1].name
                 card_play_count[card_name] = card_play_count.get(card_name, 0) + 1
-            apply_action(state, current, action)
+            ai_apply_action(state, current, action, False, False, True)
             if state.concluded:
                 break
 
         if not state.concluded:
-            GameSimulator.end_turn(state)
+            state.end_turn(False, False)
 
     return state.winner, state.turn
 
 
 def simulate_single_game(
-    ai1: MinimaxAI,
-    ai2: MinimaxAI,
-    deck1: list[cards.Card],
-    deck2: list[cards.Card],
+    ai1: BruteForceAI,
+    ai2: BruteForceAI,
+    deck1: list[shcg_core_cards.Card],
+    deck2: list[shcg_core_cards.Card],
     evaluate_method: EvalFunc,
     max_turns: int = 200,
     card_play_count: dict[str, int] | None = None,
@@ -519,10 +380,10 @@ def simulate_single_game(
 
 
 def simulate_game_with_methods(
-    ai1: MinimaxAI,
-    ai2: MinimaxAI,
-    deck1: list[cards.Card],
-    deck2: list[cards.Card],
+    ai1: BruteForceAI,
+    ai2: BruteForceAI,
+    deck1: list[shcg_core_cards.Card],
+    deck2: list[shcg_core_cards.Card],
     eval_by_player: dict[int, EvalFunc],
     max_turns: int = 200,
 ) -> tuple[int | None, int]:
@@ -753,25 +614,25 @@ def create_ai_pair(
     cuets_opp: int,
     usm_player: int,
     usm_opp: int,
-) -> tuple[MinimaxAI, MinimaxAI]:
-    """Create a pair of MinimaxAI players with the given parameters."""
+) -> tuple[BruteForceAI, BruteForceAI]:
+    """Create a pair of BruteForceAI players with the given parameters."""
     kwargs = dict(
         cuets_player_turn=cuets_player,
         cuets_opp_turn=cuets_opp,
         unique_states_max_player_turn=usm_player,
         unique_states_max_opp_turn=usm_opp,
     )
-    return MinimaxAI(player_number=1, **kwargs), MinimaxAI(player_number=2, **kwargs)
+    return BruteForceAI(player_number=1, **kwargs), BruteForceAI(player_number=2, **kwargs)
 
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------
 # Simulation runners
 # ---------------------------------------------------------------------------
 
 
 def run_evaluator_comparison(
-    ai1: MinimaxAI,
-    ai2: MinimaxAI,
+    ai1: BruteForceAI,
+    ai2: BruteForceAI,
     deck_names: list[str],
     deck_pool: dict[str, dict[str, int] | None],
     matchups: list[tuple[str, str]],
@@ -851,8 +712,8 @@ def run_evaluator_comparison(
 
 
 def run_standard_simulation(
-    ai1: MinimaxAI,
-    ai2: MinimaxAI,
+    ai1: BruteForceAI,
+    ai2: BruteForceAI,
     deck_names: list[str],
     deck_pool: dict[str, dict[str, int] | None],
     matchups: list[tuple[str, str]],

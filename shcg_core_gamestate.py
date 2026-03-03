@@ -16,7 +16,7 @@ DEFAULT_HP_S = 26
 
 class SHCGGameState:
     def __init__(self, current_player):
-        # update load_from_string if you change the attributes here
+        # update serialize_to_string and compute_state_hash and __deepcopy__ if you change the attributes here
         self.current_player = current_player  # 1 or 2
         self.turn = 1
         self.concluded = False
@@ -289,6 +289,54 @@ class SHCGGameState:
             self.draw_player_hp_ui()
 
 
+    def compute_state_hash(self) -> tuple:
+        """
+        Fast hashable representation of the game state for AI deduplication.
+
+        Returns a nested tuple of primitives that Python can hash natively —
+        no JSON serialisation, no hashlib, no string allocation.
+
+        Zone ordering rules:
+          - fields / hands / graveyard / banished / hidden_cards: sorted (card order
+            is irrelevant for state identity).
+          - decks: order preserved (top card determines the next draw).
+        """
+        def card_key(card) -> tuple:
+            return (
+                type(card).__name__,
+                getattr(card, 'hp', None), # non-followers have hp of None to distinguish them
+                getattr(card, 'max_hp', None),
+                getattr(card, 'attack', None),
+                getattr(card, 'is_enhanced', None),
+                getattr(card, 'can_attack_this_turn', None),
+                getattr(card, 'ability_rush', None),
+                getattr(card, 'ability_super_rush', None),
+                getattr(card, 'ability_protect', None),
+                getattr(card, 'ability_drain', None),
+                getattr(card, 'ability_lethal', None),
+                getattr(card, 'cost', None),
+                getattr(card, 'original_cost', None),
+                getattr(card, 'counter', None),
+                getattr(card, 'counter_max', None),
+            )
+
+        def zone_key(card_list, ordered: bool = False) -> tuple:
+            keys = [card_key(c) for c in card_list]
+            return tuple(sorted(keys) if not ordered else keys)
+
+        return (
+            zone_key(self.fields[1]),           zone_key(self.fields[2]),
+            zone_key(self.hands[1]),            zone_key(self.hands[2]),
+            zone_key(self.decks[1], ordered=True), zone_key(self.decks[2], ordered=True),
+            zone_key(self.graveyard[1]),        zone_key(self.graveyard[2]),
+            zone_key(self.banished[1]),         zone_key(self.banished[2]),
+            zone_key(self.hidden_cards[1]),     zone_key(self.hidden_cards[2]),
+            self.hp[1], self.hp[2],
+            self.max_hp[1], self.max_hp[2],
+            self.enhance_used_this_turn[1], self.enhance_used_this_turn[2],
+            self.amount_card_generated_from_void[1], self.amount_card_generated_from_void[2],
+        )
+
     def serialize_to_string(self) -> str:
         """Serialize the entire game state to a JSON string. Can be restored with load_from_string."""
         def serialize_zone(card_list):
@@ -368,6 +416,8 @@ class SHCGGameState:
         self.draw_current_player_indicator()
 
     def end_turn(self, ui_draw, ui_set_text):
+        if self.concluded:
+            raise shcg_core_error.FlowError("Cannot end turn because the game is already concluded.")
         for c in self.fields[self.current_player].copy():
             c.end_of_turn_on_field_effect(self, ui_draw, ui_set_text, self.text_box)
             if "end_of_turn_destroy" in c.extra_effect_list and c in self.fields[self.current_player]:

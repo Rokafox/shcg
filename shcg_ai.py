@@ -280,20 +280,29 @@ class BruteForceAI:
                                                              self.continuous_unique_endturnstates_req_player_turn, 
                                                              self.unique_states_max_player_turn)
 
+        # rare case: all_sequences is empty, meaning no action is possible, just end turn.
+        if not all_sequences:
+            self.best_actions = [('end_turn',)]
+            return self.best_actions
+
         for actions in all_sequences:
             # Apply actions to a copy of the state
             test_state = copy.deepcopy(game_state)
             for action in actions:
                 apply_action(test_state, self.player_number, action, False, False, True)
 
-            test_state.end_turn(False, False)
-            score = Evaluator.evaluate_new(test_state, self.player_number, only_care_about_winorlose=False) # Basic evaluation
+            if not test_state.concluded:
+                test_state.end_turn(False, False)
+                score = Evaluator.evaluate_new(test_state, self.player_number, only_care_about_winorlose=False) # Basic evaluation
+            else:
+                score = (float('inf') if test_state.winner == self.player_number else float('-inf') if test_state.winner == 3 - self.player_number else 0.0)
 
             # Advanced evaluation: simulate opponent's turn
             # If opponent scores inf for any seq, its a loss for us and set score to -inf.
             # This part can be skipped if the player is already winning (score == inf)
             # or losing (score == -inf) as checked in True basic_lethal_check or draw (score == 0.0)
-            if not score == float('inf') and not score == float('-inf') and not score == 0.0:
+            # hp <= 12 threshold as lethal line
+            if score not in (float("inf"), float("-inf"), 0.0) and test_state.hp[self.player_number] <= 12:
                 opponent_sequences = self._generate_random_turn_sequences(test_state, 3 - self.player_number, 
                                                                           self.continuous_unique_endturnstates_req_opp_turn, 
                                                                           self.unique_states_max_opp_turn)
@@ -302,10 +311,13 @@ class BruteForceAI:
                     for opp_action in single_opp_seq:
                         apply_action(opp_test_state, test_state.current_player, opp_action, False, False, True)
 
-                    # End opponent's turn
-                    opp_test_state.end_turn(False, False)
-                    # No basic lethal check. Only matters if opponent can score infinity here
-                    opp_score = Evaluator.evaluate_new(opp_test_state, 3 - self.player_number, only_care_about_winorlose=True)
+                    if not opp_test_state.concluded:
+                        # End opponent's turn
+                        opp_test_state.end_turn(False, False)
+                        # No basic lethal check. Only matters if opponent can score infinity here
+                        opp_score = Evaluator.evaluate_new(opp_test_state, 3 - self.player_number, only_care_about_winorlose=True)
+                    else:
+                        opp_score = (float('inf') if opp_test_state.winner == 3 - self.player_number else 0.0) # dont care about other scores
                     self.endturnstate_evaluated_additional += 1
 
                     if opp_score == float('inf'):
@@ -346,13 +358,14 @@ class BruteForceAI:
         min_continuous_visited_state_req: Stop If the end result same state is visited this many times continuously.
         This value should be high enough to allow many more thorough explorations.
         Only terminal sequences are accepted (foxtail=0 or no more actions possible)
-        Written and Verified by Rokafox on 2026/02/04
+        Verified by Rokafox on 2026/03/02
         """
         bundle_of_all_action_sequences = []
         visited_states = set()
         continuous_visited_state_count = 0
         current_state = copy.deepcopy(state) # the original environment
         single_action_seq = []
+        all_roads_lose = 0
 
         while continuous_visited_state_count < min_continuous_visited_state_req and len(visited_states) < max_unique_states:
             # do: generate single action sequences until requirement is met
@@ -360,13 +373,29 @@ class BruteForceAI:
             if len(single_action_seq) > SINGLE_ACTION_SEQ_MAX_LENGTH:
                 print("Action sequence too long. Resetting.")
                 next_possible_actions = [] # force stop and reset
+            elif current_state.concluded:
+                # if the game is already concluded, no more action is possible, stop and reset
+                if current_state.winner == player:
+                    # already winning, add this single action sequence to the beginning of the bundle, since it is the best possible outcome.
+                    if single_action_seq:
+                        bundle_of_all_action_sequences.insert(0, single_action_seq)
+                    break
+                else:
+                    if all_roads_lose >= max_unique_states:
+                        return []
+                    # obvious mistake during your turn, troll.
+                    current_state = copy.deepcopy(state)
+                    single_action_seq = []
+                    # WARNING: in rare cases, every move leads to a loss, change this if this is possible.
+                    all_roads_lose += 1
+                    continue
             else:
                 next_possible_actions: list[tuple] = self._get_all_actions(current_state, player)
 
             if not next_possible_actions: # if terminal state
                 # hash, compare, if in visited_states, increase continuous_visited_state_count
                 # else reset continuous_visited_state_count
-                state_hash = current_state.serialize_to_string()
+                state_hash = current_state.compute_state_hash()
                 if state_hash in visited_states:
                     continuous_visited_state_count += 1
                 else:
@@ -427,7 +456,7 @@ class BruteForceAI:
 
 
 def apply_action(state: SHCGGameState, player: int, action: Tuple,
-                 ui_draw: bool, ui_set_text: bool, is_ai_player: bool) -> bool:
+                 ui_draw: bool, ui_set_text: bool, is_ai_player: bool) -> list[Tuple]:
     """
     Apply an action to a game state.
     """

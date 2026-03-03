@@ -288,16 +288,25 @@ def get_ai_actions(
         ai.unique_states_max_player_turn,
     )
 
+    if not all_sequences:
+        best_actions = [('end_turn',)]
+        return best_actions
+
     for actions in all_sequences:
         test_state = copy.deepcopy(state)
         for action in actions:
             ai_apply_action(test_state, ai.player_number, action, False, False, True)
 
-        test_state.end_turn(False, False)
-        score = evaluate_method(test_state, ai.player_number, only_care_about_winorlose=False)
+        if not test_state.concluded:
+            test_state.end_turn(False, False)
+            score = evaluate_method(test_state, ai.player_number, only_care_about_winorlose=False)
+        else:
+            score = (float("inf") if test_state.winner == ai.player_number
+                     else float("-inf") if test_state.winner == 3 - ai.player_number
+                     else 0.0)
 
         # Lookahead: simulate opponent's response
-        if score not in (float("inf"), float("-inf"), 0.0):
+        if score not in (float("inf"), float("-inf"), 0.0) and test_state.hp[ai.player_number] <= 12:
             opp_sequences = ai._generate_random_turn_sequences(
                 test_state,
                 3 - ai.player_number,
@@ -309,18 +318,23 @@ def get_ai_actions(
                 for opp_action in opp_actions:
                     ai_apply_action(opp_state, 3 - ai.player_number, opp_action, False, False, True)
 
-                opp_state.end_turn(False, False)
-                opp_score = evaluate_method(
-                    opp_state, 3 - ai.player_number, only_care_about_winorlose=True
-                )
+                if not opp_state.concluded:
+                    opp_state.end_turn(False, False)
+                    opp_score = evaluate_method(
+                        opp_state, 3 - ai.player_number, only_care_about_winorlose=True
+                    )
+                else:
+                    opp_score = (float("inf") if opp_state.winner == 3 - ai.player_number else 0.0)
                 ai.endturnstate_evaluated_additional += 1
 
                 if opp_score == float("inf"):
                     score = float("-inf")
-                    ai.loss_endturnstate_avoided += 1
                     break
 
         ai.endturnstate_evaluated += 1
+
+        if score == float("-inf"):
+            ai.loss_endturnstate_avoided += 1
 
         if score > best_score:
             best_score = score

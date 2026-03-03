@@ -6,10 +6,10 @@ if TYPE_CHECKING:
     from super_hard_card_game import SHCGGameState
 
 
-# NOTE: every time modifying a card class and its subclass, remember to also modify ai_player_new.py's
-# _copy_card(), _serialize_card(), and _deserialize_card() functions accordingly.
 
 class Card:
+    # NOTE: every time modifying a card class and its subclass, 
+    # remember to also modify compute_state_hash and serialize_to_string methods in SHCGGameState.
     def __init__(self, name, cost, card_type):
         self.name = name
         self.cost = cost
@@ -741,9 +741,10 @@ class 唯我の絶傑マゼルベイン(Follower):
                     c.take_damage(damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
 
     def ai_meet_play_condition(self, game_state, player):
-        # only play when the opponent has followers on field
+        # only play when the opponent has followers on field, unless full hand
         condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
-        return condition_1
+        condition_2 = len(game_state.hands[player]) >= 9
+        return condition_1 or condition_2
 
 
 class 機構翼の少女ローザ(Follower):
@@ -1585,8 +1586,8 @@ class 太陽の巫女パメラ(Follower):
     def __init__(self):
         super().__init__(name="太陽の巫女・パメラ", cost=4, attack=4, hp=4, can_enhance=False)
         self.effect_description = "場に出すとき、「大地の魔片」1つ手札に加える。これが場にいる限り、自分がスペルカードをプレイするたびに、" \
-        "相手のリーダーに2ダメージ。これが「大地の魔片」によりダメージを受けるとき、そのダメージを0にし、相手のリーダーに3ダメージ、" \
-        "自分のリーダーに3回復。"
+        "相手のリーダーに2ダメージ、自分のリーダーに1回復。これが「大地の魔片」によりダメージを受けるとき、そのダメージを0にし、相手のリーダーに2ダメージ、" \
+        "自分のリーダーに1回復。"
 
     def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox, selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
         player = game_state.current_player
@@ -1597,7 +1598,7 @@ class 太陽の巫女パメラ(Follower):
         if target_spell_is_own:
             opponent = game_state.opponent
             game_state.player_take_damage(opponent, 2, draw_ui, set_text)
-            game_state.player_heal(game_state.current_player, 3, draw_ui, set_text)
+            game_state.player_heal(game_state.current_player, 1, draw_ui, set_text)
 
     def effect_before_taking_damage(self, damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker, is_battle_damage = False):
         if attacker.name == "大地の魔片":
@@ -1606,10 +1607,9 @@ class 太陽の巫女パメラ(Follower):
                 if self in game_state.fields[p]:
                     player_owning_this = p
                     break
-            # Deal 3 damage to opponent leader and heal self for 3
             opponent = 3 - player_owning_this
-            game_state.player_take_damage(opponent, 3, draw_ui, set_text)
-            game_state.player_heal(player_owning_this, 3, draw_ui, set_text)
+            game_state.player_take_damage(opponent, 2, draw_ui, set_text)
+            game_state.player_heal(player_owning_this, 1, draw_ui, set_text)
             return 0  # Negate the damage
         return damage_amount
 
@@ -2267,7 +2267,7 @@ class 大地の魔片(Amulet):
     def __init__(self):
         super().__init__(name="大地の魔片", cost=1)
         self.effect_description = "スペルカードをプレイするたび、カウンターを1減らす。カウンターが0になったとき、これは破壊される。" \
-        "破壊されるとき、場のすべてのフォロワーに3ダメージ。相手のリーダーに2ダメージ。"
+        "破壊されるとき、場のすべてのフォロワーに2ダメージ。相手のリーダーに2ダメージ。"
         self.counter_name = "魔片カウンター"
         self.counter_max = 3
         self.counter = self.counter_max
@@ -2285,7 +2285,7 @@ class 大地の魔片(Amulet):
         if mode == "destroy":
             for c in itertools.chain(game_state.fields[player].copy(), game_state.fields[3 - player].copy()):
                 if isinstance(c, Follower):
-                    c.take_damage(3, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+                    c.take_damage(2, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
             game_state.player_take_damage(3 - player, 2, draw_ui, set_text)
 
 

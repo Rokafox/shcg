@@ -1,7 +1,5 @@
 import os
-import json
 import more_itertools as mit
-import itertools
 import datetime
 import pygame, pygame_gui
 from pygame_gui.windows import UIFileDialog

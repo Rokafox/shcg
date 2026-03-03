@@ -718,6 +718,8 @@ class ハンサ(Follower):
 
     def ai_meet_play_condition(self, game_state, player):
         # make no sense to play if that cost is less than 2, unless desperate.
+        if not game_state.decks[player]:
+            return True
         top_card_cost = game_state.decks[player][-1].cost
         condition_1 = top_card_cost >= 2
         return condition_1

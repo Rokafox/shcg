@@ -3,10 +3,7 @@ Chess-like AI Player for Super Hard Card Game.
 Uses minimax with alpha-beta pruning to calculate optimal moves.
 Since all information is open (hands, decks, fields), this is a perfect information game.
 """
-import datetime
-import json
 import copy
-import uuid
 import itertools
 import shcg_core_cards
 import shcg_core_error

@@ -212,3 +212,5 @@ image/leader
 saved_decks.json
 saved_decks*.json
 game_states/
+games/
+games_error/

@@ -4,7 +4,9 @@ Uses minimax with alpha-beta pruning to calculate optimal moves.
 Since all information is open (hands, decks, fields), this is a perfect information game.
 """
 import copy
+import datetime
 import itertools
+import os
 import shcg_core_cards
 import shcg_core_error
 import random
@@ -457,6 +459,25 @@ def apply_action(state: SHCGGameState, player: int, action: Tuple,
     """
     Apply an action to a game state.
     """
+    try:
+        return _apply_action_impl(state, player, action, ui_draw, ui_set_text, is_ai_player)
+    except Exception as e:
+        try:
+            error_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "games_error")
+            os.makedirs(error_dir, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            save_path = os.path.join(error_dir, f"error_{timestamp}.json")
+            state_string = state.serialize_to_string()
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(state_string)
+            print(f"[apply_action] Error saved to {save_path}: {e}")
+        except Exception as save_err:
+            print(f"[apply_action] Could not save error state: {save_err}")
+        raise
+
+
+def _apply_action_impl(state: SHCGGameState, player: int, action: Tuple,
+                       ui_draw: bool, ui_set_text: bool, is_ai_player: bool) -> list[Tuple]:
     action_type = action[0]
 
     if action_type == 'play':
@@ -467,11 +488,6 @@ def apply_action(state: SHCGGameState, player: int, action: Tuple,
         else:
             actual_card = find_card_by_id(state.hands[player], card.unique_id)
         if actual_card is None:
-            # state_string = state.serialize_to_string()
-            # save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            # with open(save_path, "w", encoding="utf-8") as f:
-            #     f.write(state_string)
-            # print(f"Play, {card}, {targets_template}, {effect_choice}, {multi_targets_template}")
             raise shcg_core_error.CardNotFoundError(f"Card to play not found in hand: {card} with void_id {card.void_id} and unique_id {card.unique_id}")
 
         # Resolve targets list (one per selection step)
@@ -534,11 +550,6 @@ def apply_action(state: SHCGGameState, player: int, action: Tuple,
             else:
                 actual_target = find_card_by_id(state.fields[3 - player], target.unique_id)
             if actual_target is None:
-                # state_string = state.serialize_to_string()
-                # save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                # with open(save_path, "w", encoding="utf-8") as f:
-                #     f.write(state_string)
-                # print(f"Attack, {attacker}, {target}")
                 raise shcg_core_error.CardNotFoundError(f"Attack target not found on field: {target}")
 
         state.follower_attack(player, actual_attacker, actual_target, ui_draw, ui_set_text)
@@ -560,11 +571,6 @@ def apply_action(state: SHCGGameState, player: int, action: Tuple,
                 None
             )
         if actual_follower is None:
-            # state_string = state.serialize_to_string()
-            # save_path = f"error_state_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            # with open(save_path, "w", encoding="utf-8") as f:
-            #     f.write(state_string)
-            # print(f"Enhance, {follower}, {targets_template}, {effect_choice}, {multi_targets_template}")
             raise shcg_core_error.CardNotFoundError(f"Follower to enhance not found on field: {follower}")
 
         # Resolve targets list (one per selection step)

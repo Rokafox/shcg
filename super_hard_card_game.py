@@ -10,6 +10,7 @@ import shcg_ui_deck_builder
 import shcg_ui_zone_viewer
 import shcg_ui_debug
 from shcg_core_gamestate import SHCGGameState
+from shcg_core_gamemanager import SHCGGameManager
 
 
 pygame.init()
@@ -110,19 +111,19 @@ label_leader_2 = pygame_gui.elements.UILabel(pygame.Rect((50, 900 - 60), (200, 5
                                     "Player 2",
                                     ui_manager)
 
-end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 300), (260, 50)),
+end_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 255), (260, 50)),
                                     text='End Turn',
                                     manager=ui_manager,)
 
-reset_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 355), (260, 50)),
+reset_turn_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 310), (260, 50)),
                                     text='Reset Turn',
                                     manager=ui_manager,)
 
-save_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 410), (260, 50)),
+save_gamestate_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 365), (260, 40)),
                                     text='Save Game State',
                                     manager=ui_manager,)
 
-load_game_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 465), (260, 50)),
+load_gamestate_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((1320, 410), (260, 40)),
                                     text='Load Game State',
                                     manager=ui_manager,)
 
@@ -494,6 +495,7 @@ def _execute_pending_selection():
                                     additional_targets=selected_targets,
                                     is_ai_player=False, effect_choice=selected_effect,
                                     additional_multi_targets=selected_multi_targets)
+            _record_game_action(f"Play {card}")
         elif action_type == 'enhance':
             global_vars_shcg.on_card_enhanced(player, card_to_enhance=card,
                                             additional_targets=selected_targets,
@@ -501,6 +503,7 @@ def _execute_pending_selection():
                                             ui_draw=True, ui_set_text=True,
                                             effect_choice=selected_effect,
                                             additional_multi_targets=selected_multi_targets)
+            _record_game_action(f"Enhance {card}")
 
         # Clean up
         _cancel_pending_selection()
@@ -970,6 +973,105 @@ shcg_ui_debug.init(ui_manager, lambda: global_vars_shcg, lambda: text_box)
 # =====================================
 # End of UI Component D
 # =====================================
+# Game Manager & Replay UI
+# =====================================
+
+game_manager = SHCGGameManager()
+load_game_record_file_dialog: UIFileDialog | None = None
+
+replay_status_label = pygame_gui.elements.UILabel(
+    pygame.Rect((1320, 450), (260, 30)),
+    "Not recording",
+    ui_manager)
+
+replay_exit_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1320, 485), (260, 35)),
+    text='Exit Replay',
+    manager=ui_manager)
+
+save_game_record_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1320, 525), (125, 38)),
+    text='Save Game',
+    manager=ui_manager)
+
+load_game_record_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1455, 525), (125, 38)),
+    text='Load Game',
+    manager=ui_manager)
+
+replay_prev_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1320, 568), (125, 38)),
+    text='< Prev',
+    manager=ui_manager)
+
+replay_next_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1455, 568), (125, 38)),
+    text='Next >',
+    manager=ui_manager)
+
+replay_to_start_of_turn_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1320, 611), (260, 38)),
+    text='To Start of Turn',
+    manager=ui_manager)
+
+replay_turn_entry = pygame_gui.elements.UITextEntryLine(
+    relative_rect=pygame.Rect((1320, 654), (130, 35)),
+    manager=ui_manager,
+    placeholder_text='Turn #')
+
+replay_goto_turn_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect((1455, 654), (125, 35)),
+    text='Go to Turn',
+    manager=ui_manager)
+
+
+def _attach_ui_refs(state: SHCGGameState):
+    """Attach all UI references to a game state so it can draw."""
+    state.image_others = image_others
+    state.image_leader = image_leader
+    state.ui_manager = ui_manager
+    state.draw_card_image_func = draw_card
+    state.image_405_card_slot = image_405_card_slot
+    state.player_2_hp_slot = player_2_hp_slot
+    state.player_1_hp_slot = player_1_hp_slot
+    state.leader_slots = global_vars_leader_slots
+    state.deep_dark_blue = deep_dark_blue
+    state.global_vars_tail_indicators = global_vars_tail_indicators
+    state.global_vars_tail_indicators_active = global_vars_tail_indicators_active
+    state.text_box = text_box
+    state.global_vars_deck_slots = global_vars_deck_slots
+    state.global_vars_hand_slots = global_vars_hand_slots
+    state.global_vars_field_slots = global_vars_field_slots
+
+
+def _record_game_action(description: str):
+    """Record current game state as an action in the game manager."""
+    if game_manager and not game_manager.is_replaying:
+        game_manager.record_action(
+            global_vars_shcg.turn,
+            description,
+            global_vars_shcg.serialize_to_string()
+        )
+
+
+def _load_replay_entry(entry: dict):
+    """Load a replay entry into the active game state and redraw."""
+    global global_vars_shcg
+    new_state = SHCGGameState.load_from_string(entry['state'])
+    _attach_ui_refs(new_state)
+    global_vars_shcg = new_state
+    global_vars_shcg.redraw_all_ui()
+    _update_replay_status()
+
+
+def _update_replay_status():
+    """Update the replay status label."""
+    replay_status_label.set_text(game_manager.get_status_text())
+
+
+# =====================================
+# End of Game Manager & Replay UI
+# =====================================
 # Component tooltips
 # =====================================
 
@@ -982,8 +1084,8 @@ def build_component_tooltips():
     reset_turn_button.set_tooltip("Reset your turn to undo all actions taken this turn.", delay=0.1, wrap_width=300)
     new_game_button.set_tooltip("Start a new game.", delay=0.1, wrap_width=300)
     deck_builder_button.set_tooltip("Open deck builder to create custom decks.", delay=0.1, wrap_width=300)
-    save_game_button.set_tooltip("Save the current game state to a file.", delay=0.1, wrap_width=300)
-    load_game_button.set_tooltip("Load a game state from a file.", delay=0.1, wrap_width=300)
+    save_gamestate_button.set_tooltip("Save the current game state to a file.", delay=0.1, wrap_width=300)
+    load_gamestate_button.set_tooltip("Load a game state from a file.", delay=0.1, wrap_width=300)
 
 
 build_component_tooltips()
@@ -1065,6 +1167,9 @@ def start_new_game():
     # Save state at start of turn for Reset Turn
     global _turn_start_state_string
     _turn_start_state_string = global_vars_shcg.serialize_to_string()
+    # Start recording the new game
+    game_manager.start_recording(global_vars_shcg.serialize_to_string())
+    _update_replay_status()
 
 
 start_new_game()
@@ -1111,8 +1216,8 @@ if __name__ == "__main__":
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
                 pass
 
-            # left click
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not global_vars_shcg.concluded:
+            # left click (disabled during replay)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and not global_vars_shcg.concluded and not game_manager.is_replaying:
                 cp = global_vars_shcg.current_player
                 if global_vars_shcg.top_of_the_deck_ui_marker[cp] and global_vars_shcg.top_of_the_deck_ui_marker[cp].rect.collidepoint(event.pos):
                     ui_drag_and_drop_target_orig_pos = (global_vars_shcg.top_of_the_deck_ui_marker[cp].rect.x, global_vars_shcg.top_of_the_deck_ui_marker[cp].rect.y)
@@ -1150,6 +1255,7 @@ if __name__ == "__main__":
                     if ui_drag_and_drop_usage == "draw_card_player":
                         if any([slot.rect.colliderect(ui_drag_and_drop_target.rect) for slot in global_vars_hand_slots[cp]]):
                             global_vars_shcg.draw_card_with_foxtail(cp, ui_draw=True, ui_set_text=True)
+                            _record_game_action("Draw Card")
                         ui_drag_and_drop_target.kill()
                         global_vars_shcg.draw_deck_ui(cp)
 
@@ -1193,10 +1299,12 @@ if __name__ == "__main__":
                                             global_vars_shcg.play_card(cp, the_selected_card, ui_draw=True, ui_set_text=True,
                                                                     additional_targets=None,
                                                                     is_ai_player=False, effect_choice=None)
+                                            _record_game_action(f"Play {the_selected_card}")
                                     else:
                                         global_vars_shcg.play_card(cp, the_selected_card, ui_draw=True, ui_set_text=True,
                                                                 additional_targets=None,
                                                                 is_ai_player=False, effect_choice=None)
+                                        _record_game_action(f"Play {the_selected_card}")
                                 the_selected_card = None
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
@@ -1216,11 +1324,13 @@ if __name__ == "__main__":
                                             text_box.append_html_text(f"【守護】フォロワーがいるから攻撃できないのじゃ！ \n")
                                         else:
                                             global_vars_shcg.follower_attack(cp, the_selected_card, target_card, ui_draw=True, ui_set_text=True)
+                                            _record_game_action(f"Attack {the_selected_card} -> {target_card}")
                         if global_vars_leader_slots[opponent][0].rect.collidepoint(event.pos) and the_selected_card.attack_ability >= 2:
                             if protect_exists:
                                 text_box.append_html_text(f"【守護】フォロワーがいるから攻撃できないのじゃ！ \n")
                             else:
                                 global_vars_shcg.follower_attack(cp, the_selected_card, "leader", ui_draw=True, ui_set_text=True)
+                                _record_game_action(f"Attack {the_selected_card} -> Leader")
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
                     elif ui_drag_and_drop_usage == "use_foxtail_player":
@@ -1267,12 +1377,14 @@ if __name__ == "__main__":
                                                                                       is_ai_player=False,
                                                                                       ui_draw=True,
                                                                                       ui_set_text=True)
+                                                    _record_game_action(f"Enhance {target_card}")
                                             else:
                                                 global_vars_shcg.on_card_enhanced(cp, card_to_enhance=target_card,
                                                                                   additional_targets=None,
                                                                                   is_ai_player=False,
                                                                                   ui_draw=True,
                                                                                   ui_set_text=True)
+                                                _record_game_action(f"Enhance {target_card}")
 
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
@@ -1301,15 +1413,16 @@ if __name__ == "__main__":
                 if event.ui_element == quit_game_button:
                     shcg_ui_deck_builder.save_decks_to_file()
                     running = False
-                if event.ui_element == end_turn_button:
+                if event.ui_element == end_turn_button and not game_manager.is_replaying:
                     global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
                     _turn_start_state_string = global_vars_shcg.serialize_to_string()
+                    _record_game_action("End Turn")
                 if event.ui_element == reset_turn_button:
                     if _turn_start_state_string and not global_vars_shcg.concluded:
                         global_vars_shcg.load_from_string(_turn_start_state_string)
                         global_vars_shcg.redraw_all_ui()
                         text_box.append_html_text(f"ターンをリセットしたのじゃ。\n")
-                if event.ui_element == save_game_button:
+                if event.ui_element == save_gamestate_button:
                     save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_states")
                     os.makedirs(save_dir, exist_ok=True)
                     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -1318,7 +1431,7 @@ if __name__ == "__main__":
                     with open(save_path, "w", encoding="utf-8") as f:
                         f.write(state_string)
                     text_box.append_html_text(f"保存:{os.path.basename(save_path)}\n")
-                if event.ui_element == load_game_button:
+                if event.ui_element == load_gamestate_button:
                     if load_game_file_dialog is None:
                         save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_states")
                         os.makedirs(save_dir, exist_ok=True)
@@ -1330,9 +1443,70 @@ if __name__ == "__main__":
                             allow_existing_files_only=True,
                             allowed_suffixes={".json"},
                         )
-                        load_game_button.disable()
+                        load_gamestate_button.disable()
                 if event.ui_element == deck_builder_button:
                     shcg_ui_deck_builder.build_deck_builder_window()
+
+                # --- Game Manager / Replay buttons ---
+                if event.ui_element == save_game_record_button:
+                    save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "games")
+                    os.makedirs(save_dir, exist_ok=True)
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    save_path = os.path.join(save_dir, f"game_{timestamp}.json")
+                    game_manager.save_game(save_path)
+                    text_box.append_html_text(f"ゲーム保存:{os.path.basename(save_path)}\n")
+                if event.ui_element == load_game_record_button:
+                    if load_game_record_file_dialog is None:
+                        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "games")
+                        os.makedirs(save_dir, exist_ok=True)
+                        load_game_record_file_dialog = UIFileDialog(
+                            pygame.Rect(400, 150, 700, 600),
+                            ui_manager,
+                            window_title='Load Game Record...',
+                            initial_file_path=save_dir + '/',
+                            allow_existing_files_only=True,
+                            allowed_suffixes={".json"},
+                        )
+                        load_game_record_button.disable()
+                if event.ui_element == replay_prev_button and game_manager.is_replaying:
+                    entry = game_manager.prev_move()
+                    if entry:
+                        _load_replay_entry(entry)
+                        text_box.set_text(text_box_introduction_text)
+                        text_box.append_html_text(f"Replay: {game_manager.get_status_text()}\n")
+                if event.ui_element == replay_next_button and game_manager.is_replaying:
+                    entry = game_manager.next_move()
+                    if entry:
+                        _load_replay_entry(entry)
+                        text_box.set_text(text_box_introduction_text)
+                        text_box.append_html_text(f"Replay: {game_manager.get_status_text()}\n")
+                if event.ui_element == replay_to_start_of_turn_button and game_manager.is_replaying:
+                    entry = game_manager.to_start_of_turn()
+                    if entry:
+                        _load_replay_entry(entry)
+                        text_box.set_text(text_box_introduction_text)
+                        text_box.append_html_text(f"Replay: {game_manager.get_status_text()}\n")
+                if event.ui_element == replay_goto_turn_button and game_manager.is_replaying:
+                    turn_text = replay_turn_entry.get_text().strip()
+                    if turn_text.isdigit():
+                        turn_num = int(turn_text)
+                        entry = game_manager.to_turn(turn_num)
+                        if entry:
+                            _load_replay_entry(entry)
+                            text_box.set_text(text_box_introduction_text)
+                            text_box.append_html_text(f"Replay: {game_manager.get_status_text()}\n")
+                        else:
+                            text_box.append_html_text(f"ターン{turn_num}は存在しないのじゃ。\n")
+                if event.ui_element == replay_exit_button and game_manager.is_replaying:
+                    # Exit replay: restore the last recorded state as the active game
+                    last_entry = game_manager.recording[-1] if game_manager.recording else None
+                    game_manager.exit_replay()
+                    if last_entry:
+                        _load_replay_entry(last_entry)
+                    text_box.set_text(text_box_introduction_text)
+                    text_box.append_html_text("リプレイを終了したのじゃ。\n")
+                    _update_replay_status()
+
                 # Deck builder buttons
                 shcg_ui_deck_builder.handle_button_pressed(event)
                 # Zone viewer buttons (< and > pagination)
@@ -1397,21 +1571,35 @@ if __name__ == "__main__":
                         text_box.append_html_text(f"ターン{global_vars_shcg.turn}\n")
                     except Exception as e:
                         text_box.append_html_text(f"ロードに失敗したのじゃ: {e}\n")
+                if load_game_record_file_dialog and event.ui_element == load_game_record_file_dialog:
+                    try:
+                        game_manager.load_game(event.text)
+                        entry = game_manager.get_current_entry()
+                        if entry:
+                            _load_replay_entry(entry)
+                        text_box.set_text(text_box_introduction_text)
+                        text_box.append_html_text(f"ゲームロード:{os.path.basename(event.text)}\n")
+                        text_box.append_html_text(f"Replay: {game_manager.get_status_text()}\n")
+                    except Exception as e:
+                        text_box.append_html_text(f"ゲームロードに失敗したのじゃ: {e}\n")
 
             if event.type == pygame_gui.UI_WINDOW_CLOSE:
                 if card_selection_window and event.ui_element == card_selection_window:
                     _cancel_pending_selection()
                 if load_game_file_dialog and event.ui_element == load_game_file_dialog:
-                    load_game_button.enable()
+                    load_gamestate_button.enable()
                     load_game_file_dialog = None
+                if load_game_record_file_dialog and event.ui_element == load_game_record_file_dialog:
+                    load_game_record_button.enable()
+                    load_game_record_file_dialog = None
 
             ui_manager_lower.process_events(event)
             ui_manager.process_events(event)
             ui_manager_overlay.process_events(event)
 
-        # AI Turn Logic - use appropriate AI manager based on toggle
+        # AI Turn Logic - use appropriate AI manager based on toggle (disabled during replay)
         active_ai_manager = global_vars_bf_ai_manager
-        if not global_vars_shcg.concluded and active_ai_manager.is_ai_turn(global_vars_shcg):
+        if not game_manager.is_replaying and not global_vars_shcg.concluded and active_ai_manager.is_ai_turn(global_vars_shcg):
             current_time = pygame.time.get_ticks()
             if current_time - active_ai_manager.last_ai_action_time >= active_ai_manager.ai_action_delay:
                 ai = active_ai_manager.get_current_ai(global_vars_shcg)
@@ -1427,6 +1615,21 @@ if __name__ == "__main__":
                         # AI has no more actions, end turn
                         global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
                         _turn_start_state_string = global_vars_shcg.serialize_to_string()
+                        _record_game_action("AI End Turn")
+                    else:
+                        # print(f"AI took actions: {actions}") gives:
+                        # [('attack', 唯我の絶傑・マゼルベイン(7/5), 神弓の座天使・リリエル(2/-2))]
+                        # [('play', 唯我の絶傑・マゼルベイン(5/5))]
+                        # [('draw',)]
+                        action_type = actions[0][0]
+                        if action_type == 'attack':
+                            _record_game_action(f"AI {actions[0][0]}: {actions[0][1]} -> {actions[0][2]}")
+                        elif action_type == 'play':
+                            _record_game_action(f"AI {actions[0][0]}: {actions[0][1]}")
+                        elif action_type == 'enhance':
+                            _record_game_action(f"AI {actions[0][0]}: {actions[0][1]}")
+                        elif action_type == 'draw':
+                            _record_game_action(f"AI {actions[0][0]}")
 
         shcg_ui_zone_viewer.refresh()
         ui_manager_lower.update(time_delta)

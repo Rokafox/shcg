@@ -674,6 +674,17 @@ class ホーリータイガー(Follower):
         self.ability_rush = True
 
 
+class 大狼(Follower):
+    def __init__(self):
+        super().__init__(name="大狼", cost=3, attack=3, hp=3, can_enhance=False)
+        self.description = "同じものを狩り、同じ場所に棲み、同じ時を過ごす。その繰り返しを経て、獣の群れは一つの生命と化す。"
+        self.effect_description = "自分の場に他のフォロワーが召喚されたとき、これは+2/+2する。"
+
+    def effect_when_other_follower_summon(self, target_follower, game_state, draw_ui, set_text, the_actual_textbox, target_follower_is_own):
+        if target_follower_is_own:
+            self.stats_change_effect_simple(attack_change=2, hp_change=2, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox)
+
+
 class ガブリエル(Follower):
     """
     target value: 4 * 4 = 16 points
@@ -744,6 +755,32 @@ class 唯我の絶傑マゼルベイン(Follower):
 
     def ai_meet_play_condition(self, game_state, player):
         # only play when the opponent has followers on field, unless full hand
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
+        condition_2 = len(game_state.hands[player]) >= 9
+        return condition_1 or condition_2
+
+
+class 無敗の剣聖カゲミツ(Follower):
+    def __init__(self):
+        super().__init__(name="無敗の剣聖・カゲミツ", cost=2, attack=3, hp=3, can_enhance=False)
+        self.effect_description = "下記の効果を1つ選び発動する。【1】Xは自分の場のフォロワーの数。" \
+        "【2】Xは相手の場のフォロワーの数。場に出すとき、相手の場のフォロワーにすべてXダメージ。"
+        self.request_effect_choose_option = ["自分の場のフォロワーの数", "相手の場のフォロワーの数"]
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: list[Card] | None, effect_choice: str | None, selected_cards_for_multi_effect: list[Card] | None = None):
+        if effect_choice == "自分の場のフォロワーの数":
+            x = sum(1 for c in game_state.fields[game_state.current_player] if isinstance(c, Follower))
+        elif effect_choice == "相手の場のフォロワーの数":
+            x = sum(1 for c in game_state.fields[game_state.opponent] if isinstance(c, Follower))
+        else:
+            raise ValueError("Invalid effect choice for カゲミツ.")
+        for c in game_state.fields[game_state.opponent].copy():
+            if isinstance(c, Follower):
+                c.take_damage(x, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when opponent has followers on field, unless full hand
         condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
         condition_2 = len(game_state.hands[player]) >= 9
         return condition_1 or condition_2
@@ -1616,6 +1653,111 @@ class 太陽の巫女パメラ(Follower):
         return damage_amount
 
 
+class 海底都市王乙姫(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="海底都市王・乙姫", cost=2, attack=3, hp=5, can_enhance=True)
+        self.effect_description = "場に出すとき、相手の場でできるだけ「ゴブリン」を召喚する。これは+X/+Xする。Xは召喚した「ゴブリン」の数である。" \
+        "これはゴブリンによるダメージを受けない。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox, 
+                       selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        opponent = game_state.opponent
+        num_goblins_summoned = 0
+        while len(game_state.fields[opponent]) < 5:
+            new_card = ゴブリン().cp(game_state, draw_ui, set_text, the_actual_textbox)
+            new_card.mv([new_card], "summon", game_state, draw_ui, set_text, the_actual_textbox, player=opponent)
+            num_goblins_summoned += 1
+        # Increase attack and hp by X
+        self.stats_change_effect_simple(num_goblins_summoned, num_goblins_summoned, draw_ui, set_text, the_actual_textbox)
+
+    def effect_before_taking_damage(self, damage_amount, game_state, draw_ui, set_text, the_actual_textbox, attacker, is_battle_damage = False):
+        if isinstance(attacker, ゴブリン):
+            return 0  # Negate the damage from Goblins
+        return damage_amount
+
+
+class 音速の機構ララミア(Follower):
+    def __init__(self):
+        super().__init__(name="音速の機構・ララミア", cost=3, attack=4, hp=5, can_enhance=True)
+        self.effect_description = "場に出すとき、相手の場の体力1のフォロワー1枚つき狐尾1回復し、これは+1/+1する。" \
+        "進化する時、同じ効果を発動する。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                       selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        opponent = game_state.opponent
+        num = sum(1 for c in game_state.fields[opponent] if isinstance(c, Follower) and c.hp == 1)
+        if num > 0:
+            game_state.add_foxtail(game_state.current_player, num, draw_ui, set_text)
+            self.stats_change_effect_simple(num, num, draw_ui, set_text, the_actual_textbox)
+
+    def on_enhance_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        self.on_enhance_effect_default()
+        self.on_play_effect(game_state, draw_ui, set_text, the_actual_textbox,
+                            selected_card_for_effect, effect_choice, selected_cards_for_multi_effect)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # have at least 2 followers with 1 hp on opponent field
+        condition_1 = sum(1 for c in game_state.fields[3 - player] if isinstance(c, Follower) and c.hp == 1) >= 2
+        return condition_1
+
+
+class 日の出の女神ミトラ(Follower):
+    def __init__(self):
+        super().__init__(name="日の出の女神・ミトラ", cost=2, attack=2, hp=3, can_enhance=True)
+        self.effect_description = "場に出すとき、相手の場の体力Xのフォロワーすべて消滅する。Xは自分の手札の枚数。" \
+        "進化する時、同じ効果を発動する。進化後の効果が発動したとき、消滅したフォロワー1体につき、相手のリーダーに1ダメージ、自分のリーダーに1回復。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                       selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        opponent = game_state.opponent
+        num_cards_in_hand = len(game_state.hands[game_state.current_player])
+        banished_count = 0
+        for c in game_state.fields[opponent].copy():
+            if isinstance(c, Follower) and c.hp == num_cards_in_hand:
+                c.mv(game_state.fields[opponent], mode="banish", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=opponent)
+                banished_count += 1
+
+    def on_enhance_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        self.on_enhance_effect_default()
+        opponent = game_state.opponent
+        num_cards_in_hand = len(game_state.hands[game_state.current_player])
+        banished_count = 0
+        for c in game_state.fields[opponent].copy():
+            if isinstance(c, Follower) and c.hp == num_cards_in_hand:
+                c.mv(game_state.fields[opponent], mode="banish", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=opponent)
+                banished_count += 1
+        if banished_count > 0:
+            game_state.player_take_damage(opponent, banished_count, draw_ui, set_text)
+            game_state.player_heal(game_state.current_player, banished_count, draw_ui, set_text)
+
+
+class バイヴカハ(Follower):
+    def __init__(self):
+        super().__init__(name="バイヴカハ", cost=3, attack=3, hp=4, can_enhance=True)
+        self.effect_description = "これより体力が低い相手の場のフォロワーが1枚つきこれは+1/+1する。" \
+        "相手の場にフォロワーがないなら、これは+3/+3する。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        opponent = game_state.opponent
+        num_opponent_followers = sum(1 for c in game_state.fields[opponent] if isinstance(c, Follower))
+        if num_opponent_followers == 0:
+            self.stats_change_effect_simple(3, 3, draw_ui, set_text, the_actual_textbox)
+        else:
+            count = sum(1 for c in game_state.fields[opponent] if isinstance(c, Follower) and c.hp < self.hp)
+            if count > 0:
+                self.stats_change_effect_simple(count, count, draw_ui, set_text, the_actual_textbox)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # at least 1 follower on opponent field with hp < 4, or no followers on opponent field
+        condition_1 = any(isinstance(c, Follower) and c.hp < 4 for c in game_state.fields[3 - player])
+        condition_2 = all(not isinstance(c, Follower) for c in game_state.fields[3 - player])
+        return condition_1 or condition_2
+
 # ==============================
 # Spells
 # ==============================
@@ -2289,6 +2431,31 @@ class 大地の魔片(Amulet):
                 if isinstance(c, Follower):
                     c.take_damage(2, game_state, draw_ui, set_text, the_actual_textbox, attacker=self)
             game_state.player_take_damage(3 - player, 2, draw_ui, set_text)
+
+
+class 抑圧の関門(Amulet):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="抑圧の関門", cost=4)
+        self.effect_description = "これがある限り、相手の場でフォロワーが召喚されたとき、それは最大体力1になる。" \
+        "エンドフェイズ開始時、カウンターは1減らす。カウンターが0になったとき、これは破壊される。"
+        self.counter_name = "関門カウンター"
+        self.counter_max = 3
+        self.counter = self.counter_max
+
+    def end_of_turn_on_field_effect(self, game_state, draw_ui, set_text, the_actual_textbox):
+        player_owning_this = game_state.current_player
+        if self.decrease_counter(1):
+            self.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, player_owning_this)
+
+    def effect_when_other_follower_summon(self, target_follower, game_state, draw_ui, set_text, the_actual_textbox, target_follower_is_own):
+        if target_follower_is_own:
+            return
+        else:
+            if target_follower.max_hp > 1:
+                target_follower.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
+                                                imposter=self, attack_change=0, hp_change=1-target_follower.max_hp)
 
 
 # ===============================

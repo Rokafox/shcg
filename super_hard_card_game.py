@@ -639,7 +639,7 @@ def draw_card(card: shcg_core_cards.Card, show_attack_status_indicator: bool = F
             card_surface.blit(counter_render, (sx(92) - counter_width, sy(120)))
     
     # 強化可能マーカーを右上に表示
-    if hasattr(card, 'can_enhance') and card.can_enhance:
+    if hasattr(card, 'can_enhance') and card.can_enhance and not card.is_enhanced:
         # foxtail_img = pygame.transform.scale(image_others["foxtail"], (24, 24))
         # card_surface.blit(foxtail_img, (68, 0))  # Does not look good. Instead, use word "E"
         enhance_text = "E"

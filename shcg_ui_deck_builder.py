@@ -61,6 +61,7 @@ deck_builder_delete_button = None
 deck_builder_rename_button = None
 deck_builder_saved_list = None
 deck_builder_name_entry = None
+deck_builder_enhanced_preview_button = None
 
 # Mapping from display string to card type class
 deck_builder_collection_map: dict[str, type] = {}
@@ -69,6 +70,7 @@ deck_builder_deck_item_to_name: dict[str, str] = {}
 global_vars_db_deck_max_copies = 3
 global_vars_db_where_currently_selected: str = "collection"  # or "deck"
 global_vars_db_recently_selected_card: shcg_core_cards.Card | None = None
+global_vars_db_show_enhanced_preview: bool = False
 
 
 # =====================================
@@ -156,6 +158,8 @@ def build_deck_builder_window():
     global deck_builder_delete_button, deck_builder_rename_button
     global deck_builder_saved_list, deck_builder_name_entry
     global deck_builder_collection_map
+    global deck_builder_enhanced_preview_button, global_vars_db_show_enhanced_preview
+    global_vars_db_show_enhanced_preview = False
 
     try:
         deck_builder_window.kill()
@@ -203,10 +207,18 @@ def build_deck_builder_window():
     )
 
     deck_builder_card_info_label = pygame_gui.elements.UILabel(
-        pygame.Rect((405, 330), (200, 40)),
+        pygame.Rect((405, 330), (150, 40)),
         "",
         _ui_manager,
         container=deck_builder_window
+    )
+
+    deck_builder_enhanced_preview_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((560, 330), (40, 40)),
+        text="E",
+        manager=_ui_manager,
+        container=deck_builder_window,
+        object_id="#deck_builder_enhanced_preview"
     )
 
     deck_builder_add_button = pygame_gui.elements.UIButton(
@@ -331,6 +343,7 @@ def build_deck_builder_window():
 
 
     # Set tooltips
+    deck_builder_enhanced_preview_button.set_tooltip("Toggle enhanced card preview (E = enhanced version).", delay=0.1, wrap_width=300)
     deck_builder_add_button.set_tooltip("Add 1 copy of the selected card to the deck.", delay=0.1, wrap_width=300)
     deck_builder_add3_button.set_tooltip("Set the selected card to 3 copies in the deck.", delay=0.1, wrap_width=300)
     deck_builder_remove_button.set_tooltip("Remove 1 copy of the selected card from the deck.", delay=0.1, wrap_width=300)
@@ -418,11 +431,21 @@ def _update_deck_builder_card_info(where: str):
     card_type = _get_selected_card_type(where)
     if card_type:
         card = card_type()
+        card_supports_enhance = hasattr(card, 'can_enhance') and card.can_enhance
+        if global_vars_db_show_enhanced_preview and card_supports_enhance:
+            card.is_enhanced = True
+            card.on_enhance_effect_default()
         preview_surface = _draw_card_fn(card)
         deck_builder_card_preview.set_image(preview_surface)
         deck_builder_card_preview.set_tooltip(card.tooltip_str(), delay=0.1, wrap_width=300)
         count = deck_builder_deck.get(card.name, 0)
         deck_builder_card_info_label.set_text(f"In deck: {count}/{global_vars_db_deck_max_copies}")
+        if deck_builder_enhanced_preview_button:
+            if card_supports_enhance:
+                label = "N" if global_vars_db_show_enhanced_preview else "E"
+                deck_builder_enhanced_preview_button.set_text(label)
+            else:
+                deck_builder_enhanced_preview_button.set_text("E")
     else:
         deck_builder_card_preview.set_image(
             _image_405_card_slot
@@ -578,11 +601,21 @@ def deck_builder_rename_deck():
 # Event Handling (called from main loop)
 # =====================================
 
+def deck_builder_toggle_enhanced_preview():
+    """Toggle between normal and enhanced card preview."""
+    global global_vars_db_show_enhanced_preview
+    global_vars_db_show_enhanced_preview = not global_vars_db_show_enhanced_preview
+    _update_deck_builder_card_info(global_vars_db_where_currently_selected)
+
+
 def handle_button_pressed(event) -> bool:
     """
     Handle UI_BUTTON_PRESSED events for deck builder buttons.
     Returns True if the event was consumed by the deck builder.
     """
+    if deck_builder_enhanced_preview_button and event.ui_element == deck_builder_enhanced_preview_button:
+        deck_builder_toggle_enhanced_preview()
+        return True
     if deck_builder_add_button and event.ui_element == deck_builder_add_button:
         deck_builder_add_card(1)
         return True

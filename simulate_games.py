@@ -618,6 +618,163 @@ def print_evaluator_comparison_report(
     print(SEPARATOR)
 
 
+def print_focus_deck_report(
+    focus_deck: str,
+    deck_names: list[str],
+    matchup_results: dict[tuple[str, str], MatchupResult],
+    card_stats: dict[str, WinLossDrawRecord],
+    card_play_count: dict[str, int],
+    focus_deck_card_names: set[str] | None,
+    all_turns: list[int],
+    total_games: int,
+    num_games_per_matchup: int,
+) -> None:
+    """Print a report focused on one deck's performance against all others."""
+    opponents = [n for n in deck_names if n != focus_deck]
+
+    # Derive per-opponent and seat stats from matchup_results
+    overall = WinLossDrawRecord()
+    as_p1 = WinLossDrawRecord()
+    as_p2 = WinLossDrawRecord()
+    opp_data: dict[str, dict] = {}
+    for opp in opponents:
+        opp_data[opp] = {
+            "combined": WinLossDrawRecord(),
+            "as_p1": WinLossDrawRecord(),
+            "as_p2": WinLossDrawRecord(),
+            "turns": [],
+        }
+
+    for (d1, d2), mr in matchup_results.items():
+        if d1 == focus_deck:
+            opp = d2
+            fw, fl, fd = mr.p1_wins, mr.p2_wins, mr.draws
+            opp_data[opp]["as_p1"] = WinLossDrawRecord(wins=fw, losses=fl, draws=fd)
+            opp_data[opp]["combined"].wins += fw
+            opp_data[opp]["combined"].losses += fl
+            opp_data[opp]["combined"].draws += fd
+            opp_data[opp]["turns"].extend(mr.turns)
+            as_p1.wins += fw
+            as_p1.losses += fl
+            as_p1.draws += fd
+            overall.wins += fw
+            overall.losses += fl
+            overall.draws += fd
+        elif d2 == focus_deck:
+            opp = d1
+            fw, fl, fd = mr.p2_wins, mr.p1_wins, mr.draws
+            opp_data[opp]["as_p2"] = WinLossDrawRecord(wins=fw, losses=fl, draws=fd)
+            opp_data[opp]["combined"].wins += fw
+            opp_data[opp]["combined"].losses += fl
+            opp_data[opp]["combined"].draws += fd
+            opp_data[opp]["turns"].extend(mr.turns)
+            as_p2.wins += fw
+            as_p2.losses += fl
+            as_p2.draws += fd
+            overall.wins += fw
+            overall.losses += fl
+            overall.draws += fd
+
+    # --- Header ---
+    print(f"\n{SEPARATOR}")
+    print(f"    FOCUS DECK REPORT: {focus_deck}")
+    print(SEPARATOR)
+    print(f"  Opponents: {', '.join(opponents)}")
+    print(f"  Games per matchup: {num_games_per_matchup}")
+    print(f"  Total games: {total_games}")
+
+    # --- Overall Record ---
+    print(f"\n{THIN_SEP}")
+    print(" OVERALL RECORD")
+    print(THIN_SEP)
+    print(f"  {focus_deck}: {overall}")
+    print(f"    As P1 (26HP, goes 2nd): {as_p1}")
+    print(f"    As P2 (20HP, goes 1st): {as_p2}")
+
+    # --- Per-Opponent Results (sorted by focus deck winrate, highest first) ---
+    print(f"\n{THIN_SEP}")
+    print(" VS EACH OPPONENT")
+    print(THIN_SEP)
+    sorted_opps = sorted(
+        opp_data.items(),
+        key=lambda x: x[1]["combined"].winrate,
+        reverse=True,
+    )
+    opp_pad = max(len(opp) for opp in opponents) if opponents else 0
+    for opp_name, data in sorted_opps:
+        comb = data["combined"]
+        p1 = data["as_p1"]
+        p2 = data["as_p2"]
+        avg_t = sum(data["turns"]) / len(data["turns"]) if data["turns"] else 0
+        print(f"  vs {opp_name:<{opp_pad}}: {comb}  (avg {avg_t:.1f} turns)")
+        print(f"      As P1: {p1}  |  As P2: {p2}")
+
+    # --- Card Stats ---
+    if focus_deck_card_names:
+        opponent_card_names = set(card_stats.keys()) - focus_deck_card_names
+
+        # Focus deck card usage (play frequency)
+        focus_cards = sorted(
+            ((n, card_play_count.get(n, 0)) for n in focus_deck_card_names),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        print(f"\n{THIN_SEP}")
+        print(f" FOCUS DECK CARD USAGE ({focus_deck})")
+        print(THIN_SEP)
+        if focus_cards:
+            pad = max(len(n) for n, _ in focus_cards)
+            for name, plays in focus_cards:
+                print(f"  {name:<{pad}}: played {plays} times")
+
+        # Opponent cards - show focus deck's winrate when facing them
+        if opponent_card_names:
+            opponent_entries = []
+            for name in opponent_card_names:
+                record = card_stats[name]
+                # Focus deck perspective: focus wins = opponent losses
+                focus_wr = _pct(record.losses, record.total)
+                opponent_entries.append((name, record, focus_wr))
+            opponent_entries.sort(key=lambda x: (x[2], x[1].total), reverse=True)
+
+            print(f"\n{THIN_SEP}")
+            print(f" OPPONENT CARDS ({focus_deck} winrate when facing)")
+            print(THIN_SEP)
+            pad = max(len(n) for n, _, _ in opponent_entries)
+            for name, record, focus_wr in opponent_entries:
+                plays = card_play_count.get(name, 0)
+                # Show from focus deck perspective (flip W/L)
+                print(
+                    f"  {name:<{pad}}: "
+                    f"{record.losses}W / {record.wins}L / {record.draws}D  "
+                    f"({focus_wr:.1f}%)  (played {plays} times)"
+                )
+    else:
+        # Random deck - can't split cards
+        print(f"\n{THIN_SEP}")
+        print(" CARD WINRATE (by deck inclusion)")
+        print(THIN_SEP)
+        sorted_cards = sorted(
+            card_stats.items(),
+            key=lambda x: (x[1].winrate, x[1].total),
+            reverse=True,
+        )
+        if sorted_cards:
+            pad = max(len(n) for n, _ in sorted_cards)
+            for name, record in sorted_cards:
+                plays = card_play_count.get(name, 0)
+                print(f"  {name:<{pad}}: {record}  (played {plays} times)")
+
+    # --- Average Turn Count ---
+    print(f"\n{THIN_SEP}")
+    print(" AVERAGE TURN COUNT")
+    print(THIN_SEP)
+    avg = sum(all_turns) / len(all_turns) if all_turns else 0
+    print(f"  Overall: {avg:.1f} turns")
+
+    print(SEPARATOR)
+
+
 # ---------------------------------------------------------------------------
 # AI factory
 # ---------------------------------------------------------------------------
@@ -652,6 +809,7 @@ def run_evaluator_comparison(
     matchups: list[tuple[str, str]],
     num_games: int,
     total_games: int,
+    focus_deck: str | None = None,
 ) -> None:
     """Run evaluator-comparison mode and print the report."""
     try:
@@ -733,6 +891,7 @@ def run_standard_simulation(
     matchups: list[tuple[str, str]],
     num_games: int,
     total_games: int,
+    focus_deck: str | None = None,
 ) -> None:
     """Run standard simulation mode and print the report."""
     try:
@@ -779,10 +938,19 @@ def run_standard_simulation(
 
         matchup_results[(deck1_name, deck2_name)] = mr
 
-    print_report(
-        deck_names, matchup_results, deck_stats, player_stats,
-        dict(card_stats), dict(card_play_count), all_turns, total_games, num_games,
-    )
+    if focus_deck:
+        focus_recipe = deck_pool.get(focus_deck)
+        focus_card_names = set(focus_recipe.keys()) if focus_recipe else None
+        print_focus_deck_report(
+            focus_deck, deck_names, matchup_results,
+            dict(card_stats), dict(card_play_count), focus_card_names,
+            all_turns, total_games, num_games,
+        )
+    else:
+        print_report(
+            deck_names, matchup_results, deck_stats, player_stats,
+            dict(card_stats), dict(card_play_count), all_turns, total_games, num_games,
+        )
 
 
 def _record_deck_and_card_stats(
@@ -899,10 +1067,12 @@ def main() -> None:
     if compare_evaluators:
         run_evaluator_comparison(
             ai1, ai2, deck_names, deck_pool, matchups, num_games, total_games,
+            focus_deck=focus_deck,
         )
     else:
         run_standard_simulation(
             ai1, ai2, deck_names, deck_pool, matchups, num_games, total_games,
+            focus_deck=focus_deck,
         )
 
 

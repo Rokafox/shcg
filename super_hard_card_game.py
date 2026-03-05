@@ -232,6 +232,26 @@ def _build_card_selection_options(selection_type: str, pending_info: dict,
                 options.append(display)
                 om[display] = c
 
+    elif selection_type == "hand_opponent":
+        for i, c in enumerate(global_vars_shcg.hands[op]):
+            display = f"{i + 1} {str(c)}"
+            options.append(display)
+            om[display] = c
+
+    elif selection_type == "hand_opponent_follower":
+        for i, c in enumerate(global_vars_shcg.hands[op]):
+            if isinstance(c, shcg_core_cards.Follower):
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                om[display] = c
+
+    elif selection_type == "hand_opp_f_rush":
+        for i, c in enumerate(global_vars_shcg.hands[op]):
+            if isinstance(c, shcg_core_cards.Follower) and (c.ability_rush or c.ability_super_rush):
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                om[display] = c
+
     elif selection_type == "hand_spell":
         for i, c in enumerate(global_vars_shcg.hands[cp]):
             if action_type == 'play' and c is played_card:
@@ -269,12 +289,6 @@ def _build_card_selection_options(selection_type: str, pending_info: dict,
             om[display] = c
         for i, c in enumerate(global_vars_shcg.fields[op]):
             display = f"OP {i + 1} {str(c)}"
-            options.append(display)
-            om[display] = c
-
-    elif selection_type == "hand_opponent":
-        for i, c in enumerate(global_vars_shcg.hands[op]):
-            display = f"{i + 1} {str(c)}"
             options.append(display)
             om[display] = c
 

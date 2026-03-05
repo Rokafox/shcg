@@ -515,13 +515,13 @@ class SHCGGameState:
         if card_to_enhance.request_card_selection_on_enhance:
             targets = additional_targets
             if ui_set_text and targets:
-                targets_str = ", ".join(str(t) for t in targets)
+                targets_str = ",".join(str(t) for t in targets)
                 self.text_box.append_html_text(f"{prefix}プレイヤー{player}が{card_to_enhance}を強化する時に{targets_str}を選択したのじゃ。\n")
 
         if card_to_enhance.request_multi_card_selection_on_enhance[0]:
             multi_targets = additional_multi_targets
             if ui_set_text and multi_targets:
-                targets_str = ", ".join(str(t) for t in multi_targets)
+                targets_str = ",".join(str(t) for t in multi_targets)
                 self.text_box.append_html_text(f"{prefix}プレイヤー{player}が{card_to_enhance}を強化する時に{targets_str}を複数選択したのじゃ。\n")
 
         card_to_enhance.on_enhance_effect(self, draw_ui=ui_draw, set_text=ui_set_text,

@@ -369,6 +369,9 @@ class Follower(Card):
         """
         increase the attack ability by 1, up to 2
         """
+        if "skip_atb_once" in self.extra_effect_list:
+            self.extra_effect_list.remove("skip_atb_once")
+            return
         if self.attack_ability < 2:
             self.attack_ability += 1
 
@@ -1757,6 +1760,58 @@ class バイヴカハ(Follower):
         condition_1 = any(isinstance(c, Follower) and c.hp < 4 for c in game_state.fields[3 - player])
         condition_2 = all(not isinstance(c, Follower) for c in game_state.fields[3 - player])
         return condition_1 or condition_2
+
+
+class 大妖狐ギンセツ(Follower):
+    def __init__(self):
+        super().__init__(name="大妖狐・ギンセツ", cost=8, attack=1, hp=5, can_enhance=True)
+        self.effect_description = "進化するとき、一ツ尾狐をできるだけ場に出す。"
+
+    def on_enhance_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        self.on_enhance_effect_default()
+        player = game_state.current_player
+        while len(game_state.fields[player]) < 5:
+            new_card = 一ツ尾狐().cp(game_state, draw_ui, set_text, the_actual_textbox)
+            new_card.mv([new_card], "summon", game_state, draw_ui, set_text, the_actual_textbox, player=player)
+
+
+class 一ツ尾狐(Follower):
+    def __init__(self):
+        super().__init__(name="一ツ尾狐", cost=2, attack=1, hp=3, can_enhance=False)
+        self.effect_description = ""
+        self.ability_protect = True
+
+
+class 覇道の龍人ガリュウ(Follower):
+    def __init__(self):
+        super().__init__(name="覇道の龍人・ガリュウ", cost=3, attack=3, hp=4, can_enhance=True)
+        self.effect_description = "進化するとき、相手の手札のフォロワー1枚と自分の手札のフォロワー1枚を選ぶ。" \
+        "前者は「突進」と「疾走」を失う。後者は「突進」を持つ。"
+        self.request_card_selection_on_enhance = ["hand_opp_f_rush", "hand_follower"]
+
+    def on_enhance_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        self.on_enhance_effect_default()
+        opponent_target = selected_card_for_effect[0]
+        own_target = selected_card_for_effect[1]
+        if isinstance(opponent_target, Follower):
+            opponent_target.ability_rush = False
+            opponent_target.ability_super_rush = False
+        if isinstance(own_target, Follower):
+            own_target.ability_rush = True
+
+    def ai_meet_play_condition(self, game_state, player):
+        # at least 1 follower in hand who does not have rush
+        condition_1 = any(isinstance(c, Follower) and not (c.ability_rush or c.ability_super_rush) for c in game_state.hands[player])
+        return condition_1
+
+
+class 銀氷のドラゴニュートフィルレイン(Follower):
+    def __init__(self):
+        super().__init__(name="銀氷のドラゴニュート・フィルレイン", cost=2, attack=1, hp=3, can_enhance=False)
+        self.effect_description = ""
+
 
 # ==============================
 # Spells

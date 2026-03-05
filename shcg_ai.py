@@ -85,6 +85,10 @@ class MoveGenerator:
                 return [c for c in state.hands[player] if c.type == 'follower' and c.cost <= len([x for x in state.hands[player] if x.type == 'follower'])]
             case "hand_opponent":
                 return list(state.hands[3 - player])
+            case "hand_opponent_follower":
+                return [c for c in state.hands[3 - player] if isinstance(c, shcg_core_cards.Follower)]
+            case "hand_opp_f_rush":
+                return [c for c in state.hands[3 - player] if isinstance(c, shcg_core_cards.Follower) and (c.ability_rush or c.ability_super_rush)]
             case "field_c":
                 return list(state.fields[player])
             case "field_opponent_c":

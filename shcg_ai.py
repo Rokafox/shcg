@@ -467,7 +467,7 @@ def apply_action(state: SHCGGameState, player: int, action: Tuple,
         return _apply_action_impl(state, player, action, ui_draw, ui_set_text, is_ai_player)
     except Exception as e:
         try:
-            error_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "games_error")
+            error_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_states_error")
             os.makedirs(error_dir, exist_ok=True)
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             save_path = os.path.join(error_dir, f"error_{timestamp}.json")

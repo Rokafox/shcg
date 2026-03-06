@@ -214,3 +214,4 @@ saved_decks*.json
 game_states/
 games/
 games_error/
+game_states_error/

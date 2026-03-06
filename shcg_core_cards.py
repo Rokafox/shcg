@@ -316,7 +316,8 @@ class Follower(Card):
         c = "#070c55"
         s += f"<font color={c}>攻撃:{self.attack} HP:{self.hp}/{self.max_hp}</font>\n"
         # how many attacks done
-        s += f"<font color={c}>攻撃回数: {self.how_many_attacks_done_of_turn}/{self.how_many_attacks_max_of_turn}</font>\n"
+        s += f"<font color={c}>攻撃回数:{self.how_many_attacks_done_of_turn}/{self.how_many_attacks_max_of_turn}"
+        s += f" 攻撃能力:{self.attack_ability}</font>\n"
         c = "#9900ff"
         if self.extra_tooltip_str:
             s += f"<font color={c}>{self.extra_tooltip_str}</font>\n"
@@ -369,18 +370,14 @@ class Follower(Card):
         """
         increase the attack ability by 1, up to 2
         """
-        if "skip_atb_once" in self.extra_effect_list:
-            self.extra_effect_list.remove("skip_atb_once")
-            return
         if self.attack_ability < 2:
             self.attack_ability += 1
 
     def decrease_attack_ability(self):
         """
-        decrease the attack ability by 1, down to 0
+        decrease the attack ability by 1, can be negative
         """
-        if self.attack_ability > 0:
-            self.attack_ability -= 1
+        self.attack_ability -= 1
     
     def on_summon_effect(self):
         # called after on play effect and immediately after assigned to field
@@ -1810,7 +1807,25 @@ class 覇道の龍人ガリュウ(Follower):
 class 銀氷のドラゴニュートフィルレイン(Follower):
     def __init__(self):
         super().__init__(name="銀氷のドラゴニュート・フィルレイン", cost=2, attack=1, hp=3, can_enhance=False)
-        self.effect_description = ""
+        self.effect_description = "場に出すとき、相手の場のフォロワー1体を選ぶ。それは攻撃能力-1する。" \
+        "それはすでにリーダーに攻撃できるなら、それは破壊される。"
+        self.request_card_selection_on_play = ["field_opponent"]
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                       selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        target = selected_card_for_effect[0] if selected_card_for_effect else None
+        opponent = game_state.opponent
+        if isinstance(target, Follower):
+            if target.attack_ability >= 2:
+                # destroy the target
+                target.mv(game_state.fields[opponent], mode="destroy", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=opponent)
+            else:
+                target.decrease_attack_ability()
+
+    def ai_meet_play_condition(self, game_state, player):
+        # have target
+        condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
+        return condition_1
 
 
 # ==============================
@@ -2308,7 +2323,28 @@ class 渾身の一振り(Spell):
         return (condition_1 and condition_2) or condition_3
 
 
+class 銀氷の吐息(Spell):
+    def __init__(self):
+        super().__init__(name="銀氷の吐息", cost=2)
+        self.effect_description = "相手の場のフォロワー1枚選ぶ。それはすでにリーダーに攻撃できるなら、それを破壊し、それのリーダーに4ダメージ。"
+        self.request_card_selection_on_play = ["field_opponent"]
 
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: list[Card] | None, effect_choice: str | None, selected_cards_for_multi_effect: list[Card] | None = None):
+        target = selected_card_for_effect[0] if selected_card_for_effect else None
+        if target is not None and isinstance(target, Follower):
+            # Check if the target can already attack the leader
+            if target.attack_ability >= 2:
+                target.mv(game_state.fields[game_state.opponent], mode="destroy", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=game_state.opponent)
+                game_state.player_take_damage(game_state.opponent, 4, draw_ui, set_text)
+        else:
+            if set_text:
+                the_actual_textbox.append_html_text("銀氷の吐息の効果は発動しなかったのじゃ。\n")
+
+    def ai_meet_play_condition(self, game_state, player):
+        # only play when opponent has followers that can attack leader
+        condition_1 = any(isinstance(c, Follower) and c.attack_ability >= 2 for c in game_state.fields[game_state.opponent])
+        return condition_1
 
 # ===============================
 # Amulets

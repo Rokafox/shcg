@@ -198,6 +198,38 @@ class SHCGGameState:
             self.draw_deck_ui(player)
 
 
+    def get_valid_attack_targets(self, player: int, follower: shcg_core_cards.Follower) -> list[shcg_core_cards.Follower | str]:
+        """
+        Given a follower on the field, return a list of valid attack targets.
+        Targets can be opponent Followers or "leader".
+        Returns empty list if the follower cannot attack.
+        """
+        if not isinstance(follower, shcg_core_cards.Follower):
+            return []
+        if follower.attack_ability <= 0 or not follower.can_attack_this_turn:
+            return []
+        if follower not in self.fields[player]:
+            return []
+
+        opponent = 3 - player
+        targets: list[shcg_core_cards.Follower | str] = []
+
+        protect_exists = any(c.ability_protect for c in self.fields[opponent] if isinstance(c, shcg_core_cards.Follower))
+
+        if protect_exists:
+            for c in self.fields[opponent]:
+                if isinstance(c, shcg_core_cards.Follower) and c.ability_protect:
+                    targets.append(c)
+        else:
+            for c in self.fields[opponent]:
+                if isinstance(c, shcg_core_cards.Follower):
+                    targets.append(c)
+            if follower.attack_ability >= 2:
+                targets.append("leader")
+
+        return targets
+
+
     def follower_attack(self, player, attacker: shcg_core_cards.Follower, target: shcg_core_cards.Follower | str, ui_draw, ui_set_text):
         if attacker.attack_ability <= 0:
             raise shcg_core_error.FlowError(f"{attacker} cannot attack because it has no attack ability.")
@@ -417,14 +449,16 @@ class SHCGGameState:
 
     def end_turn(self, ui_draw, ui_set_text):
         if self.concluded:
-            raise shcg_core_error.FlowError("Cannot end turn because the game is already concluded.")
+            if ui_set_text:
+                self.text_box.append_html_text("ゲームは終了したのじゃ。新しいゲームを始めようではないか。\n")
+            return
         for c in self.fields[self.current_player].copy():
             c.end_of_turn_on_field_effect(self, ui_draw, ui_set_text, self.text_box)
             if "end_of_turn_destroy" in c.extra_effect_list and c in self.fields[self.current_player]:
                 c.mv(self.fields[self.current_player], "destroy", self, draw_ui=ui_draw, set_text=ui_set_text, the_actual_textbox=self.text_box, player=self.current_player)
         if self.concluded:
-            if ui_set_text:
-                self.text_box.append_html_text("ゲームは終了したのじゃ。新しいゲームを始めようではないか。\n")
+            if ui_draw:
+                self.redraw_all_ui()
             return
         self.current_player = self.opponent
         self.foxtail[self.current_player] = 9
@@ -436,8 +470,8 @@ class SHCGGameState:
         self.turn += 1
         self.enhance_used_this_turn = {1: 0, 2: 0}
         if self.concluded:
-            if ui_set_text:
-                self.text_box.append_html_text("ゲームは終了したのじゃ。新しいゲームを始めようではないか。\n")
+            if ui_draw:
+                self.redraw_all_ui()
             return
         # If both players have no cards in deck, the game ends in a draw
         if self.decks[1] == [] and self.decks[2] == []:
@@ -445,16 +479,11 @@ class SHCGGameState:
             self.winner = None
             if ui_set_text:
                 self.text_box.append_html_text("引き分けじゃ。\n")
+            if ui_draw:
+                self.redraw_all_ui()
             return
         if ui_draw:
-            self.draw_tail_ui(self.current_player)
-            self.draw_field_ui(1)
-            self.draw_field_ui(2)
-            self.draw_hand_ui(1)
-            self.draw_hand_ui(2)
-            self.draw_deck_ui(1)
-            self.draw_deck_ui(2)
-            self.draw_current_player_indicator()
+            self.redraw_all_ui()
         if ui_set_text:
             self.text_box.append_html_text("======================================\n")
             self.text_box.append_html_text(f"プレイヤー{self.current_player}のターンじゃ。\n")

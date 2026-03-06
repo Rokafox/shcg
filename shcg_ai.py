@@ -161,40 +161,41 @@ class MoveGenerator:
 
         return playable
 
-    @staticmethod
-    def get_possible_attacks(state: SHCGGameState, player: int) -> List[Tuple[shcg_core_cards.Follower, shcg_core_cards.Follower | str]]:
-        """
-        Get all possible attacks.
-        Returns list of (attacker, target) tuples. Target is Follower or "leader".
-        """
-        attacks = []
-        opponent = 3 - player
-
-        # check if opponent has any followers with ability_protect
-        # if so, only those followers can be attacked
-        protect_exists = any([c.ability_protect for c in state.fields[opponent] if isinstance(c, shcg_core_cards.Follower)])
-        for follower in state.fields[player]:
-            if follower.type != 'follower':
-                continue
-            if not follower.can_attack_this_turn or follower.attack_ability <= 0:
-                continue
-
-            if protect_exists:
-                # Can only attack followers with ability_protect
-                for target in state.fields[opponent]:
-                    if target.type == 'follower' and target.ability_protect:
-                        attacks.append((follower, target))
-            else:
-                # Can attack opponent followers
-                for target in state.fields[opponent]:
-                    if target.type == 'follower':
-                        attacks.append((follower, target))
-
-                # Can attack leader if attack_ability >= 2
-                if follower.attack_ability >= 2:
-                    attacks.append((follower, "leader"))
-
-        return attacks
+    # get_possible_attacks is now replaced by SHCGGameState.get_valid_attack_targets
+    # @staticmethod
+    # def get_possible_attacks(state: SHCGGameState, player: int) -> List[Tuple[shcg_core_cards.Follower, shcg_core_cards.Follower | str]]:
+    #     """
+    #     Get all possible attacks.
+    #     Returns list of (attacker, target) tuples. Target is Follower or "leader".
+    #     """
+    #     attacks = []
+    #     opponent = 3 - player
+    #
+    #     # check if opponent has any followers with ability_protect
+    #     # if so, only those followers can be attacked
+    #     protect_exists = any([c.ability_protect for c in state.fields[opponent] if isinstance(c, shcg_core_cards.Follower)])
+    #     for follower in state.fields[player]:
+    #         if follower.type != 'follower':
+    #             continue
+    #         if not follower.can_attack_this_turn or follower.attack_ability <= 0:
+    #             continue
+    #
+    #         if protect_exists:
+    #             # Can only attack followers with ability_protect
+    #             for target in state.fields[opponent]:
+    #                 if target.type == 'follower' and target.ability_protect:
+    #                     attacks.append((follower, target))
+    #         else:
+    #             # Can attack opponent followers
+    #             for target in state.fields[opponent]:
+    #                 if target.type == 'follower':
+    #                     attacks.append((follower, target))
+    #
+    #             # Can attack leader if attack_ability >= 2
+    #             if follower.attack_ability >= 2:
+    #                 attacks.append((follower, "leader"))
+    #
+    #     return attacks
 
     @staticmethod
     def get_enhanceable_followers(state: SHCGGameState, player: int) -> List[Tuple]:
@@ -436,8 +437,11 @@ class BruteForceAI:
             actions.append(('play', card, target, effect_choice, multi_targets))
 
         # Attacks
-        for attacker, target in MoveGenerator.get_possible_attacks(state, player):
-            actions.append(('attack', attacker, target))
+        for follower in state.fields[player]:
+            if not isinstance(follower, shcg_core_cards.Follower):
+                continue
+            for target in state.get_valid_attack_targets(player, follower):
+                actions.append(('attack', follower, target))
 
         # Enhance
         for follower, target, effect_choice, multi_targets in MoveGenerator.get_enhanceable_followers(state, player):

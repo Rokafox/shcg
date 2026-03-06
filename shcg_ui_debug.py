@@ -125,9 +125,6 @@ def build_debug_window():
 def debug_add_card_to_top_of_deck():
     game = _get_game_state()
     text_box = _get_text_box()
-    if game.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
     card_to_add = None
     card_name = _debug_card_selection_dropdown.selected_option[0]
     for card_type in shcg_core_cards.all_card_types:
@@ -146,9 +143,6 @@ def debug_add_card_to_top_of_deck():
 def debug_add_foxtail_to_current_player():
     game = _get_game_state()
     text_box = _get_text_box()
-    if game.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
     cp = game.current_player
     if game.foxtail[cp] < 9:
         game.foxtail[cp] += 1
@@ -161,9 +155,6 @@ def debug_add_foxtail_to_current_player():
 def debug_add_1_hp_to_current_player():
     game = _get_game_state()
     text_box = _get_text_box()
-    if game.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
     cp = game.current_player
     game.hp[cp] = min(game.hp[cp] + 1, game.max_hp[cp])
     game.draw_player_hp_ui()
@@ -173,9 +164,6 @@ def debug_add_1_hp_to_current_player():
 def debug_reduce_1_hp_from_current_player():
     game = _get_game_state()
     text_box = _get_text_box()
-    if game.concluded:
-        text_box.append_html_text(f"DEBUG:ゲームが終了しているのじゃ。\n")
-        return
     cp = game.current_player
     game.hp[cp] = max(game.hp[cp] - 1, 1)
     game.draw_player_hp_ui()

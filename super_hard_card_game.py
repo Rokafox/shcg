@@ -127,7 +127,7 @@ load_gamestate_button = pygame_gui.elements.UIButton(relative_rect=pygame.Rect((
                                     text='Load Game State',
                                     manager=ui_manager,)
 
-load_game_file_dialog: UIFileDialog | None = None
+load_game_state_dialog: UIFileDialog | None = None
 
 # State saved at the start of each turn, used by Reset Turn
 _turn_start_state_string: str | None = None
@@ -991,7 +991,7 @@ shcg_ui_debug.init(ui_manager, lambda: global_vars_shcg, lambda: text_box)
 # =====================================
 
 game_manager = SHCGGameManager()
-load_game_record_file_dialog: UIFileDialog | None = None
+load_game_record_dialog: UIFileDialog | None = None
 
 replay_status_label = pygame_gui.elements.UILabel(
     pygame.Rect((1320, 450), (260, 30)),
@@ -1207,7 +1207,10 @@ if __name__ == "__main__":
     ui_drag_and_drop_target = None
     ui_drag_and_drop_target_orig_pos = (0, 0)
     ui_drag_and_drop_usage: str = ""
-    running = True 
+    running = True
+
+    # Attack target indicators (red outline)
+    attack_target_valid_cards: list = []  # list of valid target cards/"leader" for current drag
 
     # other variables
     the_selected_card: shcg_core_cards.Card | None = None # record which card in hand is being dragged
@@ -1255,6 +1258,7 @@ if __name__ == "__main__":
                             ui_drag_and_drop_target_orig_pos = (card_slot.rect.x, card_slot.rect.y)
                             ui_drag_and_drop_usage = "attack_with_follower_player"
                             ui_drag_and_drop_target = card_slot
+                            attack_target_valid_cards = global_vars_shcg.get_valid_attack_targets(cp, the_selected_card)
                 for index, tail in enumerate(global_vars_tail_indicators_active[cp]):
                     if tail.rect.collidepoint(event.pos):
                         ui_drag_and_drop_target_orig_pos = (tail.rect.x, tail.rect.y)
@@ -1324,7 +1328,7 @@ if __name__ == "__main__":
 
                     elif ui_drag_and_drop_usage == "attack_with_follower_player":
                         opponent = global_vars_shcg.opponent
-                        protect_exists = any([c.ability_protect for c in global_vars_shcg.fields[opponent] if isinstance(c, shcg_core_cards.Follower)])
+                        valid_targets = global_vars_shcg.get_valid_attack_targets(cp, the_selected_card) if the_selected_card else []
                         for index, slot in enumerate(global_vars_field_slots[opponent]):
                             if slot.rect.collidepoint(event.pos):
                                 if the_selected_card:
@@ -1332,19 +1336,17 @@ if __name__ == "__main__":
                                     if index < len(global_vars_shcg.fields[opponent]):
                                         target_card = global_vars_shcg.fields[opponent][index]
                                     if target_card and isinstance(target_card, shcg_core_cards.Follower):
-                                        # if target_card .ability_protect is false but there exists other followers
-                                        # on opponent field with ability_protect true, cannot attack this target
-                                        if protect_exists and not target_card.ability_protect:
-                                            text_box.append_html_text(f"【守護】フォロワーがいるから攻撃できないのじゃ！ \n")
-                                        else:
+                                        if target_card in valid_targets:
                                             global_vars_shcg.follower_attack(cp, the_selected_card, target_card, ui_draw=True, ui_set_text=True)
                                             _record_game_action(f"Attack {the_selected_card} -> {target_card}")
-                        if global_vars_leader_slots[opponent][0].rect.collidepoint(event.pos) and the_selected_card.attack_ability >= 2:
-                            if protect_exists:
-                                text_box.append_html_text(f"【守護】フォロワーがいるから攻撃できないのじゃ！ \n")
-                            else:
+                                        else:
+                                            text_box.append_html_text(f"【守護】フォロワーがいるから攻撃できないのじゃ！ \n")
+                        if global_vars_leader_slots[opponent][0].rect.collidepoint(event.pos) and the_selected_card:
+                            if "leader" in valid_targets:
                                 global_vars_shcg.follower_attack(cp, the_selected_card, "leader", ui_draw=True, ui_set_text=True)
                                 _record_game_action(f"Attack {the_selected_card} -> Leader")
+                            else:
+                                text_box.append_html_text(f"【守護】フォロワーがいるから攻撃できないのじゃ！ \n")
                         ui_drag_and_drop_target.set_position(ui_drag_and_drop_target_orig_pos)
 
                     elif ui_drag_and_drop_usage == "use_foxtail_player":
@@ -1409,6 +1411,7 @@ if __name__ == "__main__":
                     ui_drag_and_drop_target = None
                     ui_drag_and_drop_usage = ""
                     ui_drag_and_drop_target_orig_pos = (0, 0)
+                    attack_target_valid_cards = []
 
             if event.type == pygame.MOUSEMOTION:
                 if ui_drag_and_drop_target != None:
@@ -1427,13 +1430,15 @@ if __name__ == "__main__":
                 if event.ui_element == quit_game_button:
                     shcg_ui_deck_builder.save_decks_to_file()
                     running = False
-                if event.ui_element == end_turn_button and not game_manager.is_replaying:
+                if event.ui_element == end_turn_button:
                     global_vars_shcg.end_turn(ui_draw=True, ui_set_text=True)
                     _turn_start_state_string = global_vars_shcg.serialize_to_string()
                     _record_game_action("End Turn")
                 if event.ui_element == reset_turn_button:
-                    if _turn_start_state_string and not global_vars_shcg.concluded:
-                        global_vars_shcg.load_from_string(_turn_start_state_string)
+                    if _turn_start_state_string:
+                        new_state = SHCGGameState.load_from_string(_turn_start_state_string)
+                        _attach_ui_refs(new_state)
+                        global_vars_shcg = new_state
                         global_vars_shcg.redraw_all_ui()
                         text_box.append_html_text(f"ターンをリセットしたのじゃ。\n")
                 if event.ui_element == save_gamestate_button:
@@ -1446,10 +1451,10 @@ if __name__ == "__main__":
                         f.write(state_string)
                     text_box.append_html_text(f"保存:{os.path.basename(save_path)}\n")
                 if event.ui_element == load_gamestate_button:
-                    if load_game_file_dialog is None:
+                    if load_game_state_dialog is None:
                         save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_states")
                         os.makedirs(save_dir, exist_ok=True)
-                        load_game_file_dialog = UIFileDialog(
+                        load_game_state_dialog = UIFileDialog(
                             pygame.Rect(400, 150, 700, 600),
                             ui_manager,
                             window_title='Load Game State...',
@@ -1458,6 +1463,7 @@ if __name__ == "__main__":
                             allowed_suffixes={".json"},
                         )
                         load_gamestate_button.disable()
+                        load_game_record_button.disable()
                 if event.ui_element == deck_builder_button:
                     shcg_ui_deck_builder.build_deck_builder_window()
 
@@ -1470,10 +1476,10 @@ if __name__ == "__main__":
                     game_manager.save_game(save_path)
                     text_box.append_html_text(f"ゲーム保存:{os.path.basename(save_path)}\n")
                 if event.ui_element == load_game_record_button:
-                    if load_game_record_file_dialog is None:
+                    if load_game_record_dialog is None:
                         save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "games")
                         os.makedirs(save_dir, exist_ok=True)
-                        load_game_record_file_dialog = UIFileDialog(
+                        load_game_record_dialog = UIFileDialog(
                             pygame.Rect(400, 150, 700, 600),
                             ui_manager,
                             window_title='Load Game Record...',
@@ -1481,6 +1487,7 @@ if __name__ == "__main__":
                             allow_existing_files_only=True,
                             allowed_suffixes={".json"},
                         )
+                        load_gamestate_button.disable()
                         load_game_record_button.disable()
                 if event.ui_element == replay_prev_button and game_manager.is_replaying:
                     entry = game_manager.prev_move()
@@ -1511,7 +1518,7 @@ if __name__ == "__main__":
                             text_box.append_html_text(f"Replay: {game_manager.get_status_text()}\n")
                         else:
                             text_box.append_html_text(f"ターン{turn_num}は存在しないのじゃ。\n")
-                if event.ui_element == replay_exit_button and game_manager.is_replaying:
+                if event.ui_element == replay_exit_button:
                     # Exit replay: restore the last recorded state as the active game
                     last_entry = game_manager.recording[-1] if game_manager.recording else None
                     game_manager.exit_replay()
@@ -1572,11 +1579,13 @@ if __name__ == "__main__":
                     shcg_ui_deck_builder.save_decks_to_file()
 
             if event.type == pygame_gui.UI_FILE_DIALOG_PATH_PICKED:
-                if load_game_file_dialog and event.ui_element == load_game_file_dialog:
+                if load_game_state_dialog and event.ui_element == load_game_state_dialog:
                     try:
                         with open(event.text, "r", encoding="utf-8") as f:
                             state_string = f.read()
-                        global_vars_shcg.load_from_string(state_string)
+                        new_state = SHCGGameState.load_from_string(state_string)
+                        _attach_ui_refs(new_state)
+                        global_vars_shcg = new_state
                         global_vars_shcg.redraw_all_ui()
                         _turn_start_state_string = global_vars_shcg.serialize_to_string()
                         text_box.set_text(text_box_introduction_text)
@@ -1585,7 +1594,7 @@ if __name__ == "__main__":
                         text_box.append_html_text(f"ターン{global_vars_shcg.turn}\n")
                     except Exception as e:
                         text_box.append_html_text(f"ロードに失敗したのじゃ: {e}\n")
-                if load_game_record_file_dialog and event.ui_element == load_game_record_file_dialog:
+                if load_game_record_dialog and event.ui_element == load_game_record_dialog:
                     try:
                         game_manager.load_game(event.text)
                         entry = game_manager.get_current_entry()
@@ -1600,12 +1609,14 @@ if __name__ == "__main__":
             if event.type == pygame_gui.UI_WINDOW_CLOSE:
                 if card_selection_window and event.ui_element == card_selection_window:
                     _cancel_pending_selection()
-                if load_game_file_dialog and event.ui_element == load_game_file_dialog:
+                if load_game_state_dialog and event.ui_element == load_game_state_dialog:
                     load_gamestate_button.enable()
-                    load_game_file_dialog = None
-                if load_game_record_file_dialog and event.ui_element == load_game_record_file_dialog:
                     load_game_record_button.enable()
-                    load_game_record_file_dialog = None
+                    load_game_state_dialog = None
+                if load_game_record_dialog and event.ui_element == load_game_record_dialog:
+                    load_gamestate_button.enable()
+                    load_game_record_button.enable()
+                    load_game_record_dialog = None
 
             ui_manager_lower.process_events(event)
             ui_manager.process_events(event)
@@ -1645,6 +1656,36 @@ if __name__ == "__main__":
                         elif action_type == 'draw':
                             _record_game_action(f"AI {actions[0][0]}")
 
+        # disable buttons
+        # 1. end turn button: concluded, replaying, or AI turn
+        # 2. reset turn button: same as end turn. debug_button: same
+        # 3. replay_exit_button and others related to replay: only enabled during replay
+        # 4. load game state: disable during replay
+        if global_vars_shcg.concluded or game_manager.is_replaying or (active_ai_manager.is_ai_turn(global_vars_shcg)):
+            end_turn_button.disable()
+            reset_turn_button.disable()
+            debug_button.disable()
+        else:
+            end_turn_button.enable()
+            reset_turn_button.enable()
+            debug_button.enable()
+        if game_manager.is_replaying:
+            replay_prev_button.enable()
+            replay_next_button.enable()
+            replay_to_start_of_turn_button.enable()
+            replay_goto_turn_button.enable()
+            replay_exit_button.enable()
+            load_gamestate_button.disable()
+        else:
+            replay_prev_button.disable()
+            replay_next_button.disable()
+            replay_to_start_of_turn_button.disable()
+            replay_goto_turn_button.disable()
+            replay_exit_button.disable()
+            if not load_game_state_dialog and not load_game_record_dialog:
+                load_gamestate_button.enable()
+
+
         shcg_ui_zone_viewer.refresh()
         ui_manager_lower.update(time_delta)
         ui_manager.update(time_delta)
@@ -1664,8 +1705,22 @@ if __name__ == "__main__":
         ui_manager_lower.draw_ui(display_surface)
         ui_manager.draw_ui(display_surface)
         ui_manager_overlay.draw_ui(display_surface)
-        # debug_ui_manager.update(time_delta)
-        # debug_ui_manager.draw_ui(display_surface)
+
+        # Draw red outlines on valid attack targets
+        # WARNING: is drawing every frame, should optimize
+        if attack_target_valid_cards and ui_drag_and_drop_usage == "attack_with_follower_player":
+            print(f"Valid attack targets: {attack_target_valid_cards}")
+            opponent = global_vars_shcg.opponent
+            for target in attack_target_valid_cards:
+                if target == "leader":
+                    leader_slot = global_vars_leader_slots[opponent][0]
+                    pygame.draw.rect(display_surface, (255, 0, 0), leader_slot.rect, 3)
+                elif isinstance(target, shcg_core_cards.Follower):
+                    if target in global_vars_shcg.fields[opponent]:
+                        idx = global_vars_shcg.fields[opponent].index(target)
+                        if idx < len(global_vars_field_slots[opponent]):
+                            slot = global_vars_field_slots[opponent][idx]
+                            pygame.draw.rect(display_surface, (255, 0, 0), slot.rect, 3)
 
         pygame.display.update()
 

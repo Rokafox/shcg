@@ -640,7 +640,7 @@ def draw_card(card: shcg_core_cards.Card, show_attack_status_indicator: bool = F
         card_surface.blit(hp_render, (sx(92) - hp_width, sy(120)))
     
         if show_attack_status_indicator:  # show can attack status for followers
-                if card.attack_ability == 0 or card.can_attack_this_turn == False:
+                if card.attack_ability <= 0 or card.can_attack_this_turn == False:
                     # cannot attack, gray
                     indicator_color = (150, 150, 150)
                 elif card.attack_ability == 1:
@@ -1126,10 +1126,13 @@ def _update_button_states(active_ai_manager):
     ai_turn     = active_ai_manager.is_ai_turn(global_vars_shcg)
     dialog_open = bool(load_game_state_dialog or load_game_record_dialog)
     card_sel    = bool(card_selection_window)
+    deck_build = bool(shcg_ui_deck_builder.deck_builder_window)
 
     def _set(button, *disable_conditions):
         if any(disable_conditions):
             button.disable()
+            if button == settings_button and settings_window:
+                settings_window.kill()
         else:
             button.enable()
 
@@ -1150,6 +1153,10 @@ def _update_button_states(active_ai_manager):
     _set(load_gamestate_button,  replaying, dialog_open, card_sel)
     _set(save_game_record_button, card_sel)
     _set(load_game_record_button, replaying, dialog_open, card_sel)
+
+    # new game/settings: not when deck_building
+    _set(new_game_button, card_sel, deck_build)
+    _set(settings_button, card_sel, deck_build)
 
 
 # =====================================
@@ -1648,6 +1655,9 @@ if __name__ == "__main__":
             if event.type == pygame_gui.UI_SELECTION_LIST_NEW_SELECTION:
                 shcg_ui_deck_builder.handle_selection_event(event)
 
+            if event.type == pygame_gui.UI_CONFIRMATION_DIALOG_CONFIRMED:
+                shcg_ui_deck_builder.handle_confirmation_event(event)
+
             if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
                 if event.ui_element == theme_selection_menu:
                     change_theme()
@@ -1705,6 +1715,7 @@ if __name__ == "__main__":
                         text_box.append_html_text(f"ゲームロードに失敗したのじゃ: {e}\n")
 
             if event.type == pygame_gui.UI_WINDOW_CLOSE:
+                shcg_ui_deck_builder.handle_window_close_event(event)
                 if card_selection_window and event.ui_element == card_selection_window:
                     _cancel_pending_selection()
                 if load_game_state_dialog and event.ui_element == load_game_state_dialog:

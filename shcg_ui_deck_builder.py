@@ -72,6 +72,20 @@ global_vars_db_where_currently_selected: str = "collection"  # or "deck"
 global_vars_db_recently_selected_card: shcg_core_cards.Card | None = None
 global_vars_db_show_enhanced_preview: bool = False
 
+# Current deck tracking
+deck_builder_current_deck_name: str | None = None
+deck_builder_current_name_label = None
+deck_builder_new_button = None
+
+# Confirmation / rename dialog state
+_confirm_dialog = None
+_rename_window = None
+_rename_text_entry = None
+_rename_ok_button = None
+_rename_cancel_button = None
+_pending_action: str | None = None  # "load" or "delete"
+_pending_load_deck_name: str | None = None
+
 
 # =====================================
 # Save / Load
@@ -159,6 +173,8 @@ def build_deck_builder_window():
     global deck_builder_saved_list, deck_builder_name_entry
     global deck_builder_collection_map
     global deck_builder_enhanced_preview_button, global_vars_db_show_enhanced_preview
+    global deck_builder_current_name_label, deck_builder_new_button
+    global deck_builder_current_deck_name
     global_vars_db_show_enhanced_preview = False
 
     try:
@@ -285,45 +301,47 @@ def build_deck_builder_window():
         allow_multi_select=False
     )
 
-    # === Bottom: Deck Name Entry + Save/Load/Delete/Rename + Saved Decks List ===
-    pygame_gui.elements.UILabel(
-        pygame.Rect((10, 515), (80, 30)),
-        "Deck Name:",
+    # === Bottom: Current Deck Name + New/Save/Rename/Delete + Saved Decks List ===
+    deck_builder_current_name_label = pygame_gui.elements.UILabel(
+        pygame.Rect((10, 515), (520, 30)),
+        _get_current_deck_label_text(),
         _ui_manager,
         container=deck_builder_window
     )
 
-    deck_builder_name_entry = pygame_gui.elements.UITextEntryLine(
-        pygame.Rect((95, 515), (290, 30)),
-        _ui_manager,
+    deck_builder_new_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((10, 555), (120, 35)),
+        text="New Deck",
+        manager=_ui_manager,
         container=deck_builder_window,
-        object_id="#deck_builder_name_entry"
+        object_id="#deck_builder_new"
     )
-    deck_builder_name_entry.set_text("My Deck")
 
     deck_builder_save_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((10, 555), (180, 35)),
-        text="Save Deck",
+        relative_rect=pygame.Rect((140, 555), (120, 35)),
+        text="Save",
         manager=_ui_manager,
         container=deck_builder_window,
         object_id="#deck_builder_save"
     )
 
     deck_builder_rename_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((200, 555), (180, 35)),
-        text="Rename Deck",
+        relative_rect=pygame.Rect((270, 555), (120, 35)),
+        text="Rename",
         manager=_ui_manager,
         container=deck_builder_window,
         object_id="#deck_builder_rename"
     )
 
     deck_builder_delete_button = pygame_gui.elements.UIButton(
-        relative_rect=pygame.Rect((10, 600), (180, 35)),
-        text="Delete Deck",
+        relative_rect=pygame.Rect((10, 600), (120, 35)),
+        text="Delete",
         manager=_ui_manager,
         container=deck_builder_window,
         object_id="#deck_builder_delete"
     )
+
+    deck_builder_name_entry = None
 
     # Saved decks list
     pygame_gui.elements.UILabel(
@@ -350,9 +368,10 @@ def build_deck_builder_window():
     deck_builder_remove3_button.set_tooltip("Remove up to 3 copies of the selected card from the deck.", delay=0.1, wrap_width=300)
     deck_builder_clear_button.set_tooltip("Remove all cards from the deck.", delay=0.1, wrap_width=300)
     deck_builder_randomize_button.set_tooltip("Fill the deck with 15 random card types (x3 each).", delay=0.1, wrap_width=300)
-    deck_builder_save_button.set_tooltip("Save the current deck with the name in the text field.", delay=0.1, wrap_width=300)
-    deck_builder_delete_button.set_tooltip("Delete the selected saved deck.", delay=0.1, wrap_width=300)
-    deck_builder_rename_button.set_tooltip("Rename the selected saved deck to the name in the text field.", delay=0.1, wrap_width=300)
+    deck_builder_new_button.set_tooltip("Create a new empty deck.", delay=0.1, wrap_width=300)
+    deck_builder_save_button.set_tooltip("Save the current deck.", delay=0.1, wrap_width=300)
+    deck_builder_rename_button.set_tooltip("Rename the current deck.", delay=0.1, wrap_width=300)
+    deck_builder_delete_button.set_tooltip("Delete the current deck.", delay=0.1, wrap_width=300)
 
     # Refresh deck display
     _update_deck_builder_deck_display()
@@ -390,6 +409,42 @@ def _refresh_saved_decks_list():
     """Refresh the saved decks list widget."""
     if deck_builder_saved_list:
         deck_builder_saved_list.set_item_list(_get_saved_decks_display_list())
+
+
+# =====================================
+# Current Deck Tracking Helpers
+# =====================================
+
+def _get_current_deck_label_text() -> str:
+    """Build display text for the current deck name label."""
+    name = deck_builder_current_deck_name or "(No deck)"
+    modified = " *" if _has_unsaved_changes() else ""
+    return f"Current Deck: {name}{modified}"
+
+
+def _has_unsaved_changes() -> bool:
+    """Check if the current deck editor differs from the saved version."""
+    if deck_builder_current_deck_name is None:
+        return bool(deck_builder_deck)
+    saved_recipe = deck_builder_saved_decks.get(deck_builder_current_deck_name, {})
+    return dict(deck_builder_deck) != saved_recipe
+
+
+def _update_current_name_label():
+    """Refresh the current deck name label."""
+    if deck_builder_current_name_label:
+        deck_builder_current_name_label.set_text(_get_current_deck_label_text())
+
+
+def _generate_default_deck_name() -> str:
+    """Generate a unique default deck name like 'New Deck', 'New Deck 2', etc."""
+    base = "New Deck"
+    if base not in deck_builder_saved_decks:
+        return base
+    i = 2
+    while f"{base} {i}" in deck_builder_saved_decks:
+        i += 1
+    return f"{base} {i}"
 
 
 # =====================================
@@ -533,6 +588,7 @@ def _update_deck_builder_deck_display():
     deck_builder_deck_count_label.set_text(
         f"Deck: {total_cards} cards ({len(deck_builder_deck)} types)"
     )
+    _update_current_name_label()
 
 
 # =====================================
@@ -540,32 +596,32 @@ def _update_deck_builder_deck_display():
 # =====================================
 
 def deck_builder_save_deck():
-    """Save the current deck editor contents under the name in the text entry."""
-    if not deck_builder_name_entry or not deck_builder_deck:
+    """Save the current deck editor contents under the current deck name."""
+    if not deck_builder_current_deck_name:
         return
-    name = deck_builder_name_entry.get_text().strip()
-    if not name:
-        return
-    deck_builder_saved_decks[name] = dict(deck_builder_deck)
+    deck_builder_saved_decks[deck_builder_current_deck_name] = dict(deck_builder_deck)
     save_decks_to_file()
     _refresh_saved_decks_list()
+    _update_current_name_label()
 
 
-def deck_builder_load_deck():
-    """Load the selected saved deck into the editor."""
-    name = _get_saved_list_selected_name()
+def deck_builder_load_deck(name: str | None = None):
+    """Load the given (or selected) saved deck into the editor."""
+    global deck_builder_current_deck_name
+    if name is None:
+        name = _get_saved_list_selected_name()
     if not name or name not in deck_builder_saved_decks:
         return
     deck_builder_deck.clear()
     deck_builder_deck.update(deck_builder_saved_decks[name])
-    if deck_builder_name_entry:
-        deck_builder_name_entry.set_text(name)
+    deck_builder_current_deck_name = name
     _update_deck_builder_deck_display()
 
 
 def deck_builder_delete_deck():
-    """Delete the selected saved deck."""
-    name = _get_saved_list_selected_name()
+    """Delete the current deck (after confirmation)."""
+    global deck_builder_current_deck_name
+    name = deck_builder_current_deck_name
     if not name or name not in deck_builder_saved_decks:
         return
     del deck_builder_saved_decks[name]
@@ -573,28 +629,115 @@ def deck_builder_delete_deck():
     for p in [1, 2]:
         if deck_builder_selected_decks.get(p) == name:
             deck_builder_selected_decks[p] = "Random"
+    deck_builder_current_deck_name = None
+    deck_builder_deck.clear()
     save_decks_to_file()
     _refresh_saved_decks_list()
+    _update_deck_builder_deck_display()
 
 
-def deck_builder_rename_deck():
-    """Rename the selected saved deck to the name in the text entry."""
-    old_name = _get_saved_list_selected_name()
+def deck_builder_rename_deck(new_name: str):
+    """Rename the current deck to new_name."""
+    global deck_builder_current_deck_name
+    old_name = deck_builder_current_deck_name
     if not old_name or old_name not in deck_builder_saved_decks:
         return
-    if not deck_builder_name_entry:
-        return
-    new_name = deck_builder_name_entry.get_text().strip()
     if not new_name or new_name == old_name:
         return
-    # Move recipe to new name
+    if new_name in deck_builder_saved_decks:
+        return  # name already taken
     deck_builder_saved_decks[new_name] = deck_builder_saved_decks.pop(old_name)
-    # Update any player selections that referenced the old name
     for p in [1, 2]:
         if deck_builder_selected_decks.get(p) == old_name:
             deck_builder_selected_decks[p] = new_name
+    deck_builder_current_deck_name = new_name
     save_decks_to_file()
     _refresh_saved_decks_list()
+    _update_current_name_label()
+
+
+def deck_builder_new_deck():
+    """Create a new empty deck with a default name."""
+    global deck_builder_current_deck_name
+    name = _generate_default_deck_name()
+    deck_builder_deck.clear()
+    deck_builder_current_deck_name = name
+    deck_builder_saved_decks[name] = {}
+    save_decks_to_file()
+    _refresh_saved_decks_list()
+    _update_deck_builder_deck_display()
+
+
+# =====================================
+# Confirmation / Rename Dialogs
+# =====================================
+
+def _show_confirm_dialog(title: str, message: str, action: str):
+    """Show a blocking confirmation dialog and set the pending action."""
+    global _confirm_dialog, _pending_action
+    if _confirm_dialog is not None:
+        return
+    _pending_action = action
+    _confirm_dialog = pygame_gui.windows.UIConfirmationDialog(
+        rect=pygame.Rect((400, 250), (350, 200)),
+        action_long_desc=message,
+        manager=_ui_manager,
+        window_title=title,
+        action_short_name="OK",
+        blocking=True,
+    )
+
+
+def _show_rename_window():
+    """Show a small always-on-top window with a text entry for renaming."""
+    global _rename_window, _rename_text_entry, _rename_ok_button, _rename_cancel_button
+    if _rename_window is not None:
+        return
+    if not deck_builder_current_deck_name:
+        return
+    _rename_window = pygame_gui.elements.UIWindow(
+        pygame.Rect((450, 280), (350, 160)),
+        _ui_manager,
+        window_display_title="Rename Deck",
+        resizable=False,
+        always_on_top=True,
+    )
+    _rename_window.set_blocking(True)  # prevent interaction with main window while open
+    pygame_gui.elements.UILabel(
+        pygame.Rect((10, 5), (310, 25)),
+        "Enter new deck name:",
+        _ui_manager,
+        container=_rename_window,
+    )
+    _rename_text_entry = pygame_gui.elements.UITextEntryLine(
+        pygame.Rect((10, 35), (310, 30)),
+        _ui_manager,
+        container=_rename_window,
+    )
+    _rename_text_entry.set_text(deck_builder_current_deck_name)
+    _rename_ok_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((10, 75), (100, 35)),
+        text="OK",
+        manager=_ui_manager,
+        container=_rename_window,
+    )
+    _rename_cancel_button = pygame_gui.elements.UIButton(
+        relative_rect=pygame.Rect((120, 75), (100, 35)),
+        text="Cancel",
+        manager=_ui_manager,
+        container=_rename_window,
+    )
+
+
+def _close_rename_window():
+    """Close and clean up the rename window."""
+    global _rename_window, _rename_text_entry, _rename_ok_button, _rename_cancel_button
+    if _rename_window:
+        _rename_window.kill()
+    _rename_window = None
+    _rename_text_entry = None
+    _rename_ok_button = None
+    _rename_cancel_button = None
 
 
 # =====================================
@@ -613,6 +756,18 @@ def handle_button_pressed(event) -> bool:
     Handle UI_BUTTON_PRESSED events for deck builder buttons.
     Returns True if the event was consumed by the deck builder.
     """
+    # Rename window buttons
+    if _rename_ok_button and event.ui_element == _rename_ok_button:
+        if _rename_text_entry:
+            new_name = _rename_text_entry.get_text().strip()
+            if new_name:
+                deck_builder_rename_deck(new_name)
+        _close_rename_window()
+        return True
+    if _rename_cancel_button and event.ui_element == _rename_cancel_button:
+        _close_rename_window()
+        return True
+
     if deck_builder_enhanced_preview_button and event.ui_element == deck_builder_enhanced_preview_button:
         deck_builder_toggle_enhanced_preview()
         return True
@@ -634,14 +789,22 @@ def handle_button_pressed(event) -> bool:
     if deck_builder_randomize_button and event.ui_element == deck_builder_randomize_button:
         deck_builder_randomize()
         return True
+    if deck_builder_new_button and event.ui_element == deck_builder_new_button:
+        deck_builder_new_deck()
+        return True
     if deck_builder_save_button and event.ui_element == deck_builder_save_button:
         deck_builder_save_deck()
         return True
     if deck_builder_delete_button and event.ui_element == deck_builder_delete_button:
-        deck_builder_delete_deck()
+        if deck_builder_current_deck_name:
+            _show_confirm_dialog(
+                "Delete Deck",
+                f"Delete deck '{deck_builder_current_deck_name}'?",
+                "delete",
+            )
         return True
     if deck_builder_rename_button and event.ui_element == deck_builder_rename_button:
-        deck_builder_rename_deck()
+        _show_rename_window()
         return True
     return False
 
@@ -651,6 +814,7 @@ def handle_selection_event(event) -> bool:
     Handle UI_SELECTION_LIST_NEW_SELECTION events for deck builder lists.
     Returns True if the event was consumed by the deck builder.
     """
+    global _pending_load_deck_name
     if deck_builder_collection_list and event.ui_element == deck_builder_collection_list:
         _update_deck_builder_card_info('collection')
         return True
@@ -659,9 +823,54 @@ def handle_selection_event(event) -> bool:
         return True
     if deck_builder_saved_list and event.ui_element == deck_builder_saved_list:
         name = _get_saved_list_selected_name()
-        if name and deck_builder_name_entry:
-            deck_builder_name_entry.set_text(name)
-        # load
-        deck_builder_load_deck()
+        if not name:
+            return True
+        if _has_unsaved_changes():
+            _pending_load_deck_name = name
+            _show_confirm_dialog(
+                "Unsaved Changes",
+                "You have unsaved changes. Discard and load another deck?",
+                "load",
+            )
+        else:
+            deck_builder_load_deck(name)
+        return True
+    return False
+
+
+def handle_confirmation_event(event) -> bool:
+    """
+    Handle UI_CONFIRMATION_DIALOG_CONFIRMED events.
+    Returns True if the event was consumed by the deck builder.
+    """
+    global _confirm_dialog, _pending_action, _pending_load_deck_name
+    if _confirm_dialog and event.ui_element == _confirm_dialog:
+        if _pending_action == "load" and _pending_load_deck_name:
+            deck_builder_load_deck(_pending_load_deck_name)
+            _pending_load_deck_name = None
+        elif _pending_action == "delete":
+            deck_builder_delete_deck()
+        _pending_action = None
+        _confirm_dialog = None
+        return True
+    return False
+
+
+def handle_window_close_event(event) -> bool:
+    """
+    Handle UI_WINDOW_CLOSE events for deck builder dialogs.
+    Returns True if the event was consumed by the deck builder.
+    """
+    global deck_builder_window, _confirm_dialog, _pending_action, _pending_load_deck_name
+    if deck_builder_window and event.ui_element == deck_builder_window:
+        deck_builder_window = None
+        return True
+    if _confirm_dialog and event.ui_element == _confirm_dialog:
+        _pending_action = None
+        _pending_load_deck_name = None
+        _confirm_dialog = None
+        return True
+    if _rename_window and event.ui_element == _rename_window:
+        _close_rename_window()
         return True
     return False

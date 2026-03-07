@@ -685,7 +685,7 @@ class アークサモナーエラスムス(Follower):
     """
     """
     def __init__(self):
-        super().__init__(name="アークサモナー・エラスムス", cost=3, attack=3, hp=5, can_enhance=False)
+        super().__init__(name="アークサモナー・エラスムス", cost=3, attack=3, hp=6, can_enhance=False)
         self.description = ""
         self.ability_rush = True
 
@@ -1823,9 +1823,9 @@ class 覇道の龍人ガリュウ(Follower):
 
 class 銀氷のドラゴニュートフィルレイン(Follower):
     def __init__(self):
-        super().__init__(name="銀氷のドラゴニュート・フィルレイン", cost=2, attack=1, hp=3, can_enhance=False)
-        self.effect_description = "場に出すとき、相手の場のフォロワー1体を選ぶ。それは攻撃能力-1する。" \
-        "それはすでにリーダーに攻撃できるなら、それは破壊される。"
+        super().__init__(name="銀氷のドラゴニュート・フィルレイン", cost=2, attack=1, hp=3, can_enhance=True)
+        self.effect_description = "場に出すとき、相手の場のフォロワー1体を選ぶ。それはすでにリーダーに攻撃できるなら、それは破壊される。" \
+        "それは攻撃能力-1する。進化するとき、相手の場のフォロワーの攻撃能力-1する。"
         self.request_card_selection_on_play = ["field_opponent"]
 
     def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
@@ -1839,6 +1839,14 @@ class 銀氷のドラゴニュートフィルレイン(Follower):
             else:
                 target.decrease_attack_ability()
 
+    def on_enhance_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+        self.on_enhance_effect_default()
+        opponent = game_state.opponent
+        for c in game_state.fields[opponent]:
+            if isinstance(c, Follower):
+                c.decrease_attack_ability()
+
     def ai_meet_play_condition(self, game_state, player):
         # have target
         condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
@@ -1848,11 +1856,12 @@ class 銀氷のドラゴニュートフィルレイン(Follower):
 class フェアリーブレイダーアマツ(Follower):
     def __init__(self):
         super().__init__(name="フェアリーブレイダー・アマツ", cost=3, attack=3, hp=4, can_enhance=False)
-        self.effect_description = "これより攻撃能力が低いフォロワーへ攻撃するとき、追加で3ダメージを与える。"
+        self.effect_description = "これより攻撃能力が低いフォロワーへ攻撃するとき、これは+0/+1し、追加で3ダメージを与える。"
         self.ability_rush = True
 
     def before_attack_effect(self, game_state, draw_ui, set_text, the_actual_textbox, defender):
         if isinstance(defender, Follower) and defender.attack_ability < self.attack_ability:
+            self.stats_change_effect_simple(0, 1, draw_ui, set_text, the_actual_textbox)
             return 3  # Add 3 damage
         return 0
 
@@ -2390,7 +2399,8 @@ class 渾身の一振り(Spell):
 class 銀氷の吐息(Spell):
     def __init__(self):
         super().__init__(name="銀氷の吐息", cost=2)
-        self.effect_description = "相手の場のフォロワー1枚選ぶ。それはすでにリーダーに攻撃できるなら、それを破壊し、それのリーダーに4ダメージ。"
+        self.effect_description = "相手の場のフォロワー1枚選ぶ。それはすでにリーダーに攻撃できるなら、それを破壊し、それのリーダーに4ダメージ。" \
+        "それの攻撃能力-1する。"
         self.request_card_selection_on_play = ["field_opponent"]
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
@@ -2401,6 +2411,8 @@ class 銀氷の吐息(Spell):
             if target.attack_ability >= 2:
                 target.mv(game_state.fields[game_state.opponent], mode="destroy", game_state=game_state, draw_ui=draw_ui, set_text=set_text, the_actual_textbox=the_actual_textbox, player=game_state.opponent)
                 game_state.player_take_damage(game_state.opponent, 4, draw_ui, set_text)
+            else:
+                target.decrease_attack_ability()
         else:
             if set_text:
                 the_actual_textbox.append_html_text("銀氷の吐息の効果は発動しなかったのじゃ。\n")
@@ -2413,18 +2425,18 @@ class 銀氷の吐息(Spell):
 
 class 貴族の舞踏(Spell):
     def __init__(self):
-        super().__init__(name="貴族の舞踏", cost=4)
-        self.effect_description = "自分の手札の「突進」「疾走」を持つフォロワーはすべて+3/+0する。自分の場の「突進」「疾走」を持つフォロワーはすべて+0/+3する。"
+        super().__init__(name="貴族の舞踏", cost=3)
+        self.effect_description = "自分の手札の「突進」「疾走」を持つフォロワーはすべて+3/+1する。自分の場の「突進」「疾走」を持つフォロワーはすべて+1/+3する。"
 
     def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
                         selected_card_for_effect: list[Card] | None, effect_choice: str | None, selected_cards_for_multi_effect: list[Card] | None = None):
         player = game_state.current_player
         for c in game_state.hands[player]:
             if isinstance(c, Follower) and (c.ability_rush or c.ability_super_rush):
-                c.stats_change_effect_simple(3, 0, draw_ui, set_text, the_actual_textbox)
+                c.stats_change_effect_simple(3, 1, draw_ui, set_text, the_actual_textbox)
         for c in game_state.fields[player]:
             if isinstance(c, Follower) and (c.ability_rush or c.ability_super_rush):
-                c.stats_change_effect_simple(0, 3, draw_ui, set_text, the_actual_textbox)
+                c.stats_change_effect_simple(1, 3, draw_ui, set_text, the_actual_textbox)
 
     def ai_meet_play_condition(self, game_state, player):
         # has at least 3 in hand or on field with rush or super rush
@@ -2558,7 +2570,7 @@ class 獣姫の呼び声(Amulet):
         super().__init__(name="獣姫の呼び声", cost=3)
         self.effect_description = "エンドフェイズ開始時、カウンターは1減らす。カウンターが0になったとき、これは破壊される。" \
         "これが破壊される時、「ホーリーファルコン」と「ホーリータイガー」を1体ずつ出す。それらは守護を持つ。" \
-        "自分のデッキの同名カード1枚つきそれは+1/+1する。"
+        "自分のデッキの同名カード1枚つきそれは+1/+2する。"
         self.counter_name = "獣姫の呼び声カウンター"
         self.counter_max = 3
         self.counter = self.counter_max
@@ -2582,9 +2594,9 @@ class 獣姫の呼び声(Amulet):
             num_falcon_in_deck = sum(1 for c in game_state.decks[player] if c.name == "ホーリーファルコン")
             num_tiger_in_deck = sum(1 for c in game_state.decks[player] if c.name == "ホーリータイガー")
             if num_falcon_in_deck > 0:
-                falcon.stats_change_effect_simple(num_falcon_in_deck, num_falcon_in_deck, draw_ui, set_text, the_actual_textbox)
+                falcon.stats_change_effect_simple(num_falcon_in_deck, num_falcon_in_deck * 2, draw_ui, set_text, the_actual_textbox)
             if num_tiger_in_deck > 0:
-                tiger.stats_change_effect_simple(num_tiger_in_deck, num_tiger_in_deck, draw_ui, set_text, the_actual_textbox)
+                tiger.stats_change_effect_simple(num_tiger_in_deck, num_tiger_in_deck * 2, draw_ui, set_text, the_actual_textbox)
 
 
 class 大地の魔片(Amulet):
@@ -2644,9 +2656,9 @@ class 頂きの闘技場(Amulet):
     """
     """
     def __init__(self):
-        super().__init__(name="頂きの闘技場", cost=3)
+        super().__init__(name="頂きの闘技場", cost=2)
         self.effect_description = "エンドフェイズ開始時、カウンターは1減らす。カウンターが0になったとき、これは破壊される。" \
-        "エンドフェイズ開始時、自分の場の攻撃済みのフォロワーすべては+3/+0する、体力3回復する。"
+        "エンドフェイズ開始時、自分の場の攻撃済みのフォロワーすべては+3/+0する、体力3回復する。この効果が発動したであれば、自分のリーダーに3回復する。"
         self.counter_name = "闘技場カウンター"
         self.counter_max = 3
         self.counter = self.counter_max
@@ -2659,10 +2671,14 @@ class 頂きの闘技場(Amulet):
         if self.decrease_counter(1):
             self.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, player_owning_this)
         else:
+            effect_activated = False
             for c in game_state.fields[player_owning_this]:
                 if isinstance(c, Follower) and c.how_many_attacks_done_of_turn > 0:
                     c.stats_change_effect_simple(3, 0, draw_ui, set_text, the_actual_textbox)
                     c.recover_hp(3, game_state, draw_ui, set_text, the_actual_textbox, healer=self)
+                    effect_activated = True
+            if effect_activated:
+                game_state.player_heal(player_owning_this, 3, draw_ui, set_text)
 
 
 # ===============================

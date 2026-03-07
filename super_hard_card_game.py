@@ -1083,8 +1083,80 @@ def _update_replay_status():
     replay_status_label.set_text(game_manager.get_status_text())
 
 
+def _update_button_states(active_ai_manager):
+    """Resolve and apply enable/disable state for all UI buttons.
+
+    Conditions (any True disables the button):
+      - concluded:      game is over
+      - replaying:      currently in replay mode
+      - ai_turn:        AI is controlling the current turn
+      - dialog_open:    a file-dialog is open
+      - card_sel:       card-selection window is open
+    """
+    concluded   = global_vars_shcg.concluded
+    replaying   = game_manager.is_replaying
+    ai_turn     = active_ai_manager.is_ai_turn(global_vars_shcg)
+    dialog_open = bool(load_game_state_dialog or load_game_record_dialog)
+    card_sel    = bool(card_selection_window)
+
+    def _set(button, *disable_conditions):
+        if any(disable_conditions):
+            button.disable()
+        else:
+            button.enable()
+
+    # Turn-control buttons
+    _set(end_turn_button,   concluded, replaying, ai_turn, card_sel)
+    _set(reset_turn_button, concluded, replaying, ai_turn, card_sel)
+    _set(debug_button,      concluded, replaying, ai_turn, card_sel)
+
+    # Replay navigation (only active while replaying)
+    _set(replay_prev_button,            not replaying)
+    _set(replay_next_button,            not replaying)
+    _set(replay_to_start_of_turn_button,not replaying)
+    _set(replay_goto_turn_button,       not replaying)
+    _set(replay_exit_button,            not replaying)
+
+    # Save / Load
+    _set(save_gamestate_button,  card_sel)
+    _set(load_gamestate_button,  replaying, dialog_open, card_sel)
+    _set(save_game_record_button, card_sel)
+    _set(load_game_record_button, replaying, dialog_open, card_sel)
+
+
 # =====================================
 # End of Game Manager & Replay UI
+# =====================================
+# Tooltip suppression during attack targeting
+# =====================================
+
+_original_create_tool_tip = {}
+
+def _kill_all_tooltips():
+    """
+    Kill all visible tooltips and prevent new ones from appearing.
+    Used during attack targeting drag-and-drop.
+    """
+    for mgr in (ui_manager_lower, ui_manager, ui_manager_overlay):
+        # Kill existing tooltip objects on all elements
+        for sprite in mgr.ui_group.sprites():
+            if hasattr(sprite, 'tool_tip') and sprite.tool_tip is not None:
+                sprite.tool_tip.kill()
+                sprite.tool_tip = None
+            if hasattr(sprite, 'hover_time'):
+                sprite.hover_time = 0.0
+        # Monkey-patch create_tool_tip to prevent new tooltips
+        _original_create_tool_tip[id(mgr)] = mgr.create_tool_tip
+        mgr.create_tool_tip = lambda *a, _mgr=mgr, **kw: None
+
+def _restore_all_tooltips():
+    """
+    Restore tooltip creation after attack targeting ends.
+    """
+    for mgr in (ui_manager_lower, ui_manager, ui_manager_overlay):
+        if id(mgr) in _original_create_tool_tip:
+            mgr.create_tool_tip = _original_create_tool_tip.pop(id(mgr))
+
 # =====================================
 # Component tooltips
 # =====================================
@@ -1259,6 +1331,7 @@ if __name__ == "__main__":
                             ui_drag_and_drop_usage = "attack_with_follower_player"
                             ui_drag_and_drop_target = card_slot
                             attack_target_valid_cards = global_vars_shcg.get_valid_attack_targets(cp, the_selected_card)
+                            _kill_all_tooltips()
                 for index, tail in enumerate(global_vars_tail_indicators_active[cp]):
                     if tail.rect.collidepoint(event.pos):
                         ui_drag_and_drop_target_orig_pos = (tail.rect.x, tail.rect.y)
@@ -1412,6 +1485,7 @@ if __name__ == "__main__":
                     ui_drag_and_drop_usage = ""
                     ui_drag_and_drop_target_orig_pos = (0, 0)
                     attack_target_valid_cards = []
+                    _restore_all_tooltips()
 
             if event.type == pygame.MOUSEMOTION:
                 if ui_drag_and_drop_target != None:
@@ -1462,8 +1536,6 @@ if __name__ == "__main__":
                             allow_existing_files_only=True,
                             allowed_suffixes={".json"},
                         )
-                        load_gamestate_button.disable()
-                        load_game_record_button.disable()
                 if event.ui_element == deck_builder_button:
                     shcg_ui_deck_builder.build_deck_builder_window()
 
@@ -1487,8 +1559,6 @@ if __name__ == "__main__":
                             allow_existing_files_only=True,
                             allowed_suffixes={".json"},
                         )
-                        load_gamestate_button.disable()
-                        load_game_record_button.disable()
                 if event.ui_element == replay_prev_button and game_manager.is_replaying:
                     entry = game_manager.prev_move()
                     if entry:
@@ -1610,12 +1680,8 @@ if __name__ == "__main__":
                 if card_selection_window and event.ui_element == card_selection_window:
                     _cancel_pending_selection()
                 if load_game_state_dialog and event.ui_element == load_game_state_dialog:
-                    load_gamestate_button.enable()
-                    load_game_record_button.enable()
                     load_game_state_dialog = None
                 if load_game_record_dialog and event.ui_element == load_game_record_dialog:
-                    load_gamestate_button.enable()
-                    load_game_record_button.enable()
                     load_game_record_dialog = None
 
             ui_manager_lower.process_events(event)
@@ -1656,35 +1722,7 @@ if __name__ == "__main__":
                         elif action_type == 'draw':
                             _record_game_action(f"AI {actions[0][0]}")
 
-        # disable buttons
-        # 1. end turn button: concluded, replaying, or AI turn
-        # 2. reset turn button: same as end turn. debug_button: same
-        # 3. replay_exit_button and others related to replay: only enabled during replay
-        # 4. load game state: disable during replay
-        if global_vars_shcg.concluded or game_manager.is_replaying or (active_ai_manager.is_ai_turn(global_vars_shcg)):
-            end_turn_button.disable()
-            reset_turn_button.disable()
-            debug_button.disable()
-        else:
-            end_turn_button.enable()
-            reset_turn_button.enable()
-            debug_button.enable()
-        if game_manager.is_replaying:
-            replay_prev_button.enable()
-            replay_next_button.enable()
-            replay_to_start_of_turn_button.enable()
-            replay_goto_turn_button.enable()
-            replay_exit_button.enable()
-            load_gamestate_button.disable()
-        else:
-            replay_prev_button.disable()
-            replay_next_button.disable()
-            replay_to_start_of_turn_button.disable()
-            replay_goto_turn_button.disable()
-            replay_exit_button.disable()
-            if not load_game_state_dialog and not load_game_record_dialog:
-                load_gamestate_button.enable()
-
+        _update_button_states(active_ai_manager)
 
         shcg_ui_zone_viewer.refresh()
         ui_manager_lower.update(time_delta)
@@ -1709,7 +1747,6 @@ if __name__ == "__main__":
         # Draw red outlines on valid attack targets
         # WARNING: is drawing every frame, should optimize
         if attack_target_valid_cards and ui_drag_and_drop_usage == "attack_with_follower_player":
-            print(f"Valid attack targets: {attack_target_valid_cards}")
             opponent = global_vars_shcg.opponent
             for target in attack_target_valid_cards:
                 if target == "leader":

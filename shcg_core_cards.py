@@ -415,11 +415,12 @@ class Follower(Card):
         if self.how_many_attacks_done_of_turn >= self.how_many_attacks_max_of_turn:
             self.can_attack_this_turn = False
 
-    def before_attack_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox, defender: Follower | str):
+    def before_attack_effect(self, game_state: SHCGGameState, draw_ui, set_text, 
+                             the_actual_textbox, defender: Follower | str) -> int:
         """
-        effect triggers before attack
+        attacker effect triggers before attack, return extra damage to defender to be added in take_damage(extra_damage).
         """
-        pass
+        return 0
 
     def on_enhance_effect_default(self):
         if self.can_enhance and not self.enhanced_this_turn:
@@ -443,12 +444,11 @@ class Follower(Card):
         self.on_enhance_effect_default()
 
     def take_damage(self, damage_amount: int, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
-                    attacker: Card | None, is_battle_damage: bool = False):
+                    attacker: Card | None, is_battle_damage: bool = False, extra_damage: int = 0):
         """
         Take card effect damage unless is_battle_damage is True. Can only take damage when on field.
         When hp <= 0, it is destroyed.
         """
-        extra_damage = 0
         # find out which player's field this follower is on
         for p in [1, 2]:
             if self in game_state.fields[p]:
@@ -665,11 +665,27 @@ class ホーリーファルコン(Follower):
         self.ability_super_rush = True
 
 
+class ドラゴン(Follower):
+    def __init__(self):
+        super().__init__(name="ドラゴン", cost=5, attack=5, hp=5, can_enhance=False)
+        self.effect_description = ""
+        self.ability_super_rush = True
+
+
 class ホーリータイガー(Follower):
     """
     """
     def __init__(self):
         super().__init__(name="ホーリータイガー", cost=3, attack=4, hp=4, can_enhance=False)
+        self.description = ""
+        self.ability_rush = True
+
+
+class アークサモナーエラスムス(Follower):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="アークサモナー・エラスムス", cost=3, attack=3, hp=5, can_enhance=False)
         self.description = ""
         self.ability_rush = True
 
@@ -1557,6 +1573,7 @@ class ユニコーンの踊り手ユニコ(Follower):
     def before_attack_effect(self, game_state, draw_ui, set_text, the_actual_textbox, defender):
         player = game_state.current_player
         game_state.player_heal(player, 3, draw_ui, set_text)
+        return 0
 
 
 class 次元の魔女ドロシー(Follower):
@@ -1826,6 +1843,18 @@ class 銀氷のドラゴニュートフィルレイン(Follower):
         # have target
         condition_1 = any(isinstance(c, Follower) for c in game_state.fields[3 - player])
         return condition_1
+
+
+class フェアリーブレイダーアマツ(Follower):
+    def __init__(self):
+        super().__init__(name="フェアリーブレイダー・アマツ", cost=3, attack=3, hp=4, can_enhance=False)
+        self.effect_description = "これより攻撃能力が低いフォロワーへ攻撃するとき、追加で3ダメージを与える。"
+        self.ability_rush = True
+
+    def before_attack_effect(self, game_state, draw_ui, set_text, the_actual_textbox, defender):
+        if isinstance(defender, Follower) and defender.attack_ability < self.attack_ability:
+            return 3  # Add 3 damage
+        return 0
 
 
 # ==============================

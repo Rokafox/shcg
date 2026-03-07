@@ -243,7 +243,7 @@ class SHCGGameState:
         protect_exists = any([c.ability_protect for c in self.fields[self.opponent] if isinstance(c, shcg_core_cards.Follower)])
 
         # attacker before attack effect
-        attacker.before_attack_effect(self, ui_draw, ui_set_text, self.text_box, target)
+        ed = attacker.before_attack_effect(self, ui_draw, ui_set_text, self.text_box, target)
 
         if isinstance(target, shcg_core_cards.Follower):
             if target not in self.fields[self.opponent]:
@@ -254,7 +254,7 @@ class SHCGGameState:
                 # self.text_box.append_html_text(f"{attacker} is about to attack {target}.\n")
                 self.text_box.append_html_text(f"{attacker}は{target}を攻撃するぞ！\n")
             target_hp_before = target.hp
-            target.take_damage(attacker.attack, self, ui_draw, ui_set_text, self.text_box, attacker=attacker, is_battle_damage=True)
+            target.take_damage(attacker.attack, self, ui_draw, ui_set_text, self.text_box, attacker=attacker, is_battle_damage=True, extra_damage=ed)
             target_hp_changed = target_hp_before - target.hp
             # drain ability
             if attacker.ability_drain and target_hp_changed > 0:
@@ -449,9 +449,7 @@ class SHCGGameState:
 
     def end_turn(self, ui_draw, ui_set_text):
         if self.concluded:
-            if ui_set_text:
-                self.text_box.append_html_text("ゲームは終了したのじゃ。新しいゲームを始めようではないか。\n")
-            return
+            raise shcg_core_error.FlowError("Cannot end turn because the game has already concluded.")
         for c in self.fields[self.current_player].copy():
             c.end_of_turn_on_field_effect(self, ui_draw, ui_set_text, self.text_box)
             if "end_of_turn_destroy" in c.extra_effect_list and c in self.fields[self.current_player]:

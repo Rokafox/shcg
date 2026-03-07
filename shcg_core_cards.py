@@ -1802,7 +1802,7 @@ class 覇道の龍人ガリュウ(Follower):
         super().__init__(name="覇道の龍人・ガリュウ", cost=3, attack=3, hp=4, can_enhance=True)
         self.effect_description = "進化するとき、相手の手札のフォロワー1枚と自分の手札のフォロワー1枚を選ぶ。" \
         "前者は「突進」と「疾走」を失う。後者は「突進」を持つ。"
-        self.request_card_selection_on_enhance = ["hand_opp_f_rush", "hand_follower"]
+        self.request_card_selection_on_enhance = ["hand_opponent_follower_w_true_attr: ability_rush | ability_super_rush", "hand_follower"]
 
     def on_enhance_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
                           selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
@@ -1855,6 +1855,41 @@ class フェアリーブレイダーアマツ(Follower):
         if isinstance(defender, Follower) and defender.attack_ability < self.attack_ability:
             return 3  # Add 3 damage
         return 0
+
+
+class スウィートディテクティブ(Follower):
+    def __init__(self):
+        super().__init__(name="スウィートディテクティブ", cost=2, attack=2, hp=2, can_enhance=False)
+        self.description = "探偵業の必需品は推理力と閃き。そして、少しの甘さ。「またタダ働きしちまったか。俺もとんだ甘ちゃんだな」"
+        self.effect_description = "場に出すとき、相手の場の「守護」を持つフォロワー1体を選ぶ。それは「守護」を失う。" \
+        "この効果を発動したとき、自分のリーダーに1回復。"
+        self.request_card_selection_on_play = ["field_opponent_w_true_attr: ability_protect"]
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox,
+                          selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+          target = selected_card_for_effect[0] if selected_card_for_effect else None
+          if isinstance(target, Follower) and target.ability_protect:
+                target.ability_protect = False
+                game_state.player_heal(game_state.current_player, 1, draw_ui, set_text)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # at least 1 target meet play condition or have 8 more cards
+        condition_1 = any(isinstance(c, Follower) and c.ability_protect for c in game_state.fields[3 - player])
+        condition_2 = len(game_state.hands[player]) >= 8
+        return condition_1 or condition_2
+
+
+class グランドナイトウィルバート(Follower):
+    def __init__(self):
+        super().__init__(name="グランドナイト・ウィルバート", cost=4, attack=3, hp=3, can_enhance=False)
+        self.effect_description = "場に出すとき、自分の手札の「守護」を持つフォロワーはすべて+1/+2する。"
+
+    def on_play_effect(self, game_state, draw_ui, set_text, the_actual_textbox, 
+                       selected_card_for_effect, effect_choice, selected_cards_for_multi_effect = None):
+            player = game_state.current_player
+            for c in game_state.hands[player]:
+                if isinstance(c, Follower) and c.ability_protect:
+                    c.stats_change_effect_simple(1, 2, draw_ui, set_text, the_actual_textbox)
 
 
 # ==============================
@@ -2375,6 +2410,33 @@ class 銀氷の吐息(Spell):
         condition_1 = any(isinstance(c, Follower) and c.attack_ability >= 2 for c in game_state.fields[game_state.opponent])
         return condition_1
 
+
+class 貴族の舞踏(Spell):
+    def __init__(self):
+        super().__init__(name="貴族の舞踏", cost=4)
+        self.effect_description = "自分の手札の「突進」「疾走」を持つフォロワーはすべて+3/+0する。自分の場の「突進」「疾走」を持つフォロワーはすべて+0/+3する。"
+
+    def on_play_effect(self, game_state: SHCGGameState, draw_ui, set_text, the_actual_textbox,
+                        selected_card_for_effect: list[Card] | None, effect_choice: str | None, selected_cards_for_multi_effect: list[Card] | None = None):
+        player = game_state.current_player
+        for c in game_state.hands[player]:
+            if isinstance(c, Follower) and (c.ability_rush or c.ability_super_rush):
+                c.stats_change_effect_simple(3, 0, draw_ui, set_text, the_actual_textbox)
+        for c in game_state.fields[player]:
+            if isinstance(c, Follower) and (c.ability_rush or c.ability_super_rush):
+                c.stats_change_effect_simple(0, 3, draw_ui, set_text, the_actual_textbox)
+
+    def ai_meet_play_condition(self, game_state, player):
+        # has at least 3 in hand or on field with rush or super rush
+        s = 0
+        s += sum(1 for c in game_state.hands[player] if isinstance(c, Follower) and (c.ability_rush or c.ability_super_rush))
+        s += sum(1 for c in game_state.fields[player] if isinstance(c, Follower) and (c.ability_rush or c.ability_super_rush))
+        if len(game_state.hands[player]) >= 9:
+            return s >= 1
+        else:
+            return s >= 3
+
+
 # ===============================
 # Amulets
 # ===============================
@@ -2576,6 +2638,31 @@ class 抑圧の関門(Amulet):
             if target_follower.max_hp > 1:
                 target_follower.stats_change_effect(game_state, draw_ui, set_text, the_actual_textbox,
                                                 imposter=self, attack_change=0, hp_change=1-target_follower.max_hp)
+
+
+class 頂きの闘技場(Amulet):
+    """
+    """
+    def __init__(self):
+        super().__init__(name="頂きの闘技場", cost=3)
+        self.effect_description = "エンドフェイズ開始時、カウンターは1減らす。カウンターが0になったとき、これは破壊される。" \
+        "エンドフェイズ開始時、自分の場の攻撃済みのフォロワーすべては+3/+0する、体力3回復する。"
+        self.counter_name = "闘技場カウンター"
+        self.counter_max = 3
+        self.counter = self.counter_max
+
+    def end_of_turn_on_field_effect(self, game_state, draw_ui, set_text, the_actual_textbox):
+        for p in [1, 2]:
+            if self in game_state.fields[p]:
+                player_owning_this = p
+                break
+        if self.decrease_counter(1):
+            self.destroy_amulet(game_state, draw_ui, set_text, the_actual_textbox, player_owning_this)
+        else:
+            for c in game_state.fields[player_owning_this]:
+                if isinstance(c, Follower) and c.how_many_attacks_done_of_turn > 0:
+                    c.stats_change_effect_simple(3, 0, draw_ui, set_text, the_actual_textbox)
+                    c.recover_hp(3, game_state, draw_ui, set_text, the_actual_textbox, healer=self)
 
 
 # ===============================

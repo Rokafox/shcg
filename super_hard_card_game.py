@@ -196,9 +196,26 @@ def _build_card_selection_options(selection_type: str, pending_info: dict,
                 options.append(display)
                 om[display] = c
 
+    elif selection_type.startswith("field_w_true_attr:"):
+        attrs = [a.strip() for a in selection_type.split(":", 1)[1].split("|")]
+        for i, c in enumerate(global_vars_shcg.fields[cp]):
+            if isinstance(c, shcg_core_cards.Follower) and any(getattr(c, attr, False) for attr in attrs):
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                om[display] = c
+
     elif selection_type == "field_opponent":
         for i, c in enumerate(global_vars_shcg.fields[op]):
             if isinstance(c, shcg_core_cards.Follower):
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                om[display] = c
+
+    # field_opponent_w_true_attr
+    elif selection_type.startswith("field_opponent_w_true_attr:"):
+        attrs = [a.strip() for a in selection_type.split(":", 1)[1].split("|")]
+        for i, c in enumerate(global_vars_shcg.fields[op]):
+            if isinstance(c, shcg_core_cards.Follower) and any(getattr(c, attr, False) for attr in attrs):
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
                 om[display] = c
@@ -232,6 +249,16 @@ def _build_card_selection_options(selection_type: str, pending_info: dict,
                 options.append(display)
                 om[display] = c
 
+    elif selection_type.startswith("hand_follower_w_true_attr:"): # e.g. "hand_follower_w_true_attr: ability_rush | ability_super_rush"
+        attrs = [a.strip() for a in selection_type.split(":", 1)[1].split("|")]
+        for i, c in enumerate(global_vars_shcg.hands[cp]):
+            if action_type == 'play' and c is played_card:
+                continue
+            if isinstance(c, shcg_core_cards.Follower) and any(getattr(c, attr, False) for attr in attrs):
+                display = f"{i + 1} {str(c)}"
+                options.append(display)
+                om[display] = c
+
     elif selection_type == "hand_opponent":
         for i, c in enumerate(global_vars_shcg.hands[op]):
             display = f"{i + 1} {str(c)}"
@@ -245,9 +272,10 @@ def _build_card_selection_options(selection_type: str, pending_info: dict,
                 options.append(display)
                 om[display] = c
 
-    elif selection_type == "hand_opp_f_rush":
+    elif selection_type.startswith("hand_opponent_follower_w_true_attr:"): # e.g. "hand_opponent_follower_w_true_attr: ability_rush | ability_super_rush"
+        attrs = [a.strip() for a in selection_type.split(":", 1)[1].split("|")]
         for i, c in enumerate(global_vars_shcg.hands[op]):
-            if isinstance(c, shcg_core_cards.Follower) and (c.ability_rush or c.ability_super_rush):
+            if isinstance(c, shcg_core_cards.Follower) and any(getattr(c, attr, False) for attr in attrs):
                 display = f"{i + 1} {str(c)}"
                 options.append(display)
                 om[display] = c

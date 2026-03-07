@@ -87,8 +87,6 @@ class MoveGenerator:
                 return list(state.hands[3 - player])
             case "hand_opponent_follower":
                 return [c for c in state.hands[3 - player] if isinstance(c, shcg_core_cards.Follower)]
-            case "hand_opp_f_rush":
-                return [c for c in state.hands[3 - player] if isinstance(c, shcg_core_cards.Follower) and (c.ability_rush or c.ability_super_rush)]
             case "field_c":
                 return list(state.fields[player])
             case "field_opponent_c":
@@ -96,6 +94,18 @@ class MoveGenerator:
             case "field_both_c":
                 return list(state.fields[player] + state.fields[3 - player])
             case _:
+                if sel_type.startswith("hand_opponent_follower_w_true_attr:"):
+                    attrs = [a.strip() for a in sel_type.split(":", 1)[1].split("|")]
+                    return [c for c in state.hands[3 - player] if isinstance(c, shcg_core_cards.Follower) and any(getattr(c, attr, False) for attr in attrs)]
+                elif sel_type.startswith("hand_follower_w_true_attr:"):
+                    attrs = [a.strip() for a in sel_type.split(":", 1)[1].split("|")]
+                    return [c for c in state.hands[player] if isinstance(c, shcg_core_cards.Follower) and any(getattr(c, attr, False) for attr in attrs)]
+                elif sel_type.startswith("field_opponent_w_true_attr:"):
+                    attrs = [a.strip() for a in sel_type.split(":", 1)[1].split("|")]
+                    return [c for c in state.fields[3 - player] if isinstance(c, shcg_core_cards.Follower) and any(getattr(c, attr, False) for attr in attrs)]
+                elif sel_type.startswith("field_w_true_attr:"):
+                    attrs = [a.strip() for a in sel_type.split(":", 1)[1].split("|")]
+                    return [c for c in state.fields[player] if isinstance(c, shcg_core_cards.Follower) and any(getattr(c, attr, False) for attr in attrs)]
                 raise shcg_core_error.TimeError(f"Unknown selection type: {sel_type}") 
 
     @staticmethod
@@ -160,42 +170,6 @@ class MoveGenerator:
                 playable.append((o0, targets_list, effect_choice, multi_target))
 
         return playable
-
-    # get_possible_attacks is now replaced by SHCGGameState.get_valid_attack_targets
-    # @staticmethod
-    # def get_possible_attacks(state: SHCGGameState, player: int) -> List[Tuple[shcg_core_cards.Follower, shcg_core_cards.Follower | str]]:
-    #     """
-    #     Get all possible attacks.
-    #     Returns list of (attacker, target) tuples. Target is Follower or "leader".
-    #     """
-    #     attacks = []
-    #     opponent = 3 - player
-    #
-    #     # check if opponent has any followers with ability_protect
-    #     # if so, only those followers can be attacked
-    #     protect_exists = any([c.ability_protect for c in state.fields[opponent] if isinstance(c, shcg_core_cards.Follower)])
-    #     for follower in state.fields[player]:
-    #         if follower.type != 'follower':
-    #             continue
-    #         if not follower.can_attack_this_turn or follower.attack_ability <= 0:
-    #             continue
-    #
-    #         if protect_exists:
-    #             # Can only attack followers with ability_protect
-    #             for target in state.fields[opponent]:
-    #                 if target.type == 'follower' and target.ability_protect:
-    #                     attacks.append((follower, target))
-    #         else:
-    #             # Can attack opponent followers
-    #             for target in state.fields[opponent]:
-    #                 if target.type == 'follower':
-    #                     attacks.append((follower, target))
-    #
-    #             # Can attack leader if attack_ability >= 2
-    #             if follower.attack_ability >= 2:
-    #                 attacks.append((follower, "leader"))
-    #
-    #     return attacks
 
     @staticmethod
     def get_enhanceable_followers(state: SHCGGameState, player: int) -> List[Tuple]:
